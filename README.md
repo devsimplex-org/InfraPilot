@@ -19,6 +19,32 @@
   <img src="docs/assets/infrapilot-preview.png" alt="InfraPilot Dashboard" width="800">
 </p>
 
+## Who is InfraPilot for?
+
+- SaaS founders running multiple Dockerized services on a single server
+- DevOps teams who want visibility without SSH access
+- Agencies managing client apps on shared infrastructure
+- Engineers who want Nginx + Docker + observability in one control plane
+
+## What InfraPilot is NOT
+
+- Not a hosting control panel (cPanel, Plesk)
+- Not a Kubernetes replacement
+- Not a VM manager
+
+
+## How InfraPilot compares
+
+| Feature | InfraPilot | Nginx Proxy Manager | Portainer |
+|------|-----------|--------------------|-----------|
+| Reverse proxy | ✅ Advanced | ✅ Basic | ❌ |
+| SSL automation | ✅ | ✅ | ❌ |
+| Container exec | ✅ | ❌ | ✅ |
+| Unified logs | ✅ | ❌ | ❌ |
+| RBAC + MFA | ✅ | ❌ | ❌ |
+| Docker-native | ✅ | ⚠️ | ✅ |
+
+
 ## Why InfraPilot?
 
 - **No SSH Required** — All operations through Docker API and Nginx management
