@@ -74,8 +74,8 @@ docker compose up -d
 ### Access Dashboard
 
 - **URL:** http://localhost
-- **Email:** `admin@infrapilot.local`
-- **Password:** `admin123`
+On first start, InfraPilot generates a temporary admin account.
+You will be prompted to set a secure password on first login.
 
 > **Change the default password immediately after first login!**
 
