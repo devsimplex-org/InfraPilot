@@ -100,10 +100,11 @@ docker compose up -d
 ### Access Dashboard
 
 - **URL:** http://localhost
-On first start, InfraPilot generates a temporary admin account.
-You will be prompted to set a secure password on first login.
 
-> **Change the default password immediately after first login!**
+On first start, you'll be prompted to create your admin account.
+No default credentials are used - you set your own email and password.
+
+> **Your first account will have full administrative access.**
 
 ## Features
 
@@ -221,7 +222,7 @@ docker run -d \
 ## Production Checklist
 
 - [ ] Set strong `JWT_SECRET`
-- [ ] Change default admin password
+- [ ] Create admin account with strong password
 - [ ] Set `POSTGRES_PASSWORD` and `REDIS_PASSWORD`
 - [ ] Configure `LETSENCRYPT_EMAIL`
 - [ ] Set `LETSENCRYPT_STAGING=false`
