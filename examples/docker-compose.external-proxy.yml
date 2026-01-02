@@ -1,0 +1,146 @@
+# External Proxy Examples
+#
+# For advanced users who want to use their own reverse proxy.
+# InfraPilot will NOT manage configs, reloads, or TLS for external proxies.
+#
+# Usage:
+#   1. Set PROXY_MODE=external in your .env
+#   2. Start InfraPilot without managed nginx:
+#      docker compose --profile external up -d
+#   3. Configure your proxy to route to InfraPilot services
+#
+# ⚠️  When using external proxy:
+#   - InfraPilot does NOT auto-generate nginx configs
+#   - InfraPilot does NOT reload your proxy
+#   - InfraPilot does NOT manage TLS certificates
+#   - You are responsible for routing and SSL
+
+# =============================================================
+# EXAMPLE 1: External NGINX
+# =============================================================
+# If you already have nginx running elsewhere, configure it to
+# proxy to your backend services. InfraPilot exposes services
+# on the infrapilot network.
+
+# Example nginx.conf for external nginx:
+#
+#   upstream my-app {
+#       server my-app-container:3000;
+#   }
+#
+#   server {
+#       listen 80;
+#       server_name myapp.example.com;
+#
+#       location / {
+#           proxy_pass http://my-app;
+#           proxy_set_header Host $host;
+#           proxy_set_header X-Real-IP $remote_addr;
+#       }
+#   }
+
+# =============================================================
+# EXAMPLE 2: NGINX Proxy Manager
+# =============================================================
+# Popular GUI for nginx management
+# https://nginxproxymanager.com/
+
+services:
+  nginx-proxy-manager:
+    image: jc21/nginx-proxy-manager:latest
+    container_name: nginx-proxy-manager
+    profiles:
+      - npm
+    ports:
+      - "80:80"
+      - "443:443"
+      - "81:81"  # Admin UI
+    volumes:
+      - npm_data:/data
+      - npm_letsencrypt:/etc/letsencrypt
+    networks:
+      - infrapilot
+      - external_proxy
+
+# =============================================================
+# EXAMPLE 3: Traefik
+# =============================================================
+# Cloud-native reverse proxy with auto-discovery
+# https://traefik.io/
+
+  traefik:
+    image: traefik:v3.0
+    container_name: traefik
+    profiles:
+      - traefik
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8081:8080"  # Traefik dashboard
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - infrapilot
+      - external_proxy
+
+# =============================================================
+# EXAMPLE 4: Caddy
+# =============================================================
+# Automatic HTTPS with zero config
+# https://caddyserver.com/
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    profiles:
+      - caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - infrapilot
+      - external_proxy
+
+# =============================================================
+# EXAMPLE 5: HAProxy
+# =============================================================
+# High-performance load balancer
+# https://www.haproxy.org/
+
+  haproxy:
+    image: haproxy:2.8-alpine
+    container_name: haproxy
+    profiles:
+      - haproxy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8404:8404"  # Stats page
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    networks:
+      - infrapilot
+      - external_proxy
+
+networks:
+  infrapilot:
+    external: true
+    name: deployments_infrapilot
+  external_proxy:
+    driver: bridge
+
+volumes:
+  npm_data:
+  npm_letsencrypt:
+  caddy_data:
+  caddy_config:
