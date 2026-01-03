@@ -1,0 +1,50 @@
+# Dependencies
+node_modules/
+vendor/
+
+# Build outputs
+/backend/server
+/agent/agent
+.next/
+out/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Testing
+coverage/
+*.cover
+*.out
+
+# Generated files
+*.pb.go
+
+# Docker volumes (local dev)
+postgres_data/
+redis_data/
+
+# Certificates (production)
+*.pem
+*.key
+*.crt
+agent/tmp
+backend/tmp
+
+# docsx

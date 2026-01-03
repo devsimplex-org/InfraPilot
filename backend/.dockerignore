@@ -1,0 +1,34 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Build artifacts
+bin/
+tmp/
+
+# Environment files (security)
+.env
+.env.*
+!.env.example
+
+# Documentation
+*.md
+docs/
+
+# Testing
+*_test.go
+coverage.out
+coverage.html
+
+# Air hot reload
+.air.toml
+
+# OS files
+.DS_Store
+Thumbs.db

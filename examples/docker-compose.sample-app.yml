@@ -1,0 +1,37 @@
+# Sample App for Testing InfraPilot Proxy
+#
+# This runs a simple web app that InfraPilot can proxy to.
+# Use this to test the container selection and network attachment features.
+#
+# Usage:
+#   docker compose -f docker-compose.sample-app.yml up -d
+#
+# Test Flow:
+#   1. Start this sample app
+#   2. Start nginx: docker compose -f docker-compose.nginx.yml up -d
+#   3. Start InfraPilot: docker compose up -d
+#   4. Open http://localhost:3000 (InfraPilot dashboard)
+#   5. Create a proxy:
+#      - Domain: infrapilot.local
+#      - Upstream Type: Container
+#      - Select "sample-app" container
+#      - Port: 80
+#   6. InfraPilot will prompt to attach nginx to sample_network
+#   7. Add "127.0.0.1 infrapilot.local" to /etc/hosts
+#   8. Access http://infrapilot.local - you should see "Hello from Sample App!"
+
+services:
+  sample-app:
+    image: nginx:alpine
+    container_name: sample-app
+    # Custom nginx config to show a test page
+    command: |
+      sh -c 'echo "Hello from Sample App! InfraPilot proxy is working." > /usr/share/nginx/html/index.html && nginx -g "daemon off;"'
+    networks:
+      - sample_network
+    # Note: No ports exposed - nginx will proxy via Docker network
+
+networks:
+  sample_network:
+    driver: bridge
+    name: sample_network

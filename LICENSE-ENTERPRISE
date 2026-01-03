@@ -1,0 +1,67 @@
+InfraPilot Enterprise License
+Business Source License 1.1
+
+Copyright (c) 2026 DevSimplex Ltd
+
+Licensor: DevSimplex Ltd
+Licensed Work: InfraPilot Enterprise Components
+
+---
+
+1. Grant of License
+
+Subject to the terms of this License, the Licensor hereby grants you a
+non-exclusive, non-transferable, non-sublicensable license to use,
+copy, modify, and create derivative works of the Licensed Work for
+non-production use.
+
+Production use of the Licensed Work requires a valid commercial license
+obtained from the Licensor.
+
+---
+
+2. Permitted Use
+
+You may:
+- View and audit the source code
+- Modify the code for evaluation and development
+- Run the software in non-production environments
+- Submit contributions under the project’s contribution guidelines
+
+---
+
+3. Prohibited Use Without Commercial License
+
+You may NOT, without a commercial license:
+- Use the Licensed Work in production
+- Offer the Licensed Work as a managed service
+- Resell or sublicense the Licensed Work
+- Circumvent license enforcement mechanisms
+
+---
+
+4. Change Date
+
+On the Change Date, this license will convert to the Apache License 2.0.
+
+Change Date: Four (4) years from the date of each software release.
+
+---
+
+5. Disclaimer of Warranty
+
+THE LICENSED WORK IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED.
+
+---
+
+6. Limitation of Liability
+
+IN NO EVENT SHALL THE LICENSOR BE LIABLE FOR ANY CLAIM, DAMAGES, OR
+OTHER LIABILITY ARISING FROM THE USE OF THE LICENSED WORK.
+
+---
+
+7. Governing Law
+
+This License shall be governed by the laws of England and Wales.
