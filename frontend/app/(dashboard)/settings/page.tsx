@@ -26,8 +26,15 @@ import {
   Users,
   KeyRound,
   Building2,
+  FileText,
+  Download,
+  Play,
+  Archive,
+  FileCheck,
+  Send,
+  ShieldCheck,
 } from "lucide-react";
-import { api, Agent, User, MFASetupResponse, InfraPilotDomainSettings, LicenseInfo, SSOProvider, SSOProviderType, CreateSSOProviderRequest } from "@/lib/api";
+import { api, Agent, User, MFASetupResponse, InfraPilotDomainSettings, LicenseInfo, SSOProvider, SSOProviderType, CreateSSOProviderRequest, AuditConfig, AuditExport, ComplianceReport } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/lib/auth";
 
@@ -1193,6 +1200,534 @@ function SSOSection() {
   );
 }
 
+// Enterprise Audit & Compliance Section
+function AuditComplianceSection() {
+  const queryClient = useQueryClient();
+  const [activeTab, setActiveTab] = useState<"config" | "exports" | "reports">("config");
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+
+  const { data: license } = useQuery({
+    queryKey: ["license"],
+    queryFn: () => api.getLicenseInfo(),
+  });
+
+  const { data: config, isLoading: configLoading } = useQuery({
+    queryKey: ["audit-config"],
+    queryFn: () => api.getAuditConfig(),
+    enabled: license?.edition === "enterprise",
+  });
+
+  const { data: exports, isLoading: exportsLoading } = useQuery({
+    queryKey: ["audit-exports"],
+    queryFn: () => api.getAuditExports(),
+    enabled: license?.edition === "enterprise",
+  });
+
+  const { data: reports, isLoading: reportsLoading } = useQuery({
+    queryKey: ["compliance-reports"],
+    queryFn: () => api.getComplianceReports(),
+    enabled: license?.edition === "enterprise",
+  });
+
+  const updateConfigMutation = useMutation({
+    mutationFn: (data: Parameters<typeof api.updateAuditConfig>[0]) => api.updateAuditConfig(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["audit-config"] });
+    },
+  });
+
+  const createExportMutation = useMutation({
+    mutationFn: (data: Parameters<typeof api.createAuditExport>[0]) => api.createAuditExport(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["audit-exports"] });
+      setShowExportModal(false);
+    },
+  });
+
+  const createReportMutation = useMutation({
+    mutationFn: (data: Parameters<typeof api.createComplianceReport>[0]) => api.createComplianceReport(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["compliance-reports"] });
+      setShowReportModal(false);
+    },
+  });
+
+  const testForwardingMutation = useMutation({
+    mutationFn: () => api.testAuditForwarding(),
+  });
+
+  const verifyIntegrityMutation = useMutation({
+    mutationFn: () => api.verifyAuditIntegrity(1000),
+  });
+
+  const isEnterprise = license?.edition === "enterprise";
+  const hasAuditFeature = license?.features?.some(f => f.feature === "audit_compliance" && f.licensed);
+
+  const handleExportSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    createExportMutation.mutate({
+      format: formData.get("format") as "csv" | "json" | "cef" | "syslog",
+      start_date: formData.get("start_date") as string || undefined,
+      end_date: formData.get("end_date") as string || undefined,
+    });
+  };
+
+  const handleReportSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    createReportMutation.mutate({
+      report_type: formData.get("report_type") as "soc2" | "hipaa" | "access" | "activity" | "security",
+      start_date: formData.get("start_date") as string,
+      end_date: formData.get("end_date") as string,
+    });
+  };
+
+  return (
+    <section className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-6">
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-indigo-500/10">
+            <FileCheck className="h-5 w-5 text-indigo-400" />
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Audit & Compliance</h2>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Configure retention, exports, and compliance reports
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {!isEnterprise ? (
+        <div className="p-4 bg-indigo-500/5 border border-indigo-500/20 rounded-lg">
+          <div className="flex items-center gap-3">
+            <Lock className="h-5 w-5 text-indigo-400" />
+            <div>
+              <p className="font-medium text-gray-900 dark:text-white">Enterprise Feature</p>
+              <p className="text-sm text-gray-500">
+                Advanced audit logging, exports, and compliance reports require an Enterprise license.
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {/* Tabs */}
+          <div className="flex border-b border-gray-200 dark:border-gray-700">
+            {(["config", "exports", "reports"] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={cn(
+                  "px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
+                  activeTab === tab
+                    ? "border-indigo-500 text-indigo-400"
+                    : "border-transparent text-gray-500 hover:text-gray-300"
+                )}
+              >
+                {tab === "config" && "Configuration"}
+                {tab === "exports" && "Exports"}
+                {tab === "reports" && "Compliance Reports"}
+              </button>
+            ))}
+          </div>
+
+          {/* Configuration Tab */}
+          {activeTab === "config" && (
+            <div className="space-y-6">
+              {configLoading ? (
+                <div className="flex justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+                </div>
+              ) : (
+                <>
+                  {/* Retention Settings */}
+                  <div className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+                    <h3 className="font-medium text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                      <Archive className="h-4 w-4" />
+                      Retention Policy
+                    </h3>
+                    <div className="grid sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">
+                          Retention Days
+                        </label>
+                        <select
+                          value={config?.retention_days || 90}
+                          onChange={(e) => updateConfigMutation.mutate({ retention_days: parseInt(e.target.value) })}
+                          className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800"
+                        >
+                          <option value={30}>30 days</option>
+                          <option value={90}>90 days</option>
+                          <option value={180}>180 days</option>
+                          <option value={365}>1 year</option>
+                          <option value={0}>Unlimited</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">
+                          Retention Action
+                        </label>
+                        <select
+                          value={config?.retention_policy || "delete"}
+                          onChange={(e) => updateConfigMutation.mutate({ retention_policy: e.target.value as "delete" | "archive" | "export" })}
+                          className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800"
+                        >
+                          <option value="delete">Delete</option>
+                          <option value="archive">Archive</option>
+                          <option value="export">Export before delete</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Compliance Mode */}
+                  <div className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+                    <h3 className="font-medium text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                      <ShieldCheck className="h-4 w-4" />
+                      Compliance Mode
+                    </h3>
+                    <div className="grid sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">
+                          Compliance Framework
+                        </label>
+                        <select
+                          value={config?.compliance_mode || ""}
+                          onChange={(e) => updateConfigMutation.mutate({ compliance_mode: e.target.value as "soc2" | "hipaa" | "gdpr" | "pci" | null })}
+                          className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800"
+                        >
+                          <option value="">None</option>
+                          <option value="soc2">SOC 2</option>
+                          <option value="hipaa">HIPAA</option>
+                          <option value="gdpr">GDPR</option>
+                          <option value="pci">PCI-DSS</option>
+                        </select>
+                      </div>
+                      <div className="space-y-3">
+                        <label className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={config?.immutable_logs || false}
+                            onChange={(e) => updateConfigMutation.mutate({ immutable_logs: e.target.checked })}
+                            className="rounded"
+                          />
+                          <span className="text-sm text-gray-700 dark:text-gray-300">Immutable logs</span>
+                        </label>
+                        <label className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={config?.hash_chain_enabled || false}
+                            onChange={(e) => updateConfigMutation.mutate({ hash_chain_enabled: e.target.checked })}
+                            className="rounded"
+                          />
+                          <span className="text-sm text-gray-700 dark:text-gray-300">Hash chain integrity</span>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Forwarding */}
+                  <div className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+                    <h3 className="font-medium text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                      <Send className="h-4 w-4" />
+                      Log Forwarding
+                    </h3>
+                    <div className="space-y-4">
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={config?.forwarding_enabled || false}
+                          onChange={(e) => updateConfigMutation.mutate({ forwarding_enabled: e.target.checked })}
+                          className="rounded"
+                        />
+                        <span className="text-sm text-gray-700 dark:text-gray-300">Enable log forwarding</span>
+                      </label>
+                      {config?.forwarding_enabled && (
+                        <div className="grid sm:grid-cols-2 gap-4 pt-2">
+                          <div>
+                            <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">
+                              Forwarding Type
+                            </label>
+                            <select
+                              value={config?.forwarding_type || "webhook"}
+                              onChange={(e) => updateConfigMutation.mutate({ forwarding_type: e.target.value as "syslog" | "webhook" | "splunk" | "s3" })}
+                              className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800"
+                            >
+                              <option value="webhook">Webhook</option>
+                              <option value="syslog">Syslog</option>
+                              <option value="splunk">Splunk</option>
+                              <option value="s3">S3</option>
+                            </select>
+                          </div>
+                          <div className="flex items-end">
+                            <button
+                              onClick={() => testForwardingMutation.mutate()}
+                              disabled={testForwardingMutation.isPending}
+                              className="px-3 py-2 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg text-sm flex items-center gap-2"
+                            >
+                              {testForwardingMutation.isPending ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Play className="h-4 w-4" />
+                              )}
+                              Test Forwarding
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Integrity Check */}
+                  <div className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="font-medium text-gray-900 dark:text-white">Integrity Verification</h3>
+                        <p className="text-sm text-gray-500 mt-1">Verify the hash chain integrity of audit logs</p>
+                      </div>
+                      <button
+                        onClick={() => verifyIntegrityMutation.mutate()}
+                        disabled={verifyIntegrityMutation.isPending}
+                        className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm flex items-center gap-2"
+                      >
+                        {verifyIntegrityMutation.isPending ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <ShieldCheck className="h-4 w-4" />
+                        )}
+                        Verify Integrity
+                      </button>
+                    </div>
+                    {verifyIntegrityMutation.isSuccess && (
+                      <div className={cn(
+                        "mt-4 p-3 rounded-lg text-sm",
+                        verifyIntegrityMutation.data.status === "valid"
+                          ? "bg-green-500/10 text-green-400 border border-green-500/30"
+                          : "bg-red-500/10 text-red-400 border border-red-500/30"
+                      )}>
+                        {verifyIntegrityMutation.data.status === "valid" ? (
+                          <span>All {verifyIntegrityMutation.data.verified} logs verified successfully</span>
+                        ) : (
+                          <span>Integrity compromised! {verifyIntegrityMutation.data.broken_chain} broken chain entries</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Exports Tab */}
+          {activeTab === "exports" && (
+            <div className="space-y-4">
+              <div className="flex justify-end">
+                <button
+                  onClick={() => setShowExportModal(true)}
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm flex items-center gap-1.5"
+                >
+                  <Download className="h-4 w-4" />
+                  New Export
+                </button>
+              </div>
+
+              {exportsLoading ? (
+                <div className="flex justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+                </div>
+              ) : exports && exports.length > 0 ? (
+                <div className="space-y-2">
+                  {exports.map((exp) => (
+                    <div key={exp.id} className="p-3 border border-gray-200 dark:border-gray-700 rounded-lg flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <FileText className="h-5 w-5 text-gray-400" />
+                        <div>
+                          <p className="text-sm font-medium text-gray-900 dark:text-white">
+                            {exp.format.toUpperCase()} Export
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            {new Date(exp.created_at).toLocaleString()}
+                            {exp.row_count && ` • ${exp.row_count} rows`}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={cn(
+                          "px-2 py-0.5 text-xs rounded",
+                          exp.status === "completed" ? "bg-green-500/10 text-green-400" :
+                          exp.status === "processing" ? "bg-yellow-500/10 text-yellow-400" :
+                          exp.status === "failed" ? "bg-red-500/10 text-red-400" :
+                          "bg-gray-500/10 text-gray-400"
+                        )}>
+                          {exp.status}
+                        </span>
+                        {exp.status === "completed" && (
+                          <a
+                            href={api.downloadAuditExport(exp.id)}
+                            className="p-1.5 text-gray-400 hover:text-indigo-400"
+                          >
+                            <Download className="h-4 w-4" />
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-gray-500">
+                  <FileText className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                  <p>No exports yet</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Reports Tab */}
+          {activeTab === "reports" && (
+            <div className="space-y-4">
+              <div className="flex justify-end">
+                <button
+                  onClick={() => setShowReportModal(true)}
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm flex items-center gap-1.5"
+                >
+                  <FileCheck className="h-4 w-4" />
+                  Generate Report
+                </button>
+              </div>
+
+              {reportsLoading ? (
+                <div className="flex justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+                </div>
+              ) : reports && reports.length > 0 ? (
+                <div className="space-y-2">
+                  {reports.map((report) => (
+                    <div key={report.id} className="p-3 border border-gray-200 dark:border-gray-700 rounded-lg flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <ShieldCheck className="h-5 w-5 text-gray-400" />
+                        <div>
+                          <p className="text-sm font-medium text-gray-900 dark:text-white uppercase">
+                            {report.report_type} Report
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            {new Date(report.start_date).toLocaleDateString()} - {new Date(report.end_date).toLocaleDateString()}
+                          </p>
+                        </div>
+                      </div>
+                      <span className={cn(
+                        "px-2 py-0.5 text-xs rounded",
+                        report.status === "completed" ? "bg-green-500/10 text-green-400" :
+                        report.status === "generating" ? "bg-yellow-500/10 text-yellow-400" :
+                        report.status === "failed" ? "bg-red-500/10 text-red-400" :
+                        "bg-gray-500/10 text-gray-400"
+                      )}>
+                        {report.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-gray-500">
+                  <ShieldCheck className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                  <p>No compliance reports yet</p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Export Modal */}
+      {showExportModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 w-full max-w-md">
+            <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+              <h3 className="font-semibold text-gray-900 dark:text-white">Export Audit Logs</h3>
+              <button onClick={() => setShowExportModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <form onSubmit={handleExportSubmit} className="p-4 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Format</label>
+                <select name="format" required className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800">
+                  <option value="csv">CSV</option>
+                  <option value="json">JSON</option>
+                  <option value="cef">CEF (SIEM)</option>
+                  <option value="syslog">Syslog</option>
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Start Date</label>
+                  <input type="date" name="start_date" className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">End Date</label>
+                  <input type="date" name="end_date" className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800" />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-4">
+                <button type="button" onClick={() => setShowExportModal(false)} className="px-4 py-2 border border-gray-200 dark:border-gray-700 rounded-lg">Cancel</button>
+                <button type="submit" disabled={createExportMutation.isPending} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg flex items-center gap-2">
+                  {createExportMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                  Export
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Report Modal */}
+      {showReportModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 w-full max-w-md">
+            <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+              <h3 className="font-semibold text-gray-900 dark:text-white">Generate Compliance Report</h3>
+              <button onClick={() => setShowReportModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <form onSubmit={handleReportSubmit} className="p-4 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Report Type</label>
+                <select name="report_type" required className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800">
+                  <option value="soc2">SOC 2</option>
+                  <option value="hipaa">HIPAA</option>
+                  <option value="access">Access Review</option>
+                  <option value="activity">Activity Summary</option>
+                  <option value="security">Security Events</option>
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Start Date</label>
+                  <input type="date" name="start_date" required className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">End Date</label>
+                  <input type="date" name="end_date" required className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800" />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-4">
+                <button type="button" onClick={() => setShowReportModal(false)} className="px-4 py-2 border border-gray-200 dark:border-gray-700 rounded-lg">Cancel</button>
+                <button type="submit" disabled={createReportMutation.isPending} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg flex items-center gap-2">
+                  {createReportMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                  Generate
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 // MFA Setup Component
 function MFASection() {
   const queryClient = useQueryClient();
@@ -1572,6 +2107,11 @@ export default function SettingsPage() {
       {/* SSO Providers Section (Enterprise) */}
       <div className="mb-8">
         <SSOSection />
+      </div>
+
+      {/* Audit & Compliance Section (Enterprise) */}
+      <div className="mb-8">
+        <AuditComplianceSection />
       </div>
 
       {/* InfraPilot Domain Section */}

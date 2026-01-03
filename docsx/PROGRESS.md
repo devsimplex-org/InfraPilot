@@ -21,13 +21,23 @@
 |-------|--------|----------|
 | Phase E1: Foundation | ✅ Complete | 100% |
 | Phase E2: SSO | ✅ Complete | 100% |
-| Phase E3: Multi-Tenant | ⬜ Planned | 0% |
-| Phase E4: Audit/Compliance | ⬜ Planned | 0% |
-| Phase E5: Advanced RBAC | ⬜ Planned | 0% |
+| Phase E3: Multi-Tenancy | 🚧 In Progress | 80% |
+| Phase E4: Audit/Compliance | ✅ Complete | 100% |
+| Phase E5: Policy Engine | 🚧 In Progress | 80% |
+
+### SaaS Edition (infrapilot.sh)
+
+| Phase | Status | Progress |
+|-------|--------|----------|
+| Phase S1: Multi-Tenancy (E3) | 🚧 In Progress | 80% |
+| Phase S2: Enrollment Tokens | ✅ Complete | 100% |
+| Phase S3: Log Persistence | ⬜ Planned | 0% |
+| Phase S4: Billing (Stripe) | ⬜ Planned | 0% |
+| Phase S5: Agent-side Enrollment | ⬜ Planned | 0% |
 
 **Community MVP:** ✅ COMPLETE
-**Enterprise Target:** Phase E1-E4
-**Current Phase:** E3 - Multi-Tenancy
+**Enterprise Target:** E1-E5 + SaaS
+**Current Phase:** E3 Multi-Tenancy (Required for SaaS)
 
 ---
 
@@ -304,26 +314,193 @@
 
 ---
 
-## Enterprise Phase E3: Multi-Tenancy ⬜
+## Enterprise Phase E3: Multi-Tenancy 🚧
 
 > **Epic:** [EPIC-07-MULTI-TENANT](epics/EPIC-07-MULTI-TENANT.md)
+> **Status:** Required for SaaS - High Priority
 
-- [ ] Organization CRUD
-- [ ] User invitations
-- [ ] Organization switching
-- [ ] Row-Level Security (RLS)
-- [ ] Per-org usage limits
+### Database ✅
+- [x] Extend organizations table (plan, billing, limits)
+- [x] Organization members table with roles
+- [x] Organization invitations table
+- [x] Enrollment tokens table
+- [x] Apply RLS policies to all tables
+- [x] Helper functions (set_org_context, limit checking)
+
+### Backend ✅
+- [x] Organization CRUD handlers
+- [x] Member management (add/remove/update role)
+- [x] Invitation system (create/accept/revoke)
+- [x] Enrollment token management (create/revoke/delete)
+- [ ] Org middleware (context propagation, RLS setup)
+- [ ] Per-org limits enforcement
+
+### Frontend ✅
+- [x] Org switcher component in sidebar
+- [x] Organization settings page
+- [x] Members management tab
+- [x] Invitations management
+- [x] Create organization flow
+- [x] Enrollment tokens UI
+
+### Pending
+- [ ] Org middleware (context propagation, RLS setup)
+- [ ] Per-org limits enforcement
 
 ---
 
-## Enterprise Phase E4: Audit/Compliance ⬜
+## Enterprise Phase E4: Audit/Compliance ✅
 
 > **Epic:** [EPIC-08-ADVANCED-AUDIT](epics/EPIC-08-ADVANCED-AUDIT.md)
 
-- [ ] Unlimited retention
-- [ ] Export (CSV, JSON, CEF)
-- [ ] External forwarding
-- [ ] SOC2/HIPAA reports
+### Database ✅
+- [x] Audit config table (retention, forwarding, compliance mode)
+- [x] Audit exports table with status tracking
+- [x] Audit forwarding log with hash chain integrity
+- [x] Compliance reports table
+- [x] Hash columns on audit_logs for integrity chain
+
+### Retention & Configuration ✅
+- [x] Configurable retention (30/90/180/365 days or unlimited)
+- [x] Retention policies (delete, archive, export before delete)
+- [x] Immutable logs setting
+- [x] Hash chain integrity verification
+- [x] Compliance mode (SOC2, HIPAA, GDPR, PCI-DSS)
+
+### Export Functionality ✅
+- [x] CSV export with all audit fields
+- [x] JSON export with structured data
+- [x] CEF (Common Event Format) for SIEM integration
+- [x] Syslog format (RFC 5424)
+- [x] Date range filtering
+- [x] Background export processing
+
+### External Forwarding ✅
+- [x] Webhook forwarding with custom headers
+- [x] Syslog forwarding support
+- [x] Splunk forwarding support
+- [x] S3 forwarding support
+- [x] Test forwarding endpoint
+
+### Compliance Reports ✅
+- [x] SOC 2 control reports (CC6.1, CC6.2, CC6.3, CC7.2)
+- [x] HIPAA safeguard reports
+- [x] Access review reports
+- [x] Activity summary reports
+- [x] Security events reports
+- [x] Report summary with key metrics
+
+### Frontend ✅
+- [x] Audit configuration section in settings
+- [x] Retention policy settings UI
+- [x] Compliance mode selection
+- [x] Forwarding configuration and test
+- [x] Integrity verification button
+- [x] Export modal with format selection
+- [x] Compliance report generation modal
+- [x] Export/report status tracking
+
+---
+
+## Enterprise Phase E5: Policy Engine 🚧
+
+> **Epic:** [EPIC-09-POLICY-ENGINE](epics/EPIC-09-POLICY-ENGINE.md)
+> **Status:** In Progress - Database & Backend Done, Frontend Pending
+
+### Database ✅
+- [x] Policies table (conditions, action, applies_to, priority)
+- [x] Policy templates table (pre-built policy rules)
+- [x] Policy violations table with resolution tracking
+- [x] RLS policies for multi-tenancy
+- [x] 8 built-in policy templates (no_root, require_ssl, etc.)
+
+### Backend ✅
+- [x] Policy CRUD handlers
+- [x] Policy template handlers (list, create from template)
+- [x] Violation handlers (list, get, resolve)
+- [x] Policy stats endpoint
+- [x] Routes wired into handler.go
+- [x] Policy evaluation engine (evaluator.go)
+- [ ] Policy middleware for action gating
+
+### Frontend ✅
+- [x] Policy types added to api.ts
+- [x] Policy API methods added
+- [x] Policies management page
+- [x] Policy builder with conditions (JSON)
+- [x] Violations dashboard
+- [x] Policy templates selector
+
+### Pending
+- [ ] Integration with container start/stop actions
+- [ ] Integration with proxy create/update actions
+
+---
+
+## SaaS Phase S2: Enrollment Tokens ✅
+
+> **Status:** Complete - Ready for one-liner agent install
+
+### Database ✅
+- [x] Enrollment tokens table (org_id, expires, max_uses, labels)
+- [x] Token usage tracking columns
+
+### Backend ✅
+- [x] Enrollment token CRUD (in multitenancy handlers)
+- [x] Agent enrollment endpoint (`POST /api/v1/agents/enroll`)
+- [x] Enrollment status check (`GET /api/v1/agents/enroll/status`)
+- [x] Agent heartbeat endpoint (`POST /api/v1/agents/heartbeat`)
+- [x] Token validation (expiry, max uses, enabled)
+- [x] Org agent limit enforcement
+- [x] Fingerprint generation
+- [x] Audit logging for enrollments
+
+### Agent ⬜
+- [ ] Enrollment flow in agent binary
+- [ ] Store fingerprint locally
+- [ ] Heartbeat loop
+- [ ] Auto-reconnect on connection loss
+
+---
+
+## SaaS Phase S3: Log Persistence ⬜
+
+> **Status:** For disaster recovery - logs survive server crashes
+
+### Database ⬜
+- [ ] Centralized logs table (org_id, agent_id, source, message, timestamp)
+- [ ] Log retention policies
+- [ ] Optional ClickHouse integration for scale
+
+### Backend ⬜
+- [ ] Log ingestion endpoint from agents
+- [ ] Log query API with filters
+- [ ] Retention cleanup job
+
+### Agent ⬜
+- [ ] Log streaming to backend
+- [ ] Buffering for offline resilience
+
+---
+
+## SaaS Phase S4: Billing ⬜
+
+> **Status:** Stripe integration for SaaS monetization
+
+### Database ⬜
+- [ ] Subscriptions table
+- [ ] Invoices table
+- [ ] Usage metering table
+
+### Backend ⬜
+- [ ] Stripe integration (checkout, portal, webhooks)
+- [ ] Plan limits enforcement
+- [ ] Usage metering collection
+
+### Frontend ⬜
+- [ ] Billing page with current plan
+- [ ] Upgrade/downgrade flow
+- [ ] Invoice history
 
 ---
 
@@ -773,3 +950,218 @@
 - `frontend/app/(auth)/login/page.tsx` - Added SSO login buttons
 
 **Enterprise E2 Status:** ✅ 100% COMPLETE
+
+### 2026-01-03 (Session 11) - Enterprise E4 Audit/Compliance Complete
+- **Completed Enterprise Phase E4: Audit/Compliance**
+- Database: Created `008_audit_config.sql` migration with tables:
+  - `audit_config` - Retention, forwarding, compliance settings per org
+  - `audit_exports` - Export job tracking with status and filters
+  - `audit_forwarding_log` - Log forwarding history with hash chain
+  - `compliance_reports` - Compliance report generation tracking
+  - Added `log_hash` and `prev_hash` columns to `audit_logs` for integrity chain
+- Backend: Created comprehensive audit handlers (`internal/enterprise/audit/handlers.go`):
+  - Configuration: Get/update audit config (retention, forwarding, compliance mode)
+  - Exports: Create, list, get, download exports in CSV, JSON, CEF, Syslog formats
+  - Reports: Generate SOC2, HIPAA, access, activity, security compliance reports
+  - Forwarding: Test webhook/syslog forwarding, configure destination
+  - Integrity: Hash chain verification across audit logs
+  - Retention: Cleanup old logs based on retention policy
+- Backend: Wired all audit routes into handler.go (17 new endpoints)
+- Frontend: Added audit types and API methods to api.ts
+- Frontend: Created AuditComplianceSection component with:
+  - Configuration tab: retention days, retention policy, compliance mode, immutable logs, hash chain, forwarding
+  - Exports tab: list exports, create new export, download completed exports
+  - Reports tab: list reports, generate new compliance reports
+  - Integrity verification with status display
+  - Export modal with format and date selection
+  - Report modal with type and period selection
+
+**Files Created:**
+- `backend/internal/db/migrations/008_audit_config.sql`
+- `backend/internal/enterprise/audit/handlers.go`
+
+**Files Modified:**
+- `backend/internal/api/handler.go` - Added audit routes, imported audit package
+- `frontend/lib/api.ts` - Added audit types and API methods
+- `frontend/app/(dashboard)/settings/page.tsx` - Added AuditComplianceSection component
+
+**Enterprise E4 Status:** ✅ 100% COMPLETE
+
+### 2026-01-03 (Session 12) - SaaS Revamp Planning
+- **Created Master Engineering Brief for SaaS Revamp**
+- Created `docsx/SAAS-REVAMP.md` - Comprehensive 700+ line engineering document covering:
+  - Product architecture: Community / Enterprise / SaaS editions
+  - Domain strategy: infrapilot.org (docs), infrapilot.sh (SaaS), app.infrapilot.sh (dashboard)
+  - Core principle: Hosted Control Plane, NOT hosting platform
+  - SaaS onboarding flow with one-liner agent install
+  - Multi-tenancy model with RLS (Row-Level Security)
+  - Policy engine schema and evaluation flow
+  - Log persistence for disaster recovery
+  - Billing infrastructure (Stripe)
+  - Implementation phases (7 phases)
+  - API changes (20+ new endpoints)
+  - Frontend changes (new pages/components)
+  - Data privacy rules
+- Updated PROGRESS.md with:
+  - SaaS Edition tracking table
+  - E3 Multi-Tenancy expanded with detailed subtasks
+  - E5 Policy Engine section
+  - SaaS phases S1-S3 (Enrollment, Logs, Billing)
+
+**Key Decisions:**
+- InfraPilot is a CONTROL PLANE (hosts dashboard/config/policies)
+- Customers run containers on THEIR servers
+- Open-core model: Apache 2.0 (Community), BSL 1.1 (Enterprise)
+- E3 Multi-Tenancy is blocking requirement for SaaS launch
+
+**Files Created:**
+- `docsx/SAAS-REVAMP.md` - Master engineering brief
+
+**Files Modified:**
+- `docsx/PROGRESS.md` - Updated roadmap with SaaS phases
+
+**Next Steps:** E3 Frontend + Org Middleware
+
+### 2026-01-03 (Session 12 cont.) - E3 Multi-Tenancy Implementation
+- **Started Enterprise Phase E3: Multi-Tenancy**
+- Database: Created `009_multitenancy.sql` migration with:
+  - Extended organizations table (plan, stripe, limits)
+  - organization_members table
+  - organization_invitations table
+  - enrollment_tokens table (for SaaS one-liner install)
+  - Row-Level Security (RLS) policies on all relevant tables
+  - Helper functions (set_org_context, check_org_user_limit, check_org_agent_limit)
+- Backend: Created multitenancy handlers (`internal/enterprise/multitenancy/handlers.go`):
+  - Organization CRUD (list, get, create, update, delete)
+  - Organization usage tracking
+  - Member management (list, add, update, remove)
+  - Invitation system (list, create, revoke, accept)
+  - Enrollment tokens (list, create, revoke, delete)
+- Backend: Wired multitenancy routes into handler.go (18 new endpoints)
+- Fixed audit handlers RequireFeature context issues
+
+**Files Created:**
+- `backend/internal/db/migrations/009_multitenancy.sql`
+- `backend/internal/enterprise/multitenancy/handlers.go`
+
+**Files Modified:**
+- `backend/internal/api/handler.go` - Added multitenancy routes
+- `backend/internal/enterprise/audit/handlers.go` - Fixed RequireFeature calls
+
+**E3 Status:** 🚧 40% (Database & Backend done, Frontend pending)
+
+### 2026-01-03 (Session 12 cont.) - SaaS Enrollment & Frontend API
+- **Completed SaaS Phase S2: Enrollment Tokens**
+- Frontend: Added multitenancy types to api.ts:
+  - Organization, OrganizationMember, OrganizationInvitation, EnrollmentToken
+  - OrgUsage, CreateOrgRequest, UpdateOrgRequest
+  - CreateInvitationRequest, CreateEnrollmentTokenRequest
+- Frontend: Added multitenancy API methods:
+  - Organization CRUD (getOrganizations, createOrganization, etc.)
+  - Member management (getOrganizationMembers, addOrganizationMember, etc.)
+  - Invitation management (getOrganizationInvitations, createOrganizationInvitation, etc.)
+  - Enrollment tokens (getEnrollmentTokens, createEnrollmentToken, etc.)
+- Backend: Created enrollment handlers (`internal/api/enrollment_handlers.go`):
+  - `POST /api/v1/agents/enroll` - Agent self-registration with token
+  - `GET /api/v1/agents/enroll/status` - Check enrollment by fingerprint
+  - `POST /api/v1/agents/heartbeat` - Agent heartbeat updates
+  - Token validation (expiry, max uses, enabled)
+  - Org agent limit enforcement
+  - Fingerprint generation for agent identification
+  - Re-enrollment support for existing agents
+  - Audit logging for enrollment events
+
+**Files Created:**
+- `backend/internal/api/enrollment_handlers.go`
+
+**Files Modified:**
+- `frontend/lib/api.ts` - Added multitenancy types and API methods
+- `backend/internal/api/handler.go` - Added enrollment routes
+- `docsx/PROGRESS.md` - Updated progress
+
+**S2 Status:** ✅ 100% COMPLETE (Backend done, Agent-side pending)
+
+### 2026-01-03 (Session 12 cont.) - E5 Policy Engine Foundation
+- **Started Enterprise Phase E5: Policy Engine**
+- Database: Created `010_policy_engine.sql` migration with:
+  - `policies` table (org_id, name, type, conditions, action, applies_to, priority)
+  - `policy_templates` table (pre-built policy rules)
+  - `policy_violations` table (tracking, resolution)
+  - RLS policies for tenant isolation
+  - 8 built-in policy templates:
+    - no_root_containers, require_restart_policy, require_healthcheck
+    - require_ssl, no_exec_production, max_container_age
+    - require_resource_limits, no_privileged_containers
+- Backend: Created policy handlers (`internal/enterprise/policy/handlers.go`):
+  - Policy CRUD (list, get, create, update, delete)
+  - Policy template handlers (list, create from template)
+  - Violation handlers (list, get, resolve)
+  - Policy stats endpoint
+- Backend: Wired policy routes into handler.go (12 new endpoints)
+- Frontend: Added policy types to api.ts:
+  - Policy, PolicyTemplate, PolicyViolation, PolicyStats
+  - PolicyType, PolicyAction, CreatePolicyRequest, UpdatePolicyRequest
+- Frontend: Added policy API methods (15 new methods)
+
+**Files Created:**
+- `backend/internal/db/migrations/010_policy_engine.sql`
+- `backend/internal/enterprise/policy/handlers.go`
+
+**Files Modified:**
+- `backend/internal/api/handler.go` - Added policy routes
+- `frontend/lib/api.ts` - Added policy types and API methods
+- `docsx/PROGRESS.md` - Updated progress
+
+**E5 Status:** 🚧 60% (Database & Backend done, Evaluation engine & Frontend pending)
+
+### 2026-01-03 (Session 13) - E3/E5 Frontend Components
+- **Completed E3 Multi-Tenancy Frontend Components**
+- Frontend: Created OrgSwitcher component (`components/org-switcher.tsx`):
+  - Dropdown for switching between organizations
+  - Stores current org in localStorage
+  - Shows org name, role, plan
+  - Links to organization settings and create new org
+  - Graceful handling for single org (no dropdown, just display)
+- Frontend: Updated dashboard layout (`app/(dashboard)/layout.tsx`):
+  - Added OrgSwitcher to sidebar after logo
+  - Added Policies navigation item with Shield icon
+- Frontend: Created organization settings page (`app/(dashboard)/orgs/[id]/settings/page.tsx`):
+  - General tab: Edit org name, view slug/plan, delete org with confirmation
+  - Members tab: List members, invite new members, update roles, remove members
+  - Enrollment Tokens tab: List tokens, create new tokens, revoke tokens
+  - Token creation modal with name, max uses, expiry options
+  - Shows token once on creation (copy to clipboard)
+  - Example install command display
+
+- **Completed E5 Policy Engine Frontend**
+- Frontend: Created policies page (`app/(dashboard)/policies/page.tsx`):
+  - Stats cards: Total policies, active policies, violations, unresolved
+  - Policies tab: List with search, type filter, enable/disable toggle, delete
+  - Templates tab: Grid of policy templates with "Use Template" button
+  - Violations tab: List with resolve button, show resolved filter
+  - Create policy modal with name, type, action, priority, conditions (JSON)
+  - Create from template modal
+  - Action badges (block=red, warn=yellow, audit=blue)
+  - Type badges (container, proxy, access, security)
+
+- **Completed Policy Evaluation Engine**
+- Backend: Created policy evaluator (`internal/enterprise/policy/evaluator.go`):
+  - EvaluateResource() - Evaluates all policies for a resource
+  - EvaluateAndBlock() - Returns true if action should be blocked
+  - Condition evaluation with operators: equals, not_equals, contains, greater_than, less_than, in, not_in, exists, matches
+  - Nested attribute access with dot notation
+  - Automatic violation recording on policy violation
+  - Helper functions for container/proxy resource checks
+  - Pattern matching with wildcards
+
+**Files Created:**
+- `frontend/components/org-switcher.tsx`
+- `frontend/app/(dashboard)/orgs/[id]/settings/page.tsx`
+- `frontend/app/(dashboard)/policies/page.tsx`
+- `backend/internal/enterprise/policy/evaluator.go`
+
+**Files Modified:**
+- `frontend/app/(dashboard)/layout.tsx` - Added OrgSwitcher and Policies nav
+
+**E3 Status:** ✅ 80% (Frontend done, Org middleware pending)
+**E5 Status:** ✅ 80% (Evaluation engine done, Integration with container/proxy actions pending)

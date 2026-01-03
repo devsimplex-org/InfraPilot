@@ -15,11 +15,13 @@ import {
   Menu,
   X,
   Activity,
+  Shield,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuthStore } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { OrgSwitcher } from "@/components/org-switcher";
 
 const navigation = [
   { name: "Overview", href: "/", icon: LayoutDashboard },
@@ -28,6 +30,7 @@ const navigation = [
   { name: "Logs", href: "/logs", icon: FileText },
   { name: "Alerts", href: "/alerts", icon: Bell },
   { name: "Health", href: "/health", icon: Activity },
+  { name: "Policies", href: "/policies", icon: Shield },
   { name: "Users", href: "/users", icon: Users },
   { name: "Audit Log", href: "/audit", icon: History },
   { name: "Settings", href: "/settings", icon: Settings },
@@ -116,6 +119,9 @@ export default function DashboardLayout({
             <X className="h-5 w-5" />
           </button>
         </div>
+
+        {/* Organization Switcher */}
+        <OrgSwitcher />
 
         <nav className="flex-1 px-3 overflow-y-auto">
           <ul className="space-y-1">
