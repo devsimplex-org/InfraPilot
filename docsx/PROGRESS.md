@@ -31,9 +31,9 @@
 |-------|--------|----------|
 | Phase S1: Multi-Tenancy (E3) | ✅ Complete | 100% |
 | Phase S2: Enrollment Tokens | ✅ Complete | 100% |
-| Phase S3: Log Persistence | ⬜ Planned | 0% |
+| Phase S3: Log Persistence | ✅ Complete | 100% |
 | Phase S4: Billing (Stripe) | ⬜ Planned | 0% |
-| Phase S5: Agent-side Enrollment | ⬜ Planned | 0% |
+| Phase S5: Agent-side Enrollment | ✅ Complete | 100% |
 
 **Community MVP:** ✅ COMPLETE
 **Enterprise Target:** E1-E5 + SaaS
@@ -446,31 +446,63 @@
 - [x] Fingerprint generation
 - [x] Audit logging for enrollments
 
-### Agent ⬜
-- [ ] Enrollment flow in agent binary
-- [ ] Store fingerprint locally
-- [ ] Heartbeat loop
-- [ ] Auto-reconnect on connection loss
+### Agent ✅
+- [x] Enrollment flow in agent binary
+- [x] Store fingerprint locally (credentials.json in DATA_DIR)
+- [x] Heartbeat loop (fingerprint-based via enrollment manager)
+- [x] Auto-reconnect on connection loss
+- [x] Re-enrollment when credentials become invalid
 
 ---
 
-## SaaS Phase S3: Log Persistence ⬜
+## SaaS Phase S5: Agent-side Enrollment ✅
 
-> **Status:** For disaster recovery - logs survive server crashes
+> **Status:** Complete - Agents can self-enroll using enrollment tokens
 
-### Database ⬜
-- [ ] Centralized logs table (org_id, agent_id, source, message, timestamp)
-- [ ] Log retention policies
-- [ ] Optional ClickHouse integration for scale
+### Agent ✅
+- [x] Created enrollment manager (`internal/enrollment/enrollment.go`)
+- [x] Credentials file storage (agent_id, org_id, fingerprint, hostname)
+- [x] Load existing credentials on startup
+- [x] Enroll with backend if no credentials exist
+- [x] Verify credentials are still valid
+- [x] Fingerprint-based heartbeat loop
+- [x] Auto re-enrollment when credentials become invalid
+- [x] Integration with main.go startup flow
 
-### Backend ⬜
-- [ ] Log ingestion endpoint from agents
-- [ ] Log query API with filters
-- [ ] Retention cleanup job
+### Configuration ✅
+- [x] DATA_DIR env var for credential storage
+- [x] ENROLLMENT_TOKEN env var for token-based enrollment
+- [x] Backwards compatible with AGENT_ID env var
 
-### Agent ⬜
-- [ ] Log streaming to backend
-- [ ] Buffering for offline resilience
+---
+
+## SaaS Phase S3: Log Persistence ✅
+
+> **Status:** Complete - Logs persist to database for disaster recovery
+
+### Database ✅
+- [x] Centralized logs table (org_id, agent_id, source, level, message, timestamp)
+- [x] Log retention config table (per-org settings)
+- [x] Log ingestion stats table (daily usage tracking)
+- [x] Indexes for efficient querying (org_id, agent_id, source, level, timestamp)
+- [x] RLS policies for tenant isolation
+
+### Backend ✅
+- [x] Log ingestion endpoint (`POST /logs/ingest`)
+- [x] Log query API with filters (`GET /logs/persisted`)
+- [x] Log sources endpoint (`GET /logs/sources`)
+- [x] Retention config endpoints (GET/PUT `/logs/retention`)
+- [x] Log stats endpoint (`GET /logs/stats`)
+- [x] Cleanup job endpoint (`POST /logs/cleanup`)
+
+### Agent ✅
+- [x] Log streamer (`internal/logstreamer/streamer.go`)
+- [x] Container log collection via Docker SDK
+- [x] Log buffering (100 entries, 5-second flush interval)
+- [x] Container watching with automatic start/stop of collection
+- [x] Log level detection (error, warn, debug, info)
+- [x] Timestamp parsing from Docker log format
+- [x] LOG_PERSISTENCE config option
 
 ---
 
@@ -1211,3 +1243,85 @@
 **E3 Status:** ✅ 100% COMPLETE
 **E5 Status:** ✅ 100% COMPLETE
 **Enterprise Edition:** ✅ ALL PHASES COMPLETE (E1-E5)
+
+### 2026-01-03 (Session 14) - Agent WebSocket & Enrollment
+- **Fixed 503 Error on Nginx Commands**
+- Backend: Added WebSocket endpoint for agent command streaming (`/api/v1/agents/:id/ws/commands`)
+- Backend: Added JSON tags to BackendMessage and AgentMessage structs
+- Backend: Added Type field to BackendMessage for command routing
+- Agent: Replaced placeholder gRPC streaming with real WebSocket connection
+- Agent: Added reconnection logic with 5-second retry
+- Agent: Added gorilla/websocket dependency
+- Nginx test and reload commands now work correctly
+
+- **Completed SaaS Phase S5: Agent-side Enrollment**
+- Agent: Created enrollment manager (`internal/enrollment/enrollment.go`):
+  - Credentials file storage (agent_id, org_id, fingerprint, hostname)
+  - Load existing credentials on startup
+  - Enroll with backend if no credentials exist
+  - Verify credentials are still valid with backend
+  - Fingerprint-based heartbeat loop
+  - Auto re-enrollment when credentials become invalid
+- Agent: Updated config with DATA_DIR setting
+- Agent: Integrated enrollment manager into main.go startup flow
+- Docker: Added agent_dev_data volume for credential persistence
+- Docker: Added DATA_DIR and BACKEND_HTTP_URL env vars
+
+**Files Created:**
+- `backend/internal/api/websocket_handlers.go` - Agent command WebSocket handler (added)
+- `agent/internal/enrollment/enrollment.go` - Enrollment manager
+
+**Files Modified:**
+- `backend/internal/api/handler.go` - Added WebSocket route
+- `backend/internal/grpc/service.go` - Added JSON tags to message structs
+- `agent/internal/grpc/client.go` - WebSocket connection implementation
+- `agent/internal/config/config.go` - Added DATA_DIR setting
+- `agent/cmd/agent/main.go` - Integrated enrollment manager
+- `docker-compose.dev.yml` - Added agent data volume
+
+**S5 Status:** ✅ 100% COMPLETE
+**SaaS Edition:** S1, S2, S5 Complete (S3, S4 remaining)
+
+### 2026-01-03 (Session 14 cont.) - SaaS Log Persistence Complete
+- **Completed SaaS Phase S3: Log Persistence**
+- Database: Created `012_centralized_logs.sql` migration with:
+  - `centralized_logs` table (org_id, agent_id, source, level, message, timestamp, labels, metadata)
+  - `log_retention_config` table (per-org retention settings)
+  - `log_ingestion_stats` table (daily usage tracking)
+  - Indexes for efficient querying
+  - RLS policies for tenant isolation
+  - Helper functions (get_org_log_storage, cleanup_old_logs)
+- Backend: Created log persistence handlers (`internal/api/log_persistence_handlers.go`):
+  - `POST /logs/ingest` - Bulk log ingestion from agents
+  - `GET /logs/persisted` - Query logs with filters (source, level, search, date range, pagination)
+  - `GET /logs/sources` - List all log sources for an org
+  - `GET /logs/retention` - Get retention config
+  - `PUT /logs/retention` - Update retention config
+  - `GET /logs/stats` - Get log storage stats
+  - `POST /logs/cleanup` - Run retention cleanup
+- Backend: Wired log routes into handler.go
+- Agent: Created log streamer (`internal/logstreamer/streamer.go`):
+  - Collects logs from all running containers
+  - Buffers logs (100 entries max, 5-second flush interval)
+  - Watches for container starts/stops
+  - Parses Docker log format and extracts timestamps
+  - Detects log levels from message content
+  - Streams to backend via HTTP POST
+- Agent: Added `LOG_PERSISTENCE` config option
+- Agent: Added `Client()` method to Docker client wrapper
+- Docker: Added LOG_PERSISTENCE=true to agent env
+
+**Files Created:**
+- `backend/internal/db/migrations/012_centralized_logs.sql`
+- `backend/internal/api/log_persistence_handlers.go`
+- `agent/internal/logstreamer/streamer.go`
+
+**Files Modified:**
+- `backend/internal/api/handler.go` - Added log routes
+- `agent/internal/config/config.go` - Added LogPersistence config
+- `agent/internal/docker/client.go` - Added Client() method
+- `agent/cmd/agent/main.go` - Integrated log streamer
+- `docker-compose.dev.yml` - Added LOG_PERSISTENCE env var
+
+**S3 Status:** ✅ 100% COMPLETE
+**SaaS Edition:** S1, S2, S3, S5 Complete (S4 Billing remaining)

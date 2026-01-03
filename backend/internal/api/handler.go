@@ -304,6 +304,25 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 		v1.POST("/agents/enroll", h.EnrollAgent)
 		v1.GET("/agents/enroll/status", h.GetEnrollmentStatus)
 		v1.POST("/agents/heartbeat", h.AgentHeartbeat)
+
+		// Agent WebSocket command stream (public - agents connect with their ID)
+		v1.GET("/agents/:id/ws/commands", h.agentCommandStream)
+
+		// Log ingestion (public - agents push logs)
+		v1.POST("/logs/ingest", h.IngestLogs)
+	}
+
+	// Protected log routes (require auth)
+	logs := v1.Group("/logs")
+	logs.Use(h.AuthMiddleware())
+	logs.Use(h.OrgMiddleware())
+	{
+		logs.GET("/persisted", h.GetPersistedLogs)
+		logs.GET("/sources", h.GetLogSources)
+		logs.GET("/retention", h.GetLogRetentionConfig)
+		logs.PUT("/retention", h.RequireRole(auth.RoleSuperAdmin), h.UpdateLogRetentionConfig)
+		logs.GET("/stats", h.GetLogStats)
+		logs.POST("/cleanup", h.RequireRole(auth.RoleSuperAdmin), h.RunLogCleanup)
 	}
 }
 
