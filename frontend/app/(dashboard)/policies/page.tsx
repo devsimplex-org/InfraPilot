@@ -37,6 +37,7 @@ export default function PoliciesPage() {
   const [violations, setViolations] = useState<PolicyViolation[]>([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<PolicyStats | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   // Filters
   const [typeFilter, setTypeFilter] = useState<PolicyType | "">("");
@@ -86,6 +87,7 @@ export default function PoliciesPage() {
 
   const handleCreatePolicy = async () => {
     try {
+      setError(null);
       await api.createPolicy(newPolicy);
       setShowCreateModal(false);
       setNewPolicy({
@@ -99,6 +101,7 @@ export default function PoliciesPage() {
       loadData();
     } catch (error) {
       console.error("Failed to create policy:", error);
+      setError(error instanceof Error ? error.message : "Failed to create policy");
     }
   };
 
@@ -106,13 +109,15 @@ export default function PoliciesPage() {
     try {
       const template = templates.find(t => t.id === templateId);
       await api.createPolicyFromTemplate(templateId, {
-        name: template?.name || "New Policy",
+        name: template?.name?.replace(/_/g, " ") || "New Policy",
       });
       setShowTemplateModal(false);
       setSelectedTemplate(null);
       loadData();
+      setError(null);
     } catch (error) {
       console.error("Failed to create policy from template:", error);
+      setError(error instanceof Error ? error.message : "Failed to create policy");
     }
   };
 
@@ -211,6 +216,22 @@ export default function PoliciesPage() {
             </button>
           </div>
         </div>
+
+        {/* Error Banner */}
+        {error && (
+          <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="h-5 w-5 text-red-500" />
+              <span className="text-red-700 dark:text-red-400">{error}</span>
+            </div>
+            <button
+              onClick={() => setError(null)}
+              className="text-red-500 hover:text-red-700"
+            >
+              <XCircle className="h-5 w-5" />
+            </button>
+          </div>
+        )}
 
         {/* Stats Cards */}
         {stats && (

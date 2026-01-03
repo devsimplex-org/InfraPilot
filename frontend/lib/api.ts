@@ -54,6 +54,86 @@ export interface Container {
   created_at?: string;
 }
 
+export interface PortMapping {
+  container_port: number;
+  host_port: number;
+  protocol: string;
+  host_ip?: string;
+}
+
+export interface MountInfo {
+  type: string;
+  source: string;
+  destination: string;
+  mode: string;
+  read_only: boolean;
+}
+
+export interface EnvVar {
+  key: string;
+  value: string;
+}
+
+export interface ContainerConfig {
+  hostname: string;
+  domainname: string;
+  user: string;
+  working_dir: string;
+  entrypoint: string[];
+  cmd: string[];
+  restart_policy: string;
+  privileged: boolean;
+  tty: boolean;
+  open_stdin: boolean;
+}
+
+export interface HealthCheckConfig {
+  test: string[];
+  interval: string;
+  timeout: string;
+  start_period: string;
+  retries: number;
+}
+
+export interface HealthLogEntry {
+  start: string;
+  end: string;
+  exit_code: number;
+  output: string;
+}
+
+export interface NetworkDetail {
+  name: string;
+  network_id: string;
+  ip_address: string;
+  gateway: string;
+  mac_address: string;
+  aliases?: string[];
+}
+
+export interface ResourceLimits {
+  cpu_shares: number;
+  cpu_quota: number;
+  cpu_period: number;
+  cpuset_cpus: string;
+  memory_limit: number;
+  memory_swap: number;
+  pids_limit: number;
+}
+
+export interface ContainerDetail extends Container {
+  ports: PortMapping[];
+  mounts: MountInfo[];
+  environment: EnvVar[];
+  config: ContainerConfig;
+  health_check?: HealthCheckConfig;
+  health_status?: string;
+  health_log?: HealthLogEntry[];
+  labels: Record<string, string>;
+  network_details: NetworkDetail[];
+  resources: ResourceLimits;
+}
+
 export interface Stack {
   name: string;
   container_count: number;
@@ -704,6 +784,9 @@ export const api = {
   getContainers: (agentId: string) =>
     fetchAPI<Container[]>(`/agents/${agentId}/containers`),
 
+  getContainerDetail: (agentId: string, containerId: string) =>
+    fetchAPI<ContainerDetail>(`/agents/${agentId}/containers/${containerId}`),
+
   startContainer: (agentId: string, containerId: string) =>
     fetchAPI(`/agents/${agentId}/containers/${containerId}/start`, {
       method: "POST",
@@ -718,6 +801,15 @@ export const api = {
     fetchAPI(`/agents/${agentId}/containers/${containerId}/restart`, {
       method: "POST",
     }),
+
+  deleteContainer: (agentId: string, containerId: string, confirmName: string, force: boolean = false) =>
+    fetchAPI<{ message: string; container_id: string; name: string }>(
+      `/agents/${agentId}/containers/${containerId}`,
+      {
+        method: "DELETE",
+        body: JSON.stringify({ confirm_name: confirmName, force }),
+      }
+    ),
 
   getContainerLogs: (agentId: string, containerId: string, tail: number = 100) =>
     fetchAPI<{ container_id: string; logs: string }>(

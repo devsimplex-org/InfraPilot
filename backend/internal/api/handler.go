@@ -104,6 +104,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				agents.POST("/:id/containers/:cid/start", h.RequireModifyContainers(), h.startContainerReal)
 				agents.POST("/:id/containers/:cid/stop", h.RequireModifyContainers(), h.stopContainerReal)
 				agents.POST("/:id/containers/:cid/restart", h.RequireModifyContainers(), h.restartContainerReal)
+				agents.DELETE("/:id/containers/:cid", h.RequireModifyContainers(), h.deleteContainerReal)
 				agents.GET("/:id/containers/:cid/logs", h.getContainerLogsReal)
 				agents.GET("/:id/containers/:cid/logs/stream", h.streamContainerLogs)
 				agents.GET("/:id/containers/:cid/exec", h.execContainer)
@@ -256,19 +257,19 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 			policies := protected.Group("/policies")
 			{
 				policies.GET("", policyHandler.ListPolicies)
-				policies.POST("", h.RequireRole(auth.RoleSuperAdmin), policyHandler.CreatePolicy)
+				policies.POST("", h.RequireRole(auth.RoleAdmin, auth.RoleSuperAdmin), policyHandler.CreatePolicy)
 				policies.GET("/:id", policyHandler.GetPolicy)
-				policies.PUT("/:id", h.RequireRole(auth.RoleSuperAdmin), policyHandler.UpdatePolicy)
-				policies.DELETE("/:id", h.RequireRole(auth.RoleSuperAdmin), policyHandler.DeletePolicy)
+				policies.PUT("/:id", h.RequireRole(auth.RoleAdmin, auth.RoleSuperAdmin), policyHandler.UpdatePolicy)
+				policies.DELETE("/:id", h.RequireRole(auth.RoleAdmin, auth.RoleSuperAdmin), policyHandler.DeletePolicy)
 
 				// Templates
 				policies.GET("/templates", policyHandler.ListTemplates)
-				policies.POST("/templates/:id/create", h.RequireRole(auth.RoleSuperAdmin), policyHandler.CreateFromTemplate)
+				policies.POST("/templates/:id/create", h.RequireRole(auth.RoleAdmin, auth.RoleSuperAdmin), policyHandler.CreateFromTemplate)
 
 				// Violations
 				policies.GET("/violations", policyHandler.ListViolations)
 				policies.GET("/violations/:id", policyHandler.GetViolation)
-				policies.POST("/violations/:id/resolve", h.RequireRole(auth.RoleSuperAdmin), policyHandler.ResolveViolation)
+				policies.POST("/violations/:id/resolve", h.RequireRole(auth.RoleAdmin, auth.RoleSuperAdmin), policyHandler.ResolveViolation)
 
 				// Stats
 				policies.GET("/stats", policyHandler.GetPolicyStats)
