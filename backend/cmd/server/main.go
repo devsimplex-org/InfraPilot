@@ -57,15 +57,11 @@ func main() {
 		logger.Fatal("Failed to run migrations", zap.Error(err))
 	}
 
-	// Initialize edition system
+	// Initialize license
 	if err := license.Init(); err != nil {
-		logger.Warn("Failed to initialize edition", zap.Error(err))
+		logger.Warn("Failed to initialize license", zap.Error(err))
 	}
-	lic := license.Current()
-	logger.Info("Edition initialized",
-		zap.String("edition", string(lic.Edition)),
-		zap.Bool("is_saas", lic.IsSaaS()),
-	)
+	logger.Info("InfraPilot Community Edition started")
 
 	// Initialize auth service
 	authService := auth.NewService(cfg.JWTSecret, cfg.JWTExpiry)
