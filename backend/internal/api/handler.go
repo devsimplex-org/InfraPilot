@@ -333,9 +333,5 @@ func (h *Handler) healthCheck(c *gin.Context) {
 	c.JSON(200, gin.H{
 		"status":  "ok",
 		"edition": lic.Edition,
-		"license": gin.H{
-			"valid":   lic.Valid(),
-			"edition": lic.Edition,
-		},
 	})
 }

@@ -83,6 +83,8 @@ services:
       - "8080:8080"
       - "9090:9090"
     environment:
+      # Edition: 'saas' enables all features for development
+      EDITION: saas
       ENV: development
       HTTP_PORT: 8080
       GRPC_PORT: 9090

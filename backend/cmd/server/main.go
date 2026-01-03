@@ -57,15 +57,14 @@ func main() {
 		logger.Fatal("Failed to run migrations", zap.Error(err))
 	}
 
-	// Initialize license system
+	// Initialize edition system
 	if err := license.Init(); err != nil {
-		logger.Warn("Failed to load license, running in community mode", zap.Error(err))
+		logger.Warn("Failed to initialize edition", zap.Error(err))
 	}
 	lic := license.Current()
-	logger.Info("License loaded",
+	logger.Info("Edition initialized",
 		zap.String("edition", string(lic.Edition)),
-		zap.String("organization", lic.Organization),
-		zap.Bool("valid", lic.Valid()),
+		zap.Bool("is_saas", lic.IsSaaS()),
 	)
 
 	// Initialize auth service
