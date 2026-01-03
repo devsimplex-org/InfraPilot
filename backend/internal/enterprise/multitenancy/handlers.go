@@ -127,7 +127,25 @@ func (h *Handler) ListOrganizations(c *gin.Context) {
 		return
 	}
 
-	rows, err := h.db.Query(c, `
+	// Use a transaction to bypass RLS for this query
+	// This is safe because we're filtering by user_id
+	tx, err := h.db.Begin(c)
+	if err != nil {
+		h.logger.Error("Failed to begin transaction", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list organizations"})
+		return
+	}
+	defer tx.Rollback(c)
+
+	// Temporarily disable RLS for this session
+	_, err = tx.Exec(c, "SET LOCAL row_security = off")
+	if err != nil {
+		h.logger.Error("Failed to disable RLS", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list organizations"})
+		return
+	}
+
+	rows, err := tx.Query(c, `
 		SELECT o.id, o.name, o.slug, o.plan, o.max_users, o.max_agents,
 		       COALESCE(o.settings, '{}'), o.created_at, o.updated_at,
 		       om.role

@@ -98,7 +98,7 @@ export default function OrgSettingsPage() {
   const handleInviteMember = async () => {
     if (!inviteEmail.trim()) return;
     try {
-      await api.inviteOrganizationMember(orgId, {
+      await api.createOrganizationInvitation(orgId, {
         email: inviteEmail.trim(),
         role: inviteRole,
       });
@@ -125,7 +125,7 @@ export default function OrgSettingsPage() {
     role: OrgMemberRole
   ) => {
     try {
-      await api.updateOrganizationMember(orgId, userId, { role });
+      await api.updateOrganizationMember(orgId, userId, role);
       loadData();
     } catch (error) {
       console.error("Failed to update member role:", error);
@@ -329,11 +329,11 @@ export default function OrgSettingsPage() {
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-full bg-primary-600 flex items-center justify-center text-white font-medium">
-                      {member.user_email?.[0]?.toUpperCase() || "U"}
+                      {(member.email || member.user_name)?.[0]?.toUpperCase() || "U"}
                     </div>
                     <div>
                       <p className="font-medium text-gray-900 dark:text-white">
-                        {member.user_email}
+                        {member.email || member.user_name || "Unknown"}
                       </p>
                       <p className="text-sm text-gray-500">
                         Joined{" "}

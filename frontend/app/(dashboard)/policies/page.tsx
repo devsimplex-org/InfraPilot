@@ -23,6 +23,7 @@ import {
   Policy,
   PolicyTemplate,
   PolicyViolation,
+  PolicyStats,
   PolicyType,
   PolicyAction,
 } from "@/lib/api";
@@ -35,14 +36,7 @@ export default function PoliciesPage() {
   const [templates, setTemplates] = useState<PolicyTemplate[]>([]);
   const [violations, setViolations] = useState<PolicyViolation[]>([]);
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState<{
-    total_policies: number;
-    active_policies: number;
-    total_violations: number;
-    unresolved_violations: number;
-    by_type: Record<string, number>;
-    by_action: Record<string, number>;
-  } | null>(null);
+  const [stats, setStats] = useState<PolicyStats | null>(null);
 
   // Filters
   const [typeFilter, setTypeFilter] = useState<PolicyType | "">("");
@@ -110,8 +104,9 @@ export default function PoliciesPage() {
 
   const handleCreateFromTemplate = async (templateId: string) => {
     try {
+      const template = templates.find(t => t.id === templateId);
       await api.createPolicyFromTemplate(templateId, {
-        enabled: true,
+        name: template?.name || "New Policy",
       });
       setShowTemplateModal(false);
       setSelectedTemplate(null);
@@ -141,7 +136,7 @@ export default function PoliciesPage() {
 
   const handleResolveViolation = async (violationId: string) => {
     try {
-      await api.resolveViolation(violationId, { resolution: "manual" });
+      await api.resolvePolicyViolation(violationId, "Manually resolved");
       loadData();
     } catch (error) {
       console.error("Failed to resolve violation:", error);
@@ -234,9 +229,9 @@ export default function PoliciesPage() {
             <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-500">Active Policies</p>
+                  <p className="text-sm text-gray-500">Enabled Policies</p>
                   <p className="text-2xl font-bold text-green-600">
-                    {stats.active_policies}
+                    {stats.enabled_policies}
                   </p>
                 </div>
                 <CheckCircle className="h-8 w-8 text-green-400" />
@@ -516,7 +511,7 @@ export default function PoliciesPage() {
                               <span className="flex items-center gap-1">
                                 <Clock className="h-3 w-3" />
                                 {new Date(
-                                  violation.detected_at
+                                  violation.created_at
                                 ).toLocaleString()}
                               </span>
                               {violation.resource_type && (

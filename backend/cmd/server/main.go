@@ -19,6 +19,7 @@ import (
 	"github.com/infrapilot/backend/internal/api"
 	"github.com/infrapilot/backend/internal/auth"
 	"github.com/infrapilot/backend/internal/config"
+	"github.com/infrapilot/backend/internal/db"
 	"github.com/infrapilot/backend/internal/enterprise/license"
 	agentgrpc "github.com/infrapilot/backend/internal/grpc"
 )
@@ -50,6 +51,11 @@ func main() {
 		logger.Fatal("Failed to ping database", zap.Error(err))
 	}
 	logger.Info("Connected to PostgreSQL")
+
+	// Run database migrations
+	if err := db.RunMigrations(ctx, pool, logger); err != nil {
+		logger.Fatal("Failed to run migrations", zap.Error(err))
+	}
 
 	// Initialize license system
 	if err := license.Init(); err != nil {

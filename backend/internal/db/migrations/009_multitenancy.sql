@@ -40,11 +40,13 @@ CREATE TABLE IF NOT EXISTS organization_invitations (
     expires_at      TIMESTAMPTZ NOT NULL,
     accepted_at     TIMESTAMPTZ,
     created_by      UUID REFERENCES users(id) ON DELETE SET NULL,
-    created_at      TIMESTAMPTZ DEFAULT NOW(),
-
-    -- Only one pending invitation per email per org
-    UNIQUE(org_id, email) WHERE accepted_at IS NULL
+    created_at      TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Only one pending invitation per email per org (partial unique index)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_org_invitations_pending
+    ON organization_invitations(org_id, email)
+    WHERE accepted_at IS NULL;
 
 CREATE INDEX IF NOT EXISTS idx_org_invitations_org ON organization_invitations(org_id);
 CREATE INDEX IF NOT EXISTS idx_org_invitations_token ON organization_invitations(token);

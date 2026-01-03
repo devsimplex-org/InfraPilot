@@ -65,6 +65,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 		// Protected routes
 		protected := v1.Group("")
 		protected.Use(h.AuthMiddleware())
+		protected.Use(h.OrgMiddleware())
 		{
 			// Agents
 			agents := protected.Group("/agents")

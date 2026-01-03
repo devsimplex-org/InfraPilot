@@ -414,30 +414,37 @@ export default function ContainersPage() {
 
             {/* Container Info */}
             <DetailSection title="Container Info">
-              <DetailRow label="Status">
-                <span className={cn(
-                  "px-2 py-0.5 text-xs font-medium rounded-full capitalize",
-                  getStatusBadgeClass(selectedContainer.status)
-                )}>
-                  {selectedContainer.status}
-                </span>
-              </DetailRow>
-              <DetailRow label="Container ID" mono>
-                <div className="flex items-center gap-1">
-                  <span>{selectedContainer.container_id.slice(0, 12)}</span>
-                  <button
-                    onClick={handleCopyId}
-                    className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
-                    title="Copy full ID"
-                  >
-                    {copied ? (
-                      <Check className="h-3 w-3 text-green-500" />
-                    ) : (
-                      <Copy className="h-3 w-3 text-gray-400" />
-                    )}
-                  </button>
-                </div>
-              </DetailRow>
+              <DetailRow
+                label="Status"
+                value={
+                  <span className={cn(
+                    "px-2 py-0.5 text-xs font-medium rounded-full capitalize",
+                    getStatusBadgeClass(selectedContainer.status)
+                  )}>
+                    {selectedContainer.status}
+                  </span>
+                }
+              />
+              <DetailRow
+                label="Container ID"
+                mono
+                value={
+                  <div className="flex items-center gap-1">
+                    <span>{selectedContainer.container_id.slice(0, 12)}</span>
+                    <button
+                      onClick={handleCopyId}
+                      className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
+                      title="Copy full ID"
+                    >
+                      {copied ? (
+                        <Check className="h-3 w-3 text-green-500" />
+                      ) : (
+                        <Copy className="h-3 w-3 text-gray-400" />
+                      )}
+                    </button>
+                  </div>
+                }
+              />
               <DetailRow label="Stack" value={selectedContainer.stack_name || "Standalone"} />
               {selectedContainer.created_at && (
                 <DetailRow

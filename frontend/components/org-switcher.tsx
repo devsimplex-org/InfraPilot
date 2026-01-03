@@ -29,7 +29,9 @@ export function OrgSwitcher({ onOrgChange }: OrgSwitcherProps) {
           localStorage.setItem("current_org_id", org.id);
         }
       } catch (error) {
-        console.error("Failed to load organizations:", error);
+        // Silently handle - orgs may not be set up yet
+        console.warn("Organizations not available:", error);
+        setOrgs([]);
       } finally {
         setLoading(false);
       }
@@ -54,7 +56,15 @@ export function OrgSwitcher({ onOrgChange }: OrgSwitcherProps) {
   }
 
   if (orgs.length === 0) {
-    return null;
+    // Show a placeholder when no orgs are available
+    return (
+      <div className="px-3 py-2">
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-800/50 text-gray-400">
+          <Building2 className="h-4 w-4" />
+          <span className="text-sm">No organization</span>
+        </div>
+      </div>
+    );
   }
 
   // Single org - just show the name without dropdown

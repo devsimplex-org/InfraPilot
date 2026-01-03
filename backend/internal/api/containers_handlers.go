@@ -11,6 +11,9 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+
+	"github.com/infrapilot/backend/internal/enterprise/policy"
 )
 
 // ContainerResponse represents a container in the API response
@@ -107,9 +110,74 @@ func getDockerClient() (*client.Client, error) {
 	return client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 }
 
+// evaluateContainerPolicy checks policies before container actions
+func (h *Handler) evaluateContainerPolicy(c *gin.Context, containerID string, action string) (bool, string) {
+	// Get org ID from context
+	orgIDVal, exists := c.Get("org_id")
+	if !exists {
+		// No org context, skip policy evaluation
+		return false, ""
+	}
+	orgID, ok := orgIDVal.(uuid.UUID)
+	if !ok {
+		return false, ""
+	}
+
+	// Get container details for policy evaluation
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+
+	cli, err := getDockerClient()
+	if err != nil {
+		return false, ""
+	}
+	defer cli.Close()
+
+	inspect, err := cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return false, ""
+	}
+
+	// Build resource for policy evaluation
+	resource := policy.Resource{
+		Type: "container",
+		ID:   containerID,
+		Attributes: map[string]interface{}{
+			"name":       strings.TrimPrefix(inspect.Name, "/"),
+			"image":      inspect.Config.Image,
+			"user":       inspect.Config.User,
+			"privileged": inspect.HostConfig.Privileged,
+			"action":     action,
+			"state":      inspect.State.Status,
+			"labels":     inspect.Config.Labels,
+		},
+	}
+
+	// Evaluate policies
+	evaluator := policy.NewEvaluator(h.db, h.logger)
+	blocked, message, err := evaluator.EvaluateAndBlock(ctx, orgID, resource)
+	if err != nil {
+		h.logger.Warn("Policy evaluation failed",
+			// Log but don't block on evaluation errors
+		)
+		return false, ""
+	}
+
+	return blocked, message
+}
+
 // startContainerReal starts a Docker container
 func (h *Handler) startContainerReal(c *gin.Context) {
 	containerID := c.Param("cid")
+
+	// Check policies before action
+	if blocked, message := h.evaluateContainerPolicy(c, containerID, "start"); blocked {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":   "Action blocked by policy",
+			"message": message,
+		})
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 	defer cancel()
@@ -133,6 +201,15 @@ func (h *Handler) startContainerReal(c *gin.Context) {
 func (h *Handler) stopContainerReal(c *gin.Context) {
 	containerID := c.Param("cid")
 
+	// Check policies before action
+	if blocked, message := h.evaluateContainerPolicy(c, containerID, "stop"); blocked {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":   "Action blocked by policy",
+			"message": message,
+		})
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 	defer cancel()
 
@@ -155,6 +232,15 @@ func (h *Handler) stopContainerReal(c *gin.Context) {
 // restartContainerReal restarts a Docker container
 func (h *Handler) restartContainerReal(c *gin.Context) {
 	containerID := c.Param("cid")
+
+	// Check policies before action
+	if blocked, message := h.evaluateContainerPolicy(c, containerID, "restart"); blocked {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":   "Action blocked by policy",
+			"message": message,
+		})
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 	defer cancel()
