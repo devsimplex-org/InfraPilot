@@ -23,6 +23,7 @@ type ProxyHost struct {
 	ForceSSL       bool   `json:"force_ssl"`
 	HTTP2Enabled   bool   `json:"http2_enabled"`
 	Status         string `json:"status"`
+	IsSystemProxy  bool   `json:"is_system_proxy"`
 }
 
 // ProxySyncer periodically syncs proxy configurations from the backend
@@ -87,6 +88,13 @@ func (s *ProxySyncer) syncProxies(ctx context.Context) {
 
 	for _, proxy := range proxies {
 		if proxy.Status != "active" {
+			continue
+		}
+
+		// Skip system proxies - they are managed by the backend directly
+		if proxy.IsSystemProxy {
+			s.logger.Debug("Skipping system proxy", zap.String("domain", proxy.Domain))
+			seenDomains[proxy.Domain] = true // Still mark as seen to prevent deletion
 			continue
 		}
 

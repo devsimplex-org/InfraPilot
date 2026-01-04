@@ -29,6 +29,7 @@ type ProxyHost struct {
 	HTTP2Enabled   bool       `json:"http2_enabled"`
 	ConfigHash     *string    `json:"config_hash,omitempty"`
 	Status         string     `json:"status"`
+	IsSystemProxy  bool       `json:"is_system_proxy"`
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
 }
@@ -87,7 +88,7 @@ func (h *Handler) listProxyHosts(c *gin.Context) {
 	rows, err := h.db.Query(c.Request.Context(), `
 		SELECT id, agent_id, domain, upstream_target, ssl_enabled, ssl_cert_path,
 		       ssl_key_path, ssl_expires_at, force_ssl, http2_enabled, config_hash,
-		       status, created_at, updated_at
+		       status, is_system_proxy, created_at, updated_at
 		FROM proxy_hosts
 		WHERE agent_id = $1
 		ORDER BY domain ASC
@@ -104,7 +105,7 @@ func (h *Handler) listProxyHosts(c *gin.Context) {
 		if err := rows.Scan(
 			&p.ID, &p.AgentID, &p.Domain, &p.UpstreamTarget, &p.SSLEnabled,
 			&p.SSLCertPath, &p.SSLKeyPath, &p.SSLExpiresAt, &p.ForceSSL,
-			&p.HTTP2Enabled, &p.ConfigHash, &p.Status, &p.CreatedAt, &p.UpdatedAt,
+			&p.HTTP2Enabled, &p.ConfigHash, &p.Status, &p.IsSystemProxy, &p.CreatedAt, &p.UpdatedAt,
 		); err != nil {
 			continue
 		}
