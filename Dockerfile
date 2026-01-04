@@ -72,7 +72,7 @@ RUN pnpm build
 # -------------------------------------------------------------
 # Stage 4: Production Runtime
 # -------------------------------------------------------------
-FROM alpine:3.20
+FROM alpine:3.21
 
 
 
@@ -99,7 +99,7 @@ LABEL org.opencontainers.image.vendor="DevSimplex"
 # Author / maintainer (optional but professional)
 LABEL org.opencontainers.image.authors="DevSimplex <hello@devsimplex.com>"
 # Image version (should match git tag or release)
-LABEL org.opencontainers.image.version="0.1.0"
+LABEL org.opencontainers.image.version="1.0.0"
 # Build creation time (auto-filled during build)
 ARG BUILD_DATE
 LABEL org.opencontainers.image.created=$BUILD_DATE
