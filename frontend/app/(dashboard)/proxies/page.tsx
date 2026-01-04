@@ -120,6 +120,7 @@ export default function ProxiesPage() {
   // SSL Wizard state
   const [showSSLWizard, setShowSSLWizard] = useState(false);
   const [sslWizardDomain, setSSLWizardDomain] = useState("");
+  const [sslWizardProxyId, setSSLWizardProxyId] = useState("");
 
   // Proxy settings panel state
   const [showProxySettings, setShowProxySettings] = useState(false);
@@ -921,6 +922,7 @@ export default function ProxiesPage() {
                       icon={Lock}
                       onClick={() => {
                         setSSLWizardDomain(selectedProxy.domain);
+                        setSSLWizardProxyId(selectedProxy.id);
                         setShowSSLWizard(true);
                       }}
                     >
@@ -938,6 +940,7 @@ export default function ProxiesPage() {
                             icon={RefreshCw}
                             onClick={() => {
                               setSSLWizardDomain(selectedProxy.domain);
+                              setSSLWizardProxyId(selectedProxy.id);
                               setShowSSLWizard(true);
                             }}
                           >
@@ -1761,6 +1764,8 @@ export default function ProxiesPage() {
         domain={sslWizardDomain}
         open={showSSLWizard}
         onOpenChange={setShowSSLWizard}
+        agentId={selectedAgent || undefined}
+        proxyId={sslWizardProxyId || undefined}
         onSuccess={() => {
           queryClient.invalidateQueries({ queryKey: ["proxies", selectedAgent] });
         }}

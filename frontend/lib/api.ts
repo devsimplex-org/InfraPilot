@@ -964,6 +964,23 @@ export const api = {
       method: "POST",
     }),
 
+  applyWildcardSSL: (
+    agentId: string,
+    proxyId: string,
+    data: {
+      ssl_enabled: boolean;
+      force_ssl: boolean;
+      http2_enabled: boolean;
+      ssl_source: SSLSource;
+      ssl_cert_path: string;
+      ssl_key_path: string;
+    }
+  ) =>
+    fetchAPI(`/agents/${agentId}/proxies/${proxyId}/ssl/wildcard`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
   getProxyConfig: (agentId: string, proxyId: string) =>
     fetchAPI<{ domain: string; config: string }>(
       `/agents/${agentId}/proxies/${proxyId}/config`

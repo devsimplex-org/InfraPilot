@@ -28,6 +28,9 @@ interface SSLWizardProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess?: () => void;
+  // For regular proxy hosts (not system domain)
+  agentId?: string;
+  proxyId?: string;
 }
 
 type WizardStep = "check" | "source" | "wildcard" | "dns" | "email" | "request" | "complete";
@@ -37,7 +40,11 @@ export function SSLWizard({
   open,
   onOpenChange,
   onSuccess,
+  agentId,
+  proxyId,
 }: SSLWizardProps) {
+  // Check if this is for a regular proxy (not system domain)
+  const isRegularProxy = !!(agentId && proxyId);
   const [step, setStep] = useState<WizardStep>("check");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -246,18 +253,29 @@ export function SSLWizard({
     setError(null);
     setRequestStatus("pending");
     try {
-      // Update the domain config with the selected certificate
-      // Pass cert paths directly for scanned (unregistered) certificates
-      await api.updateInfraPilotDomain({
-        domain,
-        ssl_enabled: true,
-        force_ssl: true,
-        http2_enabled: true,
-        ssl_source: "wildcard",
-        ssl_certificate_id: selectedCertId,
-        ssl_cert_path: selectedCert.cert_path,
-        ssl_key_path: selectedCert.key_path,
-      });
+      if (isRegularProxy && agentId && proxyId) {
+        // For regular proxy hosts, use the proxy SSL endpoint
+        await api.applyWildcardSSL(agentId, proxyId, {
+          ssl_enabled: true,
+          force_ssl: true,
+          http2_enabled: true,
+          ssl_source: "wildcard",
+          ssl_cert_path: selectedCert.cert_path,
+          ssl_key_path: selectedCert.key_path,
+        });
+      } else {
+        // For system domain (InfraPilot), use the domain settings endpoint
+        await api.updateInfraPilotDomain({
+          domain,
+          ssl_enabled: true,
+          force_ssl: true,
+          http2_enabled: true,
+          ssl_source: "wildcard",
+          ssl_certificate_id: selectedCertId,
+          ssl_cert_path: selectedCert.cert_path,
+          ssl_key_path: selectedCert.key_path,
+        });
+      }
       setRequestStatus("success");
       setResultMessage("SSL certificate applied successfully using wildcard certificate");
       setStep("complete");
