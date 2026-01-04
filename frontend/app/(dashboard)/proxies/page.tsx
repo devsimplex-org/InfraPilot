@@ -258,7 +258,7 @@ export default function ProxiesPage() {
     setCertCheckLoading(true);
     setCertCheckResult(null);
     try {
-      const result = await api.checkDomainSSL(wizardDomain);
+      const result = await api.checkSSL(wizardDomain);
       setCertCheckResult(result);
     } catch {
       setCertCheckResult({ exists: false, error: "Failed to check certificate" });
@@ -1514,7 +1514,7 @@ export default function ProxiesPage() {
                         ? "bg-gray-200 dark:bg-gray-700 text-gray-500"
                         : "bg-green-500 text-white"
                   )}>
-                    {wizardStep === "complete" ? <Check className="h-4 w-4" /> : "2"}
+                    {"2"}
                   </div>
                 </div>
               )}

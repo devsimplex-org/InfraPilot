@@ -18,6 +18,15 @@ const (
 // For community edition, this simply gets the org_id from the users table.
 func (h *Handler) OrgMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Check if this is an internal service call (already has org_id set by AuthMiddleware)
+		if isInternal, exists := c.Get("internal_service"); exists && isInternal.(bool) {
+			// org_id is already set by AuthMiddleware for internal calls
+			if _, orgExists := c.Get(OrgContextKey); orgExists {
+				c.Next()
+				return
+			}
+		}
+
 		// Get user ID from auth context (must be after AuthMiddleware)
 		userID, exists := c.Get("user_id")
 		if !exists {

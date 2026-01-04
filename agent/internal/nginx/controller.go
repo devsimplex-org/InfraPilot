@@ -426,12 +426,13 @@ server {
 {{ if .SSLEnabled }}
 # HTTPS server
 server {
-    listen 443 ssl{{ if .HTTP2Enabled }} http2{{ end }};
-    listen [::]:443 ssl{{ if .HTTP2Enabled }} http2{{ end }};
-    server_name {{ .Domain }};
+    listen 443 ssl;
+    listen [::]:443 ssl;
+{{ if .HTTP2Enabled }}    http2 on;
+{{ end }}    server_name {{ .Domain }};
 
-    ssl_certificate {{ .SSLCertPath }};
-    ssl_certificate_key {{ .SSLKeyPath }};
+    ssl_certificate /etc/letsencrypt/live/{{ .Domain }}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/{{ .Domain }}/privkey.pem;
 
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_prefer_server_ciphers on;

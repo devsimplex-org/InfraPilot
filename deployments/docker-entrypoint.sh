@@ -104,14 +104,9 @@ if [ "$EMBEDDED_DB" = "true" ]; then
         su-exec postgres psql -h /run/postgresql -c "CREATE DATABASE $POSTGRES_DB OWNER $POSTGRES_USER;" || true
         su-exec postgres psql -h /run/postgresql -c "GRANT ALL PRIVILEGES ON DATABASE $POSTGRES_DB TO $POSTGRES_USER;" || true
 
-        # Run migrations
-        echo "[*] Running database migrations..."
-        for migration in /app/backend/migrations/*.sql; do
-            if [ -f "$migration" ]; then
-                echo "  - Running $(basename $migration)..."
-                su-exec postgres psql -h /run/postgresql -d "$POSTGRES_DB" -f "$migration" 2>/dev/null || true
-            fi
-        done
+        # Note: Migrations are now handled by the backend service on startup
+        # This ensures proper tracking in schema_migrations table
+        echo "[*] Database initialized - migrations will run on backend startup"
 
         # Stop PostgreSQL (supervisor will start it)
         su-exec postgres pg_ctl -D "$DATA_DIR/postgres" stop -w -t 60
