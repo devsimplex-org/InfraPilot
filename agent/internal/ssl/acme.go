@@ -316,17 +316,6 @@ func (m *CertManager) saveAccount(user *User) error {
 	return nil
 }
 
-// RenewCertificate renews an existing certificate for a domain
-func (m *CertManager) RenewCertificate(domain string) error {
-	// Check if certificate exists
-	if !m.CertificateExists(domain) {
-		return fmt.Errorf("no existing certificate found for %s", domain)
-	}
-
-	// Simply request a new certificate - Let's Encrypt handles renewal
-	return m.RequestCertificate(domain)
-}
-
 // CertificateInfo contains information about a certificate
 type CertificateInfo struct {
 	Domain    string    `json:"domain"`
