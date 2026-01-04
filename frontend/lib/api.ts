@@ -380,6 +380,56 @@ export interface SystemHealth {
   cpu_cores: number;
 }
 
+// SSL/Certificate types
+export interface SSLCertificateInfo {
+  exists: boolean;
+  domain: string;
+  issuer?: string;
+  subject?: string;
+  expires_at?: string;
+  days_left?: number;
+  is_wildcard?: boolean;
+  valid_for_domain: boolean;
+  error?: string;
+  sans?: string[];
+}
+
+export interface SSLStatus {
+  letsencrypt_email: string;
+  letsencrypt_staging: boolean;
+  account_configured: boolean;
+  cert_directory: string;
+}
+
+export interface SSLRequestOptions {
+  domain: string;
+  email?: string;
+  dns_provider?: string;
+  staging?: boolean;
+  force_renew?: boolean;
+}
+
+export interface DNSInstructions {
+  domain: string;
+  server_ip: string;
+  records: Array<{
+    type: string;
+    name: string;
+    value: string;
+    ttl: number;
+  }>;
+  instructions: string;
+}
+
+export interface DNSVerifyResult {
+  domain: string;
+  configured: boolean;
+  resolved_ips: string[];
+  expected_ip: string;
+  matches: boolean;
+  error?: string;
+}
+
 // Setup types
 export interface SetupStatusResponse {
   setup_required: boolean;
@@ -401,6 +451,23 @@ export interface InfraPilotDomainSettings {
   http2_enabled: boolean;
   proxy_host_id?: string;
   status?: string;
+}
+
+// Default Pages types
+export type DefaultPageType = "welcome" | "404" | "500" | "502" | "503" | "maintenance";
+
+export interface DefaultPage {
+  id?: string;
+  org_id?: string;
+  page_type: DefaultPageType;
+  enabled: boolean;
+  title: string;
+  heading: string;
+  message: string;
+  show_logo: boolean;
+  custom_css?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 // SSO types
@@ -1155,6 +1222,58 @@ export const api = {
     fetchAPI<{ message: string }>("/settings/domain", {
       method: "DELETE",
     }),
+
+  // SSL/TLS Certificate Management
+  checkSSL: (domain: string, remote: boolean = false) =>
+    fetchAPI<SSLCertificateInfo>(`/ssl/check/${encodeURIComponent(domain)}${remote ? '?remote=true' : ''}`),
+
+  checkWildcardSSL: (domain: string) =>
+    fetchAPI<{ domain: string; certificates: SSLCertificateInfo[] }>(
+      `/ssl/check-wildcard/${encodeURIComponent(domain)}`
+    ),
+
+  getSSLStatus: () =>
+    fetchAPI<SSLStatus>("/ssl/status"),
+
+  updateSSLSettings: (data: { email: string; staging: boolean }) =>
+    fetchAPI<{ email: string; staging: boolean; message: string }>("/ssl/settings", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  requestSSLCertificate: (options: SSLRequestOptions) =>
+    fetchAPI<{
+      message: string;
+      domain: string;
+      email: string;
+      staging: boolean;
+      status: string;
+    }>("/ssl/request", {
+      method: "POST",
+      body: JSON.stringify(options),
+    }),
+
+  getDNSInstructions: (domain: string) =>
+    fetchAPI<DNSInstructions>(`/ssl/dns-instructions/${encodeURIComponent(domain)}`),
+
+  verifyDNS: (domain: string) =>
+    fetchAPI<DNSVerifyResult>(`/ssl/verify-dns/${encodeURIComponent(domain)}`),
+
+  // Default Pages
+  getDefaultPages: () =>
+    fetchAPI<DefaultPage[]>("/settings/default-pages"),
+
+  getDefaultPage: (pageType: string) =>
+    fetchAPI<DefaultPage>(`/settings/default-pages/${pageType}`),
+
+  updateDefaultPage: (pageType: string, data: Partial<DefaultPage>) =>
+    fetchAPI<DefaultPage>(`/settings/default-pages/${pageType}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  previewDefaultPage: (pageType: string) =>
+    fetchAPI<{ html: string }>(`/settings/default-pages/${pageType}/preview`),
 
   // Nginx Management
   testNginxConfig: (agentId: string) =>

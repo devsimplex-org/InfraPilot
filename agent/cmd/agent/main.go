@@ -480,6 +480,8 @@ func (h *CommandHandler) HandleCommand(ctx context.Context, cmd *agentgrpc.Backe
 		return h.handleNetworkCommand(ctx, cmd)
 	case "docker":
 		return h.handleDockerCommand(ctx, cmd)
+	case "ssl":
+		return h.handleSSLCommand(ctx, cmd)
 	default:
 		h.logger.Warn("Unknown command type", zap.String("type", cmd.Type))
 		return &agentgrpc.CommandResult{
@@ -710,6 +712,113 @@ func (h *CommandHandler) handleNetworkCommand(ctx context.Context, cmd *agentgrp
 		return &agentgrpc.CommandResult{
 			Success: false,
 			Message: fmt.Sprintf("unknown network action: %s", netCmd.Action),
+		}
+	}
+}
+
+// SSLCommand represents an SSL-related command from the backend
+type SSLCommand struct {
+	Action      string `json:"action"`       // request_cert, renew_cert, check_cert, revoke_cert
+	Domain      string `json:"domain"`
+	Email       string `json:"email,omitempty"`
+	DNSProvider string `json:"dns_provider,omitempty"`
+	Staging     bool   `json:"staging,omitempty"`
+	ForceRenew  bool   `json:"force_renew,omitempty"`
+}
+
+func (h *CommandHandler) handleSSLCommand(ctx context.Context, cmd *agentgrpc.BackendMessage) *agentgrpc.CommandResult {
+	var sslCmd SSLCommand
+	if err := json.Unmarshal(cmd.Command, &sslCmd); err != nil {
+		return &agentgrpc.CommandResult{
+			Success: false,
+			Message: fmt.Sprintf("failed to parse ssl command: %v", err),
+		}
+	}
+
+	h.logger.Info("Handling SSL command",
+		zap.String("action", sslCmd.Action),
+		zap.String("domain", sslCmd.Domain),
+	)
+
+	// Check if cert manager is initialized
+	if h.certManager == nil {
+		return &agentgrpc.CommandResult{
+			Success: false,
+			Message: "SSL certificate manager not initialized",
+		}
+	}
+
+	switch sslCmd.Action {
+	case "request_cert":
+		// Update cert manager config if email/staging provided
+		if sslCmd.Email != "" {
+			h.certManager.Email = sslCmd.Email
+		}
+		h.certManager.Staging = sslCmd.Staging
+
+		// Request the certificate
+		if err := h.certManager.RequestCertificate(sslCmd.Domain); err != nil {
+			h.logger.Error("Failed to request certificate",
+				zap.String("domain", sslCmd.Domain),
+				zap.Error(err),
+			)
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("failed to request certificate: %v", err),
+			}
+		}
+
+		// Reload nginx to pick up the new certificate
+		if h.nginx != nil {
+			if err := h.nginx.Reload(ctx); err != nil {
+				h.logger.Warn("Failed to reload nginx after certificate request", zap.Error(err))
+			}
+		}
+
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: fmt.Sprintf("SSL certificate requested for %s", sslCmd.Domain),
+		}
+
+	case "renew_cert":
+		if err := h.certManager.RenewCertificate(sslCmd.Domain); err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("failed to renew certificate: %v", err),
+			}
+		}
+
+		// Reload nginx to pick up the renewed certificate
+		if h.nginx != nil {
+			if err := h.nginx.Reload(ctx); err != nil {
+				h.logger.Warn("Failed to reload nginx after certificate renewal", zap.Error(err))
+			}
+		}
+
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: fmt.Sprintf("SSL certificate renewed for %s", sslCmd.Domain),
+		}
+
+	case "check_cert":
+		info, err := h.certManager.GetCertificateInfo(sslCmd.Domain)
+		if err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("failed to check certificate: %v", err),
+			}
+		}
+		data, _ := json.Marshal(info)
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: "certificate info retrieved",
+			Data:    data,
+		}
+
+	default:
+		return &agentgrpc.CommandResult{
+			Success: false,
+			Message: fmt.Sprintf("unknown ssl action: %s", sslCmd.Action),
 		}
 	}
 }

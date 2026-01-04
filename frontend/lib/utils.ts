@@ -71,3 +71,17 @@ export function getStatusBadgeColor(status: string): string {
       return "bg-gray-500/10 text-gray-400 border-gray-500/30";
   }
 }
+
+export function isIPAddress(hostname: string): boolean {
+  // IPv4 pattern: 1-3 digits separated by dots
+  const ipv4Pattern = /^(\d{1,3}\.){3}\d{1,3}$/;
+  // IPv6 pattern: hex digits separated by colons (simplified)
+  const ipv6Pattern = /^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$/;
+  // Also check for localhost
+  return (
+    ipv4Pattern.test(hostname) ||
+    ipv6Pattern.test(hostname) ||
+    hostname === "localhost" ||
+    hostname === "[::1]"
+  );
+}

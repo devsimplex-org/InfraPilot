@@ -299,15 +299,14 @@ func (h *Handler) dispatchInfraPilotProxyConfig(ctx interface{}, agentID, proxyI
 	configPath := filepath.Join("/etc/nginx/sites", domain+".conf")
 
 	// Create command with config content
-	cmdPayload, _ := json.Marshal(agentgrpc.NginxCommand{
-		Action:        agentgrpc.NginxActionWriteConfig,
-		ConfigContent: config,
-		ConfigPath:    configPath,
-	})
-
 	cmd := &agentgrpc.BackendMessage{
 		RequestId: uuid.New().String(),
-		Command:   cmdPayload,
+		Type:      "nginx",
+		Command: agentgrpc.NginxCommand{
+			Action:        agentgrpc.NginxActionWriteConfig,
+			ConfigContent: config,
+			ConfigPath:    configPath,
+		},
 	}
 
 	// Send command
@@ -385,10 +384,10 @@ func generateInfraPilotNginxConfig(domain string, forceSSL, http2, sslEnabled bo
 
 // writeInfraPilotLocations writes the location blocks for InfraPilot
 func writeInfraPilotLocations(config *strings.Builder) {
-	// API routes to backend
+	// API routes to backend (uses upstream defined in default.conf)
 	config.WriteString("    # API routes to backend\n")
 	config.WriteString("    location /api/ {\n")
-	config.WriteString("        proxy_pass http://backend:8080;\n")
+	config.WriteString("        proxy_pass http://backend;\n")
 	config.WriteString("        proxy_http_version 1.1;\n")
 	config.WriteString("        proxy_set_header Host $host;\n")
 	config.WriteString("        proxy_set_header X-Real-IP $remote_addr;\n")
@@ -402,15 +401,15 @@ func writeInfraPilotLocations(config *strings.Builder) {
 
 	// Health check endpoint
 	config.WriteString("    location = /health {\n")
-	config.WriteString("        proxy_pass http://backend:8080/health;\n")
+	config.WriteString("        proxy_pass http://backend/health;\n")
 	config.WriteString("        proxy_http_version 1.1;\n")
 	config.WriteString("        proxy_set_header Host $host;\n")
 	config.WriteString("    }\n\n")
 
-	// Frontend (everything else)
+	// Frontend (everything else) (uses upstream defined in default.conf)
 	config.WriteString("    # Frontend\n")
 	config.WriteString("    location / {\n")
-	config.WriteString("        proxy_pass http://frontend:3000;\n")
+	config.WriteString("        proxy_pass http://frontend;\n")
 	config.WriteString("        proxy_http_version 1.1;\n")
 	config.WriteString("        proxy_set_header Host $host;\n")
 	config.WriteString("        proxy_set_header X-Real-IP $remote_addr;\n")

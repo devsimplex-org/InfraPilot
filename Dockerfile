@@ -126,6 +126,7 @@ RUN apk add --no-cache \
     redis \
     curl \
     su-exec \
+    apache2-utils \
     && rm -rf /var/cache/apk/*
 
 # Create directories

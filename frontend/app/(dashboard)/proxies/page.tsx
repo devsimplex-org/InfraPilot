@@ -27,6 +27,8 @@ import {
 } from "lucide-react";
 import { api, Container, SecurityHeaders, RateLimit } from "@/lib/api";
 import { formatRelativeTime, cn } from "@/lib/utils";
+import { AlertBar } from "@/components/ui/alert-bar";
+import { SSLWizard } from "@/components/ssl-wizard";
 import {
   PageLayout,
   ListCard,
@@ -115,6 +117,10 @@ export default function ProxiesPage() {
   const [configContent, setConfigContent] = useState<string>("");
   const [configLoading, setConfigLoading] = useState(false);
 
+  // SSL Wizard state
+  const [showSSLWizard, setShowSSLWizard] = useState(false);
+  const [sslWizardDomain, setSSLWizardDomain] = useState("");
+
   // Proxy settings panel state
   const [showProxySettings, setShowProxySettings] = useState(false);
   const [domainInput, setDomainInput] = useState("");
@@ -122,6 +128,23 @@ export default function ProxiesPage() {
   const [forceSSL, setForceSSL] = useState(true);
   const [http2Enabled, setHTTP2Enabled] = useState(true);
   const [domainHasChanges, setDomainHasChanges] = useState(false);
+
+  // Domain setup wizard state
+  type WizardStep = "domain" | "ssl" | "complete";
+  const [showDomainWizard, setShowDomainWizard] = useState(false);
+  const [wizardStep, setWizardStep] = useState<WizardStep>("domain");
+  const [wizardDomain, setWizardDomain] = useState("");
+  const [wizardSSLEnabled, setWizardSSLEnabled] = useState(true);
+  const [wizardForceSSL, setWizardForceSSL] = useState(true);
+  const [wizardHTTP2, setWizardHTTP2] = useState(true);
+  const [certCheckLoading, setCertCheckLoading] = useState(false);
+  const [certCheckResult, setCertCheckResult] = useState<{
+    exists: boolean;
+    expires_at?: string;
+    issuer?: string;
+    days_left?: number;
+    error?: string;
+  } | null>(null);
 
   // Fetch agents
   const { data: agents } = useQuery({
@@ -197,6 +220,52 @@ export default function ProxiesPage() {
       setDomainHasChanges(false);
     },
   });
+
+  // Wizard save mutation
+  const wizardSaveMutation = useMutation({
+    mutationFn: () =>
+      api.updateInfraPilotDomain({
+        domain: wizardDomain,
+        ssl_enabled: wizardSSLEnabled,
+        force_ssl: wizardForceSSL,
+        http2_enabled: wizardHTTP2,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["infrapilotDomain"] });
+      setWizardStep("complete");
+    },
+  });
+
+  // Wizard helper functions
+  const openDomainWizard = () => {
+    setWizardDomain(domainSettings?.domain || "");
+    setWizardSSLEnabled(domainSettings?.ssl_enabled ?? true);
+    setWizardForceSSL(domainSettings?.force_ssl ?? true);
+    setWizardHTTP2(domainSettings?.http2_enabled ?? true);
+    setWizardStep("domain");
+    setCertCheckResult(null);
+    setShowDomainWizard(true);
+  };
+
+  const closeDomainWizard = () => {
+    setShowDomainWizard(false);
+    setWizardStep("domain");
+    setCertCheckResult(null);
+  };
+
+  const checkSSLCertificate = async () => {
+    if (!wizardDomain) return;
+    setCertCheckLoading(true);
+    setCertCheckResult(null);
+    try {
+      const result = await api.checkDomainSSL(wizardDomain);
+      setCertCheckResult(result);
+    } catch {
+      setCertCheckResult({ exists: false, error: "Failed to check certificate" });
+    } finally {
+      setCertCheckLoading(false);
+    }
+  };
 
   // Nginx test mutation
   const nginxTestMutation = useMutation({
@@ -833,7 +902,7 @@ export default function ProxiesPage() {
                         : "SSL Not Enabled"}
                     </span>
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2 mb-3">
                     {selectedProxy.force_ssl && (
                       <span className="px-2 py-1 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-lg">
                         Force SSL
@@ -845,6 +914,40 @@ export default function ProxiesPage() {
                       </span>
                     )}
                   </div>
+                  {!selectedProxy.ssl_enabled && selectedProxy.status !== "ssl_pending" && (
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      icon={Lock}
+                      onClick={() => {
+                        setSSLWizardDomain(selectedProxy.domain);
+                        setShowSSLWizard(true);
+                      }}
+                    >
+                      Setup SSL Certificate
+                    </Button>
+                  )}
+                  {selectedProxy.ssl_enabled && selectedProxy.ssl_expires_at && (
+                    (() => {
+                      const daysLeft = Math.ceil((new Date(selectedProxy.ssl_expires_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                      if (daysLeft < 30) {
+                        return (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            icon={RefreshCw}
+                            onClick={() => {
+                              setSSLWizardDomain(selectedProxy.domain);
+                              setShowSSLWizard(true);
+                            }}
+                          >
+                            Renew Certificate
+                          </Button>
+                        );
+                      }
+                      return null;
+                    })()
+                  )}
                 </DetailSection>
               </>
             )}
@@ -936,10 +1039,19 @@ export default function ProxiesPage() {
           <div className="mt-4 p-4 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 space-y-6">
             {/* InfraPilot Domain */}
             <div>
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
-                <Globe className="h-4 w-4 text-blue-400" />
-                InfraPilot Domain
-              </h3>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                  <Globe className="h-4 w-4 text-blue-400" />
+                  InfraPilot Domain
+                </h3>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={openDomainWizard}
+                >
+                  {domainSettings?.domain ? "Edit Domain" : "Set Up Domain"}
+                </Button>
+              </div>
               {domainLoading ? (
                 <div className="flex items-center justify-center py-4">
                   <Loader2 className="h-5 w-5 text-gray-400 animate-spin" />
@@ -1360,6 +1472,299 @@ export default function ProxiesPage() {
           </div>
         </div>
       )}
+
+      {/* Domain Setup Wizard Modal */}
+      {showDomainWizard && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
+            {/* Header */}
+            <div className="p-6 border-b border-gray-200 dark:border-gray-800">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                  {wizardStep === "complete" ? "Setup Complete" : "Set Up Domain"}
+                </h2>
+                <button
+                  onClick={closeDomainWizard}
+                  className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              {wizardStep !== "complete" && (
+                <div className="flex items-center gap-2 mt-4">
+                  <div className={cn(
+                    "flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium",
+                    wizardStep === "domain"
+                      ? "bg-primary-600 text-white"
+                      : "bg-green-500 text-white"
+                  )}>
+                    {wizardStep === "domain" ? "1" : <Check className="h-4 w-4" />}
+                  </div>
+                  <div className="h-0.5 flex-1 bg-gray-200 dark:bg-gray-700">
+                    <div className={cn(
+                      "h-full bg-primary-600 transition-all",
+                      wizardStep !== "domain" ? "w-full" : "w-0"
+                    )} />
+                  </div>
+                  <div className={cn(
+                    "flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium",
+                    wizardStep === "ssl"
+                      ? "bg-primary-600 text-white"
+                      : wizardStep === "domain"
+                        ? "bg-gray-200 dark:bg-gray-700 text-gray-500"
+                        : "bg-green-500 text-white"
+                  )}>
+                    {wizardStep === "complete" ? <Check className="h-4 w-4" /> : "2"}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Content */}
+            <div className="p-6">
+              {wizardStep === "domain" && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Domain Name
+                    </label>
+                    <input
+                      type="text"
+                      value={wizardDomain}
+                      onChange={(e) => setWizardDomain(e.target.value)}
+                      placeholder="infrapilot.example.com"
+                      className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    />
+                    <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                      Enter the domain you want to use to access InfraPilot. Make sure DNS is pointing to this server.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {wizardStep === "ssl" && (
+                <div className="space-y-6">
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                      Domain: <span className="text-gray-900 dark:text-white">{wizardDomain}</span>
+                    </h3>
+                  </div>
+
+                  {/* SSL Options */}
+                  <div className="space-y-3">
+                    <label className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={wizardSSLEnabled}
+                        onChange={(e) => setWizardSSLEnabled(e.target.checked)}
+                        className="w-5 h-5 rounded"
+                      />
+                      <div>
+                        <span className="font-medium text-gray-900 dark:text-white">Enable SSL/HTTPS</span>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">Secure your connection with HTTPS</p>
+                      </div>
+                    </label>
+
+                    {wizardSSLEnabled && (
+                      <>
+                        <label className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg cursor-pointer ml-4">
+                          <input
+                            type="checkbox"
+                            checked={wizardForceSSL}
+                            onChange={(e) => setWizardForceSSL(e.target.checked)}
+                            className="w-5 h-5 rounded"
+                          />
+                          <div>
+                            <span className="font-medium text-gray-900 dark:text-white">Force HTTPS</span>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">Redirect HTTP to HTTPS</p>
+                          </div>
+                        </label>
+
+                        <label className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg cursor-pointer ml-4">
+                          <input
+                            type="checkbox"
+                            checked={wizardHTTP2}
+                            onChange={(e) => setWizardHTTP2(e.target.checked)}
+                            className="w-5 h-5 rounded"
+                          />
+                          <div>
+                            <span className="font-medium text-gray-900 dark:text-white">Enable HTTP/2</span>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">Faster page loads with HTTP/2</p>
+                          </div>
+                        </label>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Certificate Check */}
+                  {wizardSSLEnabled && (
+                    <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                          SSL Certificate Status
+                        </h4>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={checkSSLCertificate}
+                            disabled={certCheckLoading}
+                          >
+                            {certCheckLoading ? "Checking..." : "Check Certificate"}
+                          </Button>
+                        </div>
+                      </div>
+
+                      {certCheckResult && (
+                        <div className={cn(
+                          "p-3 rounded-lg text-sm",
+                          certCheckResult.exists
+                            ? "bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800"
+                            : "bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-400 border border-yellow-200 dark:border-yellow-800"
+                        )}>
+                          {certCheckResult.exists ? (
+                            <div className="flex items-start gap-2">
+                              <ShieldCheck className="h-5 w-5 flex-shrink-0 mt-0.5" />
+                              <div>
+                                <p className="font-medium">Certificate found</p>
+                                <p className="text-xs mt-1">
+                                  Issuer: {certCheckResult.issuer || "Unknown"} |
+                                  Expires in: {certCheckResult.days_left} days
+                                </p>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex items-start gap-2">
+                              <ShieldAlert className="h-5 w-5 flex-shrink-0 mt-0.5" />
+                              <div>
+                                <p className="font-medium">No certificate found</p>
+                                <p className="text-xs mt-1">
+                                  {certCheckResult.error || "You'll need to set up an SSL certificate."}
+                                </p>
+                                <Button
+                                  variant="primary"
+                                  size="sm"
+                                  icon={Lock}
+                                  className="mt-2"
+                                  onClick={() => {
+                                    setSSLWizardDomain(wizardDomain);
+                                    setShowSSLWizard(true);
+                                  }}
+                                >
+                                  Setup SSL with Let's Encrypt
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {!certCheckResult && (
+                        <div className="space-y-2">
+                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                            Click "Check Certificate" to see if SSL is already configured for this domain.
+                          </p>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            icon={Lock}
+                            onClick={() => {
+                              setSSLWizardDomain(wizardDomain);
+                              setShowSSLWizard(true);
+                            }}
+                          >
+                            Setup SSL with Let's Encrypt
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {wizardStep === "complete" && (
+                <div className="text-center py-4">
+                  <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Check className="h-8 w-8 text-green-600 dark:text-green-400" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+                    Domain Configured Successfully
+                  </h3>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                    Your InfraPilot instance is now accessible at:
+                  </p>
+                  <a
+                    href={`${wizardSSLEnabled ? "https" : "http"}://${wizardDomain}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 text-primary-600 dark:text-primary-400 hover:underline"
+                  >
+                    {wizardSSLEnabled ? "https" : "http"}://{wizardDomain}
+                    <ExternalLink className="h-4 w-4" />
+                  </a>
+                  {wizardSSLEnabled && !certCheckResult?.exists && (
+                    <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                      <p className="text-xs text-blue-700 dark:text-blue-400">
+                        SSL certificate will be automatically requested. This may take a few minutes.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-6 border-t border-gray-200 dark:border-gray-800 flex justify-between">
+              {wizardStep === "domain" && (
+                <>
+                  <Button variant="ghost" onClick={closeDomainWizard}>
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="primary"
+                    onClick={() => setWizardStep("ssl")}
+                    disabled={!wizardDomain.trim()}
+                  >
+                    Next
+                    <ChevronRight className="h-4 w-4 ml-1" />
+                  </Button>
+                </>
+              )}
+
+              {wizardStep === "ssl" && (
+                <>
+                  <Button variant="ghost" onClick={() => setWizardStep("domain")}>
+                    Back
+                  </Button>
+                  <Button
+                    variant="primary"
+                    onClick={() => wizardSaveMutation.mutate()}
+                    disabled={wizardSaveMutation.isPending}
+                  >
+                    {wizardSaveMutation.isPending ? "Saving..." : "Complete Setup"}
+                  </Button>
+                </>
+              )}
+
+              {wizardStep === "complete" && (
+                <Button variant="primary" onClick={closeDomainWizard} className="ml-auto">
+                  Done
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SSL Certificate Wizard */}
+      <SSLWizard
+        domain={sslWizardDomain}
+        open={showSSLWizard}
+        onOpenChange={setShowSSLWizard}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ["proxies", selectedAgent] });
+        }}
+      />
     </PageLayout>
   );
 }

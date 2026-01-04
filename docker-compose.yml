@@ -48,6 +48,10 @@ services:
       LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL:-}
       LETSENCRYPT_STAGING: ${LETSENCRYPT_STAGING:-true}
 
+      # Basic Auth (optional - set both to enable)
+      BASIC_AUTH_USER: ${BASIC_AUTH_USER:-}
+      BASIC_AUTH_PASSWORD: ${BASIC_AUTH_PASSWORD:-}
+
       # CORS origins
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost,https://localhost}
     volumes:

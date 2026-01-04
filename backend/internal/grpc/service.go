@@ -574,3 +574,76 @@ func IsAgentConnected(agentID string) bool {
 	_, ok := connectedAgents.Load(agentID)
 	return ok
 }
+
+// ============ SSL Commands ============
+
+// SSL Command actions
+const (
+	SSLActionCheckCert   = "check_cert"
+	SSLActionRequestCert = "request_cert"
+	SSLActionRenewCert   = "renew_cert"
+	SSLActionRevokeCert  = "revoke_cert"
+)
+
+// SSLCommand represents an SSL-related command
+type SSLCommand struct {
+	Action      string `json:"action"`
+	Domain      string `json:"domain"`
+	Email       string `json:"email,omitempty"`
+	DNSProvider string `json:"dns_provider,omitempty"`
+	Staging     bool   `json:"staging,omitempty"`
+	ForceRenew  bool   `json:"force_renew,omitempty"`
+}
+
+// SSLCheckResult represents the result of an SSL check
+type SSLCheckResult struct {
+	Exists         bool      `json:"exists"`
+	Domain         string    `json:"domain"`
+	Issuer         string    `json:"issuer,omitempty"`
+	ExpiresAt      time.Time `json:"expires_at,omitempty"`
+	DaysLeft       int       `json:"days_left,omitempty"`
+	ValidForDomain bool      `json:"valid_for_domain"`
+	IsWildcard     bool      `json:"is_wildcard,omitempty"`
+	SANs           []string  `json:"sans,omitempty"`
+	Error          string    `json:"error,omitempty"`
+}
+
+// NewSSLCheckCommand creates a command to check SSL certificate status
+func NewSSLCheckCommand(domain string) *BackendMessage {
+	return &BackendMessage{
+		RequestId: uuid.New().String(),
+		Type:      "ssl",
+		Command: SSLCommand{
+			Action: SSLActionCheckCert,
+			Domain: domain,
+		},
+	}
+}
+
+// NewSSLRequestCommand creates a command to request an SSL certificate
+func NewSSLRequestCommand(domain, email, dnsProvider string, staging bool) *BackendMessage {
+	return &BackendMessage{
+		RequestId: uuid.New().String(),
+		Type:      "ssl",
+		Command: SSLCommand{
+			Action:      SSLActionRequestCert,
+			Domain:      domain,
+			Email:       email,
+			DNSProvider: dnsProvider,
+			Staging:     staging,
+		},
+	}
+}
+
+// NewSSLRenewCommand creates a command to renew an SSL certificate
+func NewSSLRenewCommand(domain string, forceRenew bool) *BackendMessage {
+	return &BackendMessage{
+		RequestId: uuid.New().String(),
+		Type:      "ssl",
+		Command: SSLCommand{
+			Action:     SSLActionRenewCert,
+			Domain:     domain,
+			ForceRenew: forceRenew,
+		},
+	}
+}

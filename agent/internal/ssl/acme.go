@@ -315,3 +315,72 @@ func (m *CertManager) saveAccount(user *User) error {
 	m.logger.Info("Saved ACME account", zap.String("email", user.Email))
 	return nil
 }
+
+// RenewCertificate renews an existing certificate for a domain
+func (m *CertManager) RenewCertificate(domain string) error {
+	// Check if certificate exists
+	if !m.CertificateExists(domain) {
+		return fmt.Errorf("no existing certificate found for %s", domain)
+	}
+
+	// Simply request a new certificate - Let's Encrypt handles renewal
+	return m.RequestCertificate(domain)
+}
+
+// CertificateInfo contains information about a certificate
+type CertificateInfo struct {
+	Domain    string    `json:"domain"`
+	Exists    bool      `json:"exists"`
+	ExpiresAt time.Time `json:"expires_at,omitempty"`
+	DaysLeft  int       `json:"days_left,omitempty"`
+	Issuer    string    `json:"issuer,omitempty"`
+	IsStaging bool      `json:"is_staging,omitempty"`
+}
+
+// GetCertificateInfo retrieves information about a domain's certificate
+func (m *CertManager) GetCertificateInfo(domain string) (*CertificateInfo, error) {
+	info := &CertificateInfo{
+		Domain: domain,
+		Exists: false,
+	}
+
+	if !m.CertificateExists(domain) {
+		return info, nil
+	}
+
+	info.Exists = true
+
+	// Read certificate
+	certPath := filepath.Join(m.getCertPath(domain), "fullchain.pem")
+	certPEM, err := os.ReadFile(certPath)
+	if err != nil {
+		return info, fmt.Errorf("failed to read certificate: %w", err)
+	}
+
+	// Parse certificate
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		return info, fmt.Errorf("failed to decode certificate PEM")
+	}
+
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return info, fmt.Errorf("failed to parse certificate: %w", err)
+	}
+
+	info.ExpiresAt = cert.NotAfter
+	info.DaysLeft = int(time.Until(cert.NotAfter).Hours() / 24)
+	info.Issuer = cert.Issuer.CommonName
+
+	// Check if it's a staging certificate
+	if cert.Issuer.Organization != nil && len(cert.Issuer.Organization) > 0 {
+		for _, org := range cert.Issuer.Organization {
+			if org == "(STAGING) Let's Encrypt" {
+				info.IsStaging = true
+				break
+			}
+		}
+	}
+
+	return info, nil
+}

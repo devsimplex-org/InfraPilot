@@ -160,6 +160,24 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				settings.GET("/domain", h.getInfraPilotDomain)
 				settings.PUT("/domain", h.updateInfraPilotDomain)
 				settings.DELETE("/domain", h.deleteInfraPilotDomain)
+
+				// Default pages
+				settings.GET("/default-pages", h.listDefaultPages)
+				settings.GET("/default-pages/:type", h.getDefaultPage)
+				settings.PUT("/default-pages/:type", h.updateDefaultPage)
+				settings.GET("/default-pages/:type/preview", h.previewDefaultPage)
+			}
+
+			// SSL/TLS Management
+			ssl := protected.Group("/ssl")
+			{
+				ssl.GET("/check/:domain", h.checkDomainSSL)
+				ssl.GET("/check-wildcard/:domain", h.checkWildcardSSL)
+				ssl.GET("/verify-dns/:domain", h.verifyDNS)
+				ssl.GET("/dns-instructions/:domain", h.getDNSInstructions)
+				ssl.GET("/status", h.getSSLStatus)
+				ssl.PUT("/settings", h.RequireRole(auth.RoleSuperAdmin), h.updateSSLSettings)
+				ssl.POST("/request", h.RequireRole(auth.RoleSuperAdmin), h.requestSSLCertificate)
 			}
 		}
 
