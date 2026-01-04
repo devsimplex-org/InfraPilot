@@ -37,9 +37,21 @@ func main() {
 		logger.Fatal("Failed to load config", zap.Error(err))
 	}
 
-	// Connect to PostgreSQL
+	// Connect to PostgreSQL with connection pool configuration
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	poolConfig, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	if err != nil {
+		logger.Fatal("Failed to parse database URL", zap.Error(err))
+	}
+
+	// Configure connection pool limits to prevent exhaustion
+	poolConfig.MaxConns = 20                      // Max connections (leave room for other clients)
+	poolConfig.MinConns = 2                       // Keep some connections warm
+	poolConfig.MaxConnLifetime = 30 * time.Minute // Recycle connections periodically
+	poolConfig.MaxConnIdleTime = 5 * time.Minute  // Close idle connections
+	poolConfig.HealthCheckPeriod = time.Minute    // Check connection health
+
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
 		logger.Fatal("Failed to connect to database", zap.Error(err))
 	}

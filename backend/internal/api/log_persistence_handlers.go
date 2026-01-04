@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -119,10 +121,18 @@ func (h *Handler) IngestLogs(c *gin.Context) {
 	// Track stats
 	var errorCount, warnCount, infoCount, debugCount int64
 	var totalBytes int64
-	var insertedCount int
 
-	// Insert logs individually (no transaction - each insert is independent)
-	// This prevents one failed insert from aborting all subsequent inserts
+	// Use a background context for the database operation to avoid context cancellation
+	// when client disconnects mid-request (we still want to save the logs)
+	dbCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Prepare batch insert - much more efficient than individual inserts
+	// Build VALUES clause with placeholders
+	valueStrings := make([]string, 0, len(batch.Entries))
+	valueArgs := make([]any, 0, len(batch.Entries)*10)
+	argNum := 1
+
 	for _, entry := range batch.Entries {
 		// Default values
 		if entry.Stream == "" {
@@ -138,17 +148,13 @@ func (h *Handler) IngestLogs(c *gin.Context) {
 			entry.Timestamp = time.Now()
 		}
 
-		_, err = h.db.Exec(c.Request.Context(), `
-			INSERT INTO centralized_logs (org_id, agent_id, source, source_type, stream, level, message, log_timestamp, labels, metadata)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-		`, orgID, agentID, entry.Source, entry.SourceType, entry.Stream, entry.Level, entry.Message, entry.Timestamp, entry.Labels, entry.Metadata)
+		// Sanitize message - remove null bytes that PostgreSQL rejects
+		message := strings.ReplaceAll(entry.Message, "\x00", "")
 
-		if err != nil {
-			h.logger.Error("Failed to insert log entry", zap.Error(err))
-			continue
-		}
-
-		insertedCount++
+		// Build placeholder string for this row
+		valueStrings = append(valueStrings, "($"+strconv.Itoa(argNum)+", $"+strconv.Itoa(argNum+1)+", $"+strconv.Itoa(argNum+2)+", $"+strconv.Itoa(argNum+3)+", $"+strconv.Itoa(argNum+4)+", $"+strconv.Itoa(argNum+5)+", $"+strconv.Itoa(argNum+6)+", $"+strconv.Itoa(argNum+7)+", $"+strconv.Itoa(argNum+8)+", $"+strconv.Itoa(argNum+9)+")")
+		valueArgs = append(valueArgs, orgID, agentID, entry.Source, entry.SourceType, entry.Stream, entry.Level, message, entry.Timestamp, entry.Labels, entry.Metadata)
+		argNum += 10
 
 		// Count by level
 		switch entry.Level {
@@ -163,6 +169,19 @@ func (h *Handler) IngestLogs(c *gin.Context) {
 		}
 
 		totalBytes += int64(len(entry.Message))
+	}
+
+	// Execute batch insert
+	insertedCount := 0
+	if len(valueStrings) > 0 {
+		query := `INSERT INTO centralized_logs (org_id, agent_id, source, source_type, stream, level, message, log_timestamp, labels, metadata) VALUES ` + strings.Join(valueStrings, ", ")
+		result, err := h.db.Exec(dbCtx, query, valueArgs...)
+		if err != nil {
+			h.logger.Error("Failed to insert log entries", zap.Error(err), zap.Int("batch_size", len(batch.Entries)))
+			// Don't return error - we'll report partial success
+		} else {
+			insertedCount = int(result.RowsAffected())
+		}
 	}
 
 	// Update daily stats (only if we inserted something)

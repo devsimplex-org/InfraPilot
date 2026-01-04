@@ -381,25 +381,83 @@ func (h *Handler) requestSSLCertificate(c *gin.Context) {
 		return
 	}
 
+	agentIDStr := agentID.String()
+
 	// Check if agent is connected
-	if !agentgrpc.IsAgentConnected(agentID.String()) {
+	if !agentgrpc.IsAgentConnected(agentIDStr) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "agent not connected"})
 		return
 	}
 
-	// Send SSL request to agent
-	go h.dispatchSSLRequestWithOptions(agentID, req.Domain, req.Email, req.DNSProvider, req.Staging)
+	// Send SSL request to agent and wait for response (up to 2 minutes for ACME challenge)
+	cmd := agentgrpc.NewSSLRequestCommand(req.Domain, req.Email, req.DNSProvider, req.Staging)
+
+	h.logger.Info("Sending SSL request to agent",
+		zap.String("agent_id", agentIDStr),
+		zap.String("domain", req.Domain),
+		zap.String("email", req.Email),
+		zap.Bool("staging", req.Staging),
+	)
+
+	resp, err := agentgrpc.SendCommand(agentIDStr, cmd, 120*time.Second)
+	if err != nil {
+		h.logger.Error("SSL request failed", zap.Error(err), zap.String("domain", req.Domain))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   fmt.Sprintf("SSL request failed: %v", err),
+			"domain":  req.Domain,
+		})
+		return
+	}
 
 	// Audit log
 	h.auditLog(c, userID, orgID, "ssl.request", "domain", uuid.Nil, req)
 
-	c.JSON(http.StatusAccepted, gin.H{
-		"message": "SSL certificate request initiated",
-		"domain":  req.Domain,
-		"email":   req.Email,
-		"staging": req.Staging,
-		"status":  "pending",
-	})
+	// Parse response from agent
+	if result, ok := resp.Response.(*agentgrpc.CommandResult); ok {
+		if result.Success {
+			c.JSON(http.StatusOK, gin.H{
+				"success": true,
+				"message": result.Message,
+				"domain":  req.Domain,
+				"email":   req.Email,
+				"staging": req.Staging,
+			})
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"error":   result.Message,
+				"domain":  req.Domain,
+			})
+		}
+	} else {
+		// Try to extract from map if CommandResult type assertion failed
+		if resultMap, ok := resp.Response.(map[string]interface{}); ok {
+			success, _ := resultMap["success"].(bool)
+			message, _ := resultMap["message"].(string)
+			if success {
+				c.JSON(http.StatusOK, gin.H{
+					"success": true,
+					"message": message,
+					"domain":  req.Domain,
+					"email":   req.Email,
+					"staging": req.Staging,
+				})
+			} else {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"success": false,
+					"error":   message,
+					"domain":  req.Domain,
+				})
+			}
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"error":   "Invalid response from agent",
+				"domain":  req.Domain,
+			})
+		}
+	}
 }
 
 // dispatchSSLRequestWithOptions sends SSL request with full options
@@ -432,6 +490,35 @@ func (h *Handler) dispatchSSLRequestWithOptions(agentID uuid.UUID, domain, email
 	)
 }
 
+// getPublicIP tries to detect the server's public IP
+func getPublicIP() string {
+	// Try multiple services for reliability
+	services := []string{
+		"https://api.ipify.org",
+		"https://ifconfig.me/ip",
+		"https://icanhazip.com",
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	for _, svc := range services {
+		resp, err := client.Get(svc)
+		if err != nil {
+			continue
+		}
+		defer resp.Body.Close()
+
+		body := make([]byte, 64)
+		n, _ := resp.Body.Read(body)
+		ip := strings.TrimSpace(string(body[:n]))
+
+		// Validate it looks like an IP
+		if net.ParseIP(ip) != nil {
+			return ip
+		}
+	}
+	return ""
+}
+
 // getDNSInstructions returns DNS configuration instructions for a domain
 // GET /api/v1/ssl/dns-instructions/:domain
 func (h *Handler) getDNSInstructions(c *gin.Context) {
@@ -441,16 +528,12 @@ func (h *Handler) getDNSInstructions(c *gin.Context) {
 		return
 	}
 
-	// Get server's public IP (from agent or fallback)
-	serverIP := "YOUR_SERVER_IP"
-	orgID := c.MustGet("org_id").(uuid.UUID)
+	// Get server's public IP
+	serverIP := getPublicIP()
 
-	var agentHost string
-	err := h.db.QueryRow(c.Request.Context(), `
-		SELECT host FROM agents WHERE org_id = $1 AND status = 'active' LIMIT 1
-	`, orgID).Scan(&agentHost)
-	if err == nil && agentHost != "" {
-		serverIP = agentHost
+	// Fallback message if still not found
+	if serverIP == "" {
+		serverIP = "YOUR_SERVER_IP"
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -502,17 +585,8 @@ func (h *Handler) verifyDNS(c *gin.Context) {
 		return
 	}
 
-	// Get expected IP from agent
-	expectedIP := ""
-	orgID := c.MustGet("org_id").(uuid.UUID)
-
-	var agentHost string
-	h.db.QueryRow(c.Request.Context(), `
-		SELECT host FROM agents WHERE org_id = $1 AND status = 'active' LIMIT 1
-	`, orgID).Scan(&agentHost)
-	if agentHost != "" {
-		expectedIP = agentHost
-	}
+	// Get expected IP
+	expectedIP := getPublicIP()
 
 	// Check if any IP matches
 	ipStrings := []string{}

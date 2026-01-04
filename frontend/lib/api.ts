@@ -1241,17 +1241,27 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  requestSSLCertificate: (options: SSLRequestOptions) =>
-    fetchAPI<{
-      message: string;
-      domain: string;
-      email: string;
-      staging: boolean;
-      status: string;
-    }>("/ssl/request", {
+  requestSSLCertificate: async (options: SSLRequestOptions): Promise<{
+    success: boolean;
+    message?: string;
+    error?: string;
+    domain: string;
+    email?: string;
+    staging?: boolean;
+  }> => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+    const res = await fetch(`${API_BASE}/ssl/request`, {
       method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
       body: JSON.stringify(options),
-    }),
+    });
+    const data = await res.json();
+    // Return the full response regardless of status code
+    return data;
+  },
 
   getDNSInstructions: (domain: string) =>
     fetchAPI<DNSInstructions>(`/ssl/dns-instructions/${encodeURIComponent(domain)}`),

@@ -123,8 +123,9 @@ func main() {
 	}
 
 	// Initialize SSL/ACME certificate manager
+	// Always initialize in managed mode - email can be set later via commands
 	var certManager *ssl.CertManager
-	if cfg.IsManagedProxy() && cfg.LetsEncryptEmail != "" {
+	if cfg.IsManagedProxy() {
 		certManager = ssl.NewCertManager(
 			cfg.LetsEncryptDir,
 			cfg.LetsEncryptEmail,
@@ -755,6 +756,14 @@ func (h *CommandHandler) handleSSLCommand(ctx context.Context, cmd *agentgrpc.Ba
 			h.certManager.Email = sslCmd.Email
 		}
 		h.certManager.Staging = sslCmd.Staging
+
+		// Validate email is set
+		if h.certManager.Email == "" {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: "Let's Encrypt email not configured",
+			}
+		}
 
 		// Request the certificate
 		if err := h.certManager.RequestCertificate(sslCmd.Domain); err != nil {

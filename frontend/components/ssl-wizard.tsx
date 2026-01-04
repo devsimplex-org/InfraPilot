@@ -56,6 +56,7 @@ export function SSLWizard({
 
   // Request state
   const [requestStatus, setRequestStatus] = useState<"pending" | "success" | "error" | null>(null);
+  const [resultMessage, setResultMessage] = useState<string>("");
 
   // Reset state when dialog opens/closes
   useEffect(() => {
@@ -69,6 +70,7 @@ export function SSLWizard({
       setEmail("");
       setStaging(false);
       setRequestStatus(null);
+      setResultMessage("");
       setError(null);
       // Start certificate check
       checkCertificate();
@@ -153,18 +155,28 @@ export function SSLWizard({
     setLoading(true);
     setError(null);
     setRequestStatus("pending");
+    setResultMessage("");
     try {
-      await api.requestSSLCertificate({
+      const response = await api.requestSSLCertificate({
         domain,
         email,
         staging,
       });
-      setRequestStatus("success");
-      setStep("complete");
-      onSuccess?.();
-    } catch (err) {
+      if (response.success) {
+        setRequestStatus("success");
+        setResultMessage(response.message || "SSL certificate issued successfully");
+        setStep("complete");
+        onSuccess?.();
+      } else {
+        setRequestStatus("error");
+        setError(response.error || "Failed to request certificate");
+      }
+    } catch (err: unknown) {
       setRequestStatus("error");
-      setError(err instanceof Error ? err.message : "Failed to request certificate");
+      // Try to extract error message from response
+      const error = err as { message?: string; error?: string };
+      const errorMessage = error?.error || error?.message || "Failed to request certificate";
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -648,27 +660,27 @@ export function SSLWizard({
             <div className="space-y-4 text-center py-4">
               <div className="flex justify-center">
                 <div className="w-16 h-16 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
-                  <Check className="h-8 w-8 text-green-600" />
+                  <ShieldCheck className="h-8 w-8 text-green-600" />
                 </div>
               </div>
 
               <div>
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                  Certificate Requested!
+                  SSL Certificate Issued!
                 </h3>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                  SSL certificate request has been initiated for {domain}
+                  {resultMessage || `SSL certificate has been issued for ${domain}`}
                 </p>
               </div>
 
-              <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 text-sm text-left space-y-2">
-                <p className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
-                  <Clock className="h-4 w-4" />
-                  <span>Certificate issuance typically takes 1-2 minutes</span>
+              <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800 text-sm text-left space-y-2">
+                <p className="flex items-center gap-2 text-green-700 dark:text-green-400">
+                  <Check className="h-4 w-4" />
+                  <span>Certificate successfully issued by Let's Encrypt</span>
                 </p>
-                <p className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
-                  <RefreshCw className="h-4 w-4" />
-                  <span>Nginx will be automatically reloaded once ready</span>
+                <p className="flex items-center gap-2 text-green-700 dark:text-green-400">
+                  <Check className="h-4 w-4" />
+                  <span>Nginx configuration updated</span>
                 </p>
                 {staging && (
                   <p className="flex items-center gap-2 text-yellow-600 dark:text-yellow-400">
@@ -677,6 +689,18 @@ export function SSLWizard({
                   </p>
                 )}
               </div>
+
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Your site is now accessible via HTTPS at{" "}
+                <a
+                  href={`https://${domain}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary-600 hover:underline"
+                >
+                  https://{domain}
+                </a>
+              </p>
 
               <Button variant="primary" onClick={() => onOpenChange(false)} className="mt-4">
                 Done
