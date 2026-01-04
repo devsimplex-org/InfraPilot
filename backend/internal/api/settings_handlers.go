@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -224,6 +225,9 @@ func (h *Handler) updateInfraPilotDomain(c *gin.Context) {
 	// Dispatch the special InfraPilot nginx config to the agent
 	go h.dispatchInfraPilotProxyConfig(c.Request.Context(), agentID, proxyID, req.Domain, req.ForceSSL, req.HTTP2Enabled, req.SSLEnabled)
 
+	// Update default.conf to serve welcome page for direct IP access
+	go h.dispatchDefaultPageConfig(agentID, orgID, true)
+
 	c.JSON(http.StatusOK, settings)
 }
 
@@ -272,6 +276,17 @@ func (h *Handler) deleteInfraPilotDomain(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete settings"})
 		return
+	}
+
+	// Get agent ID to reset default.conf
+	var agentID uuid.UUID
+	h.db.QueryRow(c.Request.Context(), `
+		SELECT id FROM agents WHERE org_id = $1 AND status = 'active' ORDER BY created_at LIMIT 1
+	`, orgID).Scan(&agentID)
+
+	if agentID != uuid.Nil {
+		// Reset default.conf to proxy to frontend (no domain configured)
+		go h.dispatchDefaultPageConfig(agentID, orgID, false)
 	}
 
 	// Audit log
@@ -339,7 +354,15 @@ func generateInfraPilotNginxConfig(domain string, forceSSL, http2, sslEnabled bo
 	config.WriteString(fmt.Sprintf("    server_name %s;\n\n", domain))
 
 	if sslEnabled && forceSSL {
-		config.WriteString("    return 301 https://$host$request_uri;\n")
+		// ACME challenge must always be accessible for certificate renewals
+		config.WriteString("    # ACME challenge for Let's Encrypt (renewals)\n")
+		config.WriteString("    location /.well-known/acme-challenge/ {\n")
+		config.WriteString("        root /var/www/acme-challenge;\n")
+		config.WriteString("    }\n\n")
+		config.WriteString("    # Redirect all other HTTP to HTTPS\n")
+		config.WriteString("    location / {\n")
+		config.WriteString("        return 301 https://$host$request_uri;\n")
+		config.WriteString("    }\n")
 		config.WriteString("}\n\n")
 	} else {
 		writeInfraPilotLocations(&config)
@@ -348,14 +371,12 @@ func generateInfraPilotNginxConfig(domain string, forceSSL, http2, sslEnabled bo
 
 	// HTTPS server block (if SSL enabled)
 	if sslEnabled {
-		listen := "443 ssl"
-		if http2 {
-			listen = "443 ssl http2"
-		}
-
 		config.WriteString("server {\n")
-		config.WriteString(fmt.Sprintf("    listen %s;\n", listen))
-		config.WriteString(fmt.Sprintf("    listen [::]:%s;\n", listen))
+		config.WriteString("    listen 443 ssl;\n")
+		config.WriteString("    listen [::]:443 ssl;\n")
+		if http2 {
+			config.WriteString("    http2 on;\n")
+		}
 		config.WriteString(fmt.Sprintf("    server_name %s;\n\n", domain))
 
 		// SSL configuration
@@ -447,4 +468,254 @@ func isValidDomain(domain string) bool {
 		}
 	}
 	return true
+}
+
+// dispatchDefaultPageConfig sends the welcome page HTML and updates default.conf
+// to serve it for direct IP access when a domain is configured
+func (h *Handler) dispatchDefaultPageConfig(agentID uuid.UUID, orgID uuid.UUID, domainConfigured bool) {
+	agentIDStr := agentID.String()
+
+	if !agentgrpc.IsAgentConnected(agentIDStr) {
+		h.logger.Warn("Agent not connected, cannot dispatch default page config",
+			zap.String("agent_id", agentIDStr),
+		)
+		return
+	}
+
+	// Get the welcome page content from database or use default
+	welcomeHTML := h.getWelcomePageHTML(orgID)
+
+	// Write welcome.html to nginx's html directory
+	htmlCmd := &agentgrpc.BackendMessage{
+		RequestId: uuid.New().String(),
+		Type:      "nginx",
+		Command: agentgrpc.NginxCommand{
+			Action:        agentgrpc.NginxActionWriteConfig,
+			ConfigContent: welcomeHTML,
+			ConfigPath:    "/usr/share/nginx/html/welcome.html",
+		},
+	}
+
+	if err := agentgrpc.SendCommandAsync(agentIDStr, htmlCmd); err != nil {
+		h.logger.Error("Failed to dispatch welcome page HTML", zap.Error(err))
+		return
+	}
+
+	// Generate and dispatch updated default.conf
+	defaultConf := generateDefaultNginxConfig(domainConfigured)
+	confCmd := &agentgrpc.BackendMessage{
+		RequestId: uuid.New().String(),
+		Type:      "nginx",
+		Command: agentgrpc.NginxCommand{
+			Action:        agentgrpc.NginxActionWriteConfig,
+			ConfigContent: defaultConf,
+			ConfigPath:    "/etc/nginx/conf.d/default.conf",
+		},
+	}
+
+	if err := agentgrpc.SendCommandAsync(agentIDStr, confCmd); err != nil {
+		h.logger.Error("Failed to dispatch default.conf", zap.Error(err))
+		return
+	}
+
+	h.logger.Info("Dispatched default page config to agent",
+		zap.String("agent_id", agentIDStr),
+		zap.Bool("domain_configured", domainConfigured),
+	)
+}
+
+// getWelcomePageHTML retrieves the welcome page HTML from database or returns default
+func (h *Handler) getWelcomePageHTML(orgID uuid.UUID) string {
+	var page struct {
+		Enabled  bool
+		Title    string
+		Heading  string
+		Message  string
+		ShowLogo bool
+	}
+
+	ctx := context.Background()
+	err := h.db.QueryRow(ctx, `
+		SELECT enabled, title, heading, message, show_logo
+		FROM default_pages
+		WHERE org_id = $1 AND page_type = 'welcome'
+	`, orgID).Scan(&page.Enabled, &page.Title, &page.Heading, &page.Message, &page.ShowLogo)
+
+	if err != nil || !page.Enabled {
+		// Use defaults
+		page.Title = "Welcome"
+		page.Heading = "Welcome"
+		page.Message = "This site is being configured. Please check back soon."
+		page.ShowLogo = true
+	}
+
+	return generateWelcomePageHTML(page.Title, page.Heading, page.Message, page.ShowLogo)
+}
+
+// generateWelcomePageHTML creates clean HTML for the welcome page
+func generateWelcomePageHTML(title, heading, message string, showLogo bool) string {
+	var b strings.Builder
+
+	b.WriteString(`<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>`)
+	b.WriteString(title)
+	b.WriteString(`</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #fff;
+            padding: 20px;
+        }
+        .container {
+            text-align: center;
+            max-width: 600px;
+        }
+        .heading {
+            font-size: 4rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 1rem;
+        }
+        .message {
+            font-size: 1.25rem;
+            color: rgba(255,255,255,0.7);
+            line-height: 1.6;
+        }
+        .logo {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 2rem;
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+`)
+
+	if showLogo {
+		b.WriteString(`        <svg class="logo" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+`)
+	}
+
+	b.WriteString(fmt.Sprintf(`        <h1 class="heading">%s</h1>
+        <p class="message">%s</p>
+    </div>
+</body>
+</html>`, heading, message))
+
+	return b.String()
+}
+
+// generateDefaultNginxConfig creates the default.conf that handles IP access
+func generateDefaultNginxConfig(domainConfigured bool) string {
+	var config strings.Builder
+
+	config.WriteString("# InfraPilot Base Nginx Configuration\n")
+	config.WriteString("# Auto-generated - do not edit manually\n\n")
+
+	config.WriteString("# Include proxy host configurations managed by InfraPilot\n")
+	config.WriteString("include /etc/nginx/sites/*.conf;\n\n")
+
+	config.WriteString("upstream frontend {\n")
+	config.WriteString("    server frontend:3000;\n")
+	config.WriteString("}\n\n")
+
+	config.WriteString("upstream backend {\n")
+	config.WriteString("    server backend:8080;\n")
+	config.WriteString("}\n\n")
+
+	// HTTP default server
+	config.WriteString("server {\n")
+	config.WriteString("    listen 80 default_server;\n")
+	config.WriteString("    listen [::]:80 default_server;\n")
+	config.WriteString("    server_name _;\n\n")
+
+	if domainConfigured {
+		// When a domain is configured, serve welcome page for direct IP access
+		config.WriteString("    # Domain is configured - serve welcome page for direct IP access\n")
+		config.WriteString("    root /usr/share/nginx/html;\n\n")
+		config.WriteString("    location / {\n")
+		config.WriteString("        try_files /welcome.html =404;\n")
+		config.WriteString("    }\n")
+	} else {
+		// No domain configured - proxy to frontend (initial setup)
+		config.WriteString("    # No domain configured - proxy to InfraPilot for initial setup\n")
+		config.WriteString("    # API routes\n")
+		config.WriteString("    location /api/ {\n")
+		config.WriteString("        proxy_pass http://backend;\n")
+		config.WriteString("        proxy_http_version 1.1;\n")
+		config.WriteString("        proxy_set_header Host $host;\n")
+		config.WriteString("        proxy_set_header X-Real-IP $remote_addr;\n")
+		config.WriteString("        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n")
+		config.WriteString("        proxy_set_header X-Forwarded-Proto $scheme;\n")
+		config.WriteString("        proxy_set_header Upgrade $http_upgrade;\n")
+		config.WriteString("        proxy_set_header Connection \"upgrade\";\n")
+		config.WriteString("        proxy_read_timeout 86400;\n")
+		config.WriteString("        proxy_buffering off;\n")
+		config.WriteString("    }\n\n")
+
+		config.WriteString("    location = /api/health {\n")
+		config.WriteString("        proxy_pass http://backend/health;\n")
+		config.WriteString("    }\n\n")
+
+		config.WriteString("    # Frontend\n")
+		config.WriteString("    location / {\n")
+		config.WriteString("        proxy_pass http://frontend;\n")
+		config.WriteString("        proxy_http_version 1.1;\n")
+		config.WriteString("        proxy_set_header Host $host;\n")
+		config.WriteString("        proxy_set_header X-Real-IP $remote_addr;\n")
+		config.WriteString("        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n")
+		config.WriteString("        proxy_set_header X-Forwarded-Proto $scheme;\n")
+		config.WriteString("        proxy_set_header Upgrade $http_upgrade;\n")
+		config.WriteString("        proxy_set_header Connection \"upgrade\";\n")
+		config.WriteString("    }\n\n")
+
+		config.WriteString("    # Next.js HMR WebSocket\n")
+		config.WriteString("    location /_next/webpack-hmr {\n")
+		config.WriteString("        proxy_pass http://frontend/_next/webpack-hmr;\n")
+		config.WriteString("        proxy_http_version 1.1;\n")
+		config.WriteString("        proxy_set_header Upgrade $http_upgrade;\n")
+		config.WriteString("        proxy_set_header Connection \"upgrade\";\n")
+		config.WriteString("    }\n")
+	}
+
+	config.WriteString("}\n\n")
+
+	// HTTPS catch-all server - reject SSL handshake for unconfigured domains
+	// This prevents certificate mismatch errors for domains not yet configured
+	if domainConfigured {
+		config.WriteString("# HTTPS catch-all - reject connections for unconfigured domains\n")
+		config.WriteString("# This prevents certificate mismatch errors\n")
+		config.WriteString("server {\n")
+		config.WriteString("    listen 443 ssl default_server;\n")
+		config.WriteString("    listen [::]:443 ssl default_server;\n")
+		config.WriteString("    server_name _;\n\n")
+		config.WriteString("    # Reject SSL handshake for unconfigured domains\n")
+		config.WriteString("    ssl_reject_handshake on;\n")
+		config.WriteString("}\n")
+	}
+
+	return config.String()
 }

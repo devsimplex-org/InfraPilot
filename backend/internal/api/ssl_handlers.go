@@ -414,49 +414,64 @@ func (h *Handler) requestSSLCertificate(c *gin.Context) {
 	h.auditLog(c, userID, orgID, "ssl.request", "domain", uuid.Nil, req)
 
 	// Parse response from agent
+	success := false
+	message := ""
+
 	if result, ok := resp.Response.(*agentgrpc.CommandResult); ok {
-		if result.Success {
-			c.JSON(http.StatusOK, gin.H{
-				"success": true,
-				"message": result.Message,
-				"domain":  req.Domain,
-				"email":   req.Email,
-				"staging": req.Staging,
-			})
-		} else {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"success": false,
-				"error":   result.Message,
-				"domain":  req.Domain,
-			})
-		}
-	} else {
-		// Try to extract from map if CommandResult type assertion failed
-		if resultMap, ok := resp.Response.(map[string]interface{}); ok {
-			success, _ := resultMap["success"].(bool)
-			message, _ := resultMap["message"].(string)
-			if success {
-				c.JSON(http.StatusOK, gin.H{
-					"success": true,
-					"message": message,
-					"domain":  req.Domain,
-					"email":   req.Email,
-					"staging": req.Staging,
-				})
+		success = result.Success
+		message = result.Message
+	} else if resultMap, ok := resp.Response.(map[string]interface{}); ok {
+		success, _ = resultMap["success"].(bool)
+		message, _ = resultMap["message"].(string)
+	}
+
+	if success {
+		// Update proxy_hosts to enable SSL and regenerate nginx config
+		var proxyID uuid.UUID
+		var forceSSL, http2Enabled, isSystemProxy bool
+		err := h.db.QueryRow(c.Request.Context(), `
+			UPDATE proxy_hosts SET ssl_enabled = true, force_ssl = true, status = 'active', updated_at = NOW()
+			WHERE agent_id = $1 AND domain = $2
+			RETURNING id, force_ssl, http2_enabled, is_system_proxy
+		`, agentID, req.Domain).Scan(&proxyID, &forceSSL, &http2Enabled, &isSystemProxy)
+
+		if err == nil {
+			h.logger.Info("Updated proxy_hosts for SSL",
+				zap.String("domain", req.Domain),
+				zap.String("proxy_id", proxyID.String()),
+			)
+
+			// Regenerate and dispatch nginx config with SSL enabled
+			if isSystemProxy {
+				go h.dispatchInfraPilotProxyConfig(c.Request.Context(), agentID, proxyID, req.Domain, true, http2Enabled, true)
 			} else {
-				c.JSON(http.StatusBadRequest, gin.H{
-					"success": false,
-					"error":   message,
-					"domain":  req.Domain,
-				})
+				// For regular proxies, get upstream and dispatch
+				var upstream string
+				h.db.QueryRow(c.Request.Context(), `SELECT upstream_target FROM proxy_hosts WHERE id = $1`, proxyID).Scan(&upstream)
+				if upstream != "" {
+					go h.dispatchProxyConfig(c.Request.Context(), agentID, proxyID, req.Domain, upstream, true, http2Enabled, true)
+				}
 			}
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"success": false,
-				"error":   "Invalid response from agent",
-				"domain":  req.Domain,
-			})
+			h.logger.Warn("Could not find proxy_host to update SSL status",
+				zap.String("domain", req.Domain),
+				zap.Error(err),
+			)
 		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": message,
+			"domain":  req.Domain,
+			"email":   req.Email,
+			"staging": req.Staging,
+		})
+	} else {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   message,
+			"domain":  req.Domain,
+		})
 	}
 }
 

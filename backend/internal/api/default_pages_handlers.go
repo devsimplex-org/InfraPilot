@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -232,7 +233,41 @@ func (h *Handler) updateDefaultPage(c *gin.Context) {
 	// Audit log
 	h.auditLog(c, userID, orgID, "settings.default_pages.update", "default_pages", resultPage.ID, req)
 
+	// If this is the welcome page, regenerate the static HTML file on the agent
+	if pageType == "welcome" {
+		go h.regenerateWelcomePage(orgID)
+	}
+
 	c.JSON(http.StatusOK, resultPage)
+}
+
+// regenerateWelcomePage regenerates the welcome page HTML on the agent if a domain is configured
+func (h *Handler) regenerateWelcomePage(orgID uuid.UUID) {
+	// Check if a domain is configured
+	var settingValue []byte
+	err := h.db.QueryRow(context.Background(), `
+		SELECT setting_value
+		FROM system_settings
+		WHERE org_id = $1 AND setting_key = 'infrapilot_domain'
+	`, orgID).Scan(&settingValue)
+
+	if err != nil || len(settingValue) == 0 {
+		// No domain configured, nothing to update
+		return
+	}
+
+	// Get the agent ID
+	var agentID uuid.UUID
+	err = h.db.QueryRow(context.Background(), `
+		SELECT id FROM agents WHERE org_id = $1 AND status = 'active' ORDER BY created_at LIMIT 1
+	`, orgID).Scan(&agentID)
+
+	if err != nil || agentID == uuid.Nil {
+		return
+	}
+
+	// Dispatch the updated welcome page
+	h.dispatchDefaultPageConfig(agentID, orgID, true)
 }
 
 // previewDefaultPage returns the rendered HTML for a default page
