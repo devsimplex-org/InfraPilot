@@ -155,9 +155,6 @@ COPY --from=frontend-builder /build/.next/standalone /app/frontend
 COPY --from=frontend-builder /build/.next/static /app/frontend/.next/static
 COPY --from=frontend-builder /build/public /app/frontend/public
 
-# Copy nginx config
-COPY deployments/nginx/default.conf /etc/nginx/http.d/default.conf
-
 # Copy supervisor config
 COPY deployments/supervisor/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 

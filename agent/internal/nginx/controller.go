@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -140,7 +141,7 @@ func (c *Controller) WriteConfigFile(configPath, content string) error {
 
 // TestConfig validates the nginx configuration by running nginx -t in the container
 func (c *Controller) TestConfig(ctx context.Context) error {
-	output, exitCode, err := c.execInContainer(ctx, []string{"nginx", "-t"})
+	output, exitCode, err := c.execNginxCommand(ctx, []string{"nginx", "-t"})
 	if err != nil {
 		return fmt.Errorf("failed to exec nginx -t: %w", err)
 	}
@@ -160,7 +161,7 @@ func (c *Controller) Reload(ctx context.Context) error {
 		return err
 	}
 
-	output, exitCode, err := c.execInContainer(ctx, []string{"nginx", "-s", "reload"})
+	output, exitCode, err := c.execNginxCommand(ctx, []string{"nginx", "-s", "reload"})
 	if err != nil {
 		return fmt.Errorf("failed to exec nginx reload: %w", err)
 	}
@@ -171,6 +172,37 @@ func (c *Controller) Reload(ctx context.Context) error {
 
 	c.logger.Info("Nginx reloaded successfully")
 	return nil
+}
+
+// execNginxCommand executes a command either locally or via docker exec depending on containerName
+func (c *Controller) execNginxCommand(ctx context.Context, cmd []string) (string, int, error) {
+	// If containerName is "local", run commands directly (single-container mode)
+	if c.containerName == "local" {
+		return c.execLocal(ctx, cmd)
+	}
+	// Otherwise, use docker exec (multi-container mode)
+	return c.execInContainer(ctx, cmd)
+}
+
+// execLocal executes a command directly on the local system
+func (c *Controller) execLocal(ctx context.Context, cmd []string) (string, int, error) {
+	if len(cmd) == 0 {
+		return "", -1, fmt.Errorf("empty command")
+	}
+
+	command := exec.CommandContext(ctx, cmd[0], cmd[1:]...)
+	output, err := command.CombinedOutput()
+
+	exitCode := 0
+	if err != nil {
+		if exitError, ok := err.(*exec.ExitError); ok {
+			exitCode = exitError.ExitCode()
+		} else {
+			return string(output), -1, err
+		}
+	}
+
+	return string(output), exitCode, nil
 }
 
 // UpstreamStatus represents the result of upstream validation
