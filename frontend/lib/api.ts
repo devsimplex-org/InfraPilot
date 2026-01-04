@@ -407,6 +407,33 @@ export interface SSLRequestOptions {
   dns_provider?: string;
   staging?: boolean;
   force_renew?: boolean;
+  ssl_source?: 'letsencrypt' | 'wildcard' | 'external';
+  certificate_id?: string;
+}
+
+// SSL Certificate Management types
+export type SSLSource = 'letsencrypt' | 'wildcard' | 'external';
+
+export interface SSLCertificateRecord {
+  id: string;
+  org_id: string;
+  name: string;
+  domain: string;
+  is_wildcard: boolean;
+  cert_path: string;
+  key_path: string;
+  issuer?: string;
+  subject?: string;
+  san?: string;
+  expires_at?: string;
+  auto_detected: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SSLCertificateScanResult {
+  certificates: SSLCertificateRecord[];
+  scanned_dir: string;
 }
 
 export interface DNSInstructions {
@@ -451,6 +478,10 @@ export interface InfraPilotDomainSettings {
   http2_enabled: boolean;
   proxy_host_id?: string;
   status?: string;
+  ssl_source?: SSLSource;
+  ssl_certificate_id?: string;
+  ssl_cert_path?: string;
+  ssl_key_path?: string;
 }
 
 // Default Pages types
@@ -1212,6 +1243,8 @@ export const api = {
     ssl_enabled?: boolean;
     force_ssl?: boolean;
     http2_enabled?: boolean;
+    ssl_source?: SSLSource;
+    ssl_certificate_id?: string;
   }) =>
     fetchAPI<InfraPilotDomainSettings>("/settings/domain", {
       method: "PUT",
@@ -1268,6 +1301,27 @@ export const api = {
 
   verifyDNS: (domain: string) =>
     fetchAPI<DNSVerifyResult>(`/ssl/verify-dns/${encodeURIComponent(domain)}`),
+
+  // SSL Certificate Management
+  listSSLCertificates: () =>
+    fetchAPI<SSLCertificateRecord[]>("/ssl/certificates"),
+
+  scanSSLCertificates: () =>
+    fetchAPI<SSLCertificateScanResult>("/ssl/certificates/scan"),
+
+  registerSSLCertificate: (data: { name?: string; domain?: string; cert_path: string; key_path: string }) =>
+    fetchAPI<{ id: string; name: string; domain: string; is_wildcard: boolean; issuer?: string; expires_at?: string; message: string }>("/ssl/certificates", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  getSSLCertificate: (id: string) =>
+    fetchAPI<SSLCertificateRecord>(`/ssl/certificates/${id}`),
+
+  deleteSSLCertificate: (id: string) =>
+    fetchAPI<{ message: string }>(`/ssl/certificates/${id}`, {
+      method: "DELETE",
+    }),
 
   // Default Pages
   getDefaultPages: () =>

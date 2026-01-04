@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { api, SSLCertificateInfo, SSLStatus, DNSVerifyResult } from "@/lib/api";
+import { api, SSLCertificateInfo, SSLStatus, DNSVerifyResult, SSLCertificateRecord, SSLSource } from "@/lib/api";
 import { Button, Input } from "@/components/ui/page-layout";
 import { cn } from "@/lib/utils";
 import {
@@ -14,12 +14,13 @@ import {
   Check,
   X,
   AlertTriangle,
-  Clock,
   ArrowRight,
   ArrowLeft,
   Loader2,
   Copy,
   Lock,
+  FileKey,
+  Scan,
 } from "lucide-react";
 
 interface SSLWizardProps {
@@ -29,7 +30,7 @@ interface SSLWizardProps {
   onSuccess?: () => void;
 }
 
-type WizardStep = "check" | "dns" | "email" | "request" | "complete";
+type WizardStep = "check" | "source" | "wildcard" | "dns" | "email" | "request" | "complete";
 
 export function SSLWizard({
   domain,
@@ -44,6 +45,11 @@ export function SSLWizard({
   // Certificate check state
   const [certInfo, setCertInfo] = useState<SSLCertificateInfo | null>(null);
   const [wildcardCerts, setWildcardCerts] = useState<SSLCertificateInfo[]>([]);
+
+  // SSL source selection
+  const [sslSource, setSSLSource] = useState<SSLSource>("letsencrypt");
+  const [availableCerts, setAvailableCerts] = useState<SSLCertificateRecord[]>([]);
+  const [selectedCertId, setSelectedCertId] = useState<string>("");
 
   // DNS verification state
   const [dnsResult, setDnsResult] = useState<DNSVerifyResult | null>(null);
@@ -64,6 +70,9 @@ export function SSLWizard({
       setStep("check");
       setCertInfo(null);
       setWildcardCerts([]);
+      setAvailableCerts([]);
+      setSelectedCertId("");
+      setSSLSource("letsencrypt");
       setDnsResult(null);
       setServerIP("");
       setSSLStatus(null);
@@ -134,6 +143,27 @@ export function SSLWizard({
     }
   };
 
+  const scanCertificates = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await api.scanSSLCertificates();
+      setAvailableCerts(result.certificates || []);
+      // Auto-select a matching wildcard cert if available
+      const parentDomain = domain.split('.').slice(1).join('.');
+      const matchingCert = result.certificates?.find(c =>
+        c.is_wildcard && (c.domain === parentDomain || c.domain === `*.${parentDomain}`)
+      );
+      if (matchingCert?.id) {
+        setSelectedCertId(matchingCert.id);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to scan certificates");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const saveEmail = async () => {
     if (!email) {
       setError("Email is required for Let's Encrypt");
@@ -188,7 +218,9 @@ export function SSLWizard({
 
   const goToStep = (newStep: WizardStep) => {
     setError(null);
-    if (newStep === "dns") {
+    if (newStep === "wildcard") {
+      scanCertificates();
+    } else if (newStep === "dns") {
       verifyDNS();
     } else if (newStep === "email") {
       loadSSLSettings();
@@ -196,15 +228,61 @@ export function SSLWizard({
     setStep(newStep);
   };
 
+  // Apply wildcard certificate directly
+  const applyWildcardCert = async () => {
+    if (!selectedCertId) {
+      setError("Please select a certificate");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    setRequestStatus("pending");
+    try {
+      // Update the domain config with the selected certificate
+      await api.updateInfraPilotDomain({
+        domain,
+        ssl_enabled: true,
+        force_ssl: true,
+        http2_enabled: true,
+        ssl_source: "wildcard",
+        ssl_certificate_id: selectedCertId,
+      });
+      setRequestStatus("success");
+      setResultMessage("SSL certificate applied successfully using wildcard certificate");
+      setStep("complete");
+      onSuccess?.();
+    } catch (err: unknown) {
+      setRequestStatus("error");
+      const error = err as { message?: string; error?: string };
+      setError(error?.error || error?.message || "Failed to apply certificate");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (!open) return null;
 
-  const steps: { key: WizardStep; label: string; icon: typeof Shield }[] = [
-    { key: "check", label: "Check", icon: Shield },
-    { key: "dns", label: "DNS", icon: Globe },
-    { key: "email", label: "Email", icon: Mail },
-    { key: "request", label: "Request", icon: Lock },
-  ];
+  // Steps depend on SSL source selection
+  const getSteps = (): { key: WizardStep; label: string; icon: typeof Shield }[] => {
+    if (sslSource === "wildcard") {
+      return [
+        { key: "check", label: "Check", icon: Shield },
+        { key: "source", label: "Source", icon: FileKey },
+        { key: "wildcard", label: "Select", icon: Scan },
+        { key: "request", label: "Apply", icon: Lock },
+      ];
+    }
+    // Let's Encrypt flow
+    return [
+      { key: "check", label: "Check", icon: Shield },
+      { key: "source", label: "Source", icon: FileKey },
+      { key: "dns", label: "DNS", icon: Globe },
+      { key: "email", label: "Email", icon: Mail },
+      { key: "request", label: "Request", icon: Lock },
+    ];
+  };
 
+  const steps = getSteps();
   const currentStepIndex = steps.findIndex((s) => s.key === step);
 
   return (
@@ -384,7 +462,7 @@ export function SSLWizard({
                         Recheck
                       </Button>
                       {(!certInfo.exists || !certInfo.valid_for_domain || (certInfo.days_left && certInfo.days_left < 30)) && (
-                        <Button variant="primary" onClick={() => goToStep("dns")} icon={ArrowRight}>
+                        <Button variant="primary" onClick={() => goToStep("source")} icon={ArrowRight}>
                           Get Certificate
                         </Button>
                       )}
@@ -392,6 +470,206 @@ export function SSLWizard({
                   </div>
                 </div>
               ) : null}
+            </div>
+          )}
+
+          {/* Step: Source Selection */}
+          {step === "source" && (
+            <div className="space-y-4">
+              <div className="text-center mb-4">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                  Choose Certificate Source
+                </h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  How would you like to get an SSL certificate?
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                {/* Let's Encrypt option */}
+                <button
+                  onClick={() => setSSLSource("letsencrypt")}
+                  className={cn(
+                    "w-full p-4 rounded-lg border text-left transition-colors",
+                    sslSource === "letsencrypt"
+                      ? "border-primary-500 bg-primary-50 dark:bg-primary-900/20"
+                      : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
+                  )}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className={cn(
+                      "w-5 h-5 rounded-full border-2 flex items-center justify-center mt-0.5",
+                      sslSource === "letsencrypt"
+                        ? "border-primary-500"
+                        : "border-gray-300 dark:border-gray-600"
+                    )}>
+                      {sslSource === "letsencrypt" && (
+                        <div className="w-2.5 h-2.5 rounded-full bg-primary-500" />
+                      )}
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-900 dark:text-white">
+                        Request new certificate (Let&apos;s Encrypt)
+                      </p>
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                        Automatically obtain a free SSL certificate from Let&apos;s Encrypt
+                      </p>
+                    </div>
+                  </div>
+                </button>
+
+                {/* Wildcard option */}
+                <button
+                  onClick={() => setSSLSource("wildcard")}
+                  className={cn(
+                    "w-full p-4 rounded-lg border text-left transition-colors",
+                    sslSource === "wildcard"
+                      ? "border-primary-500 bg-primary-50 dark:bg-primary-900/20"
+                      : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
+                  )}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className={cn(
+                      "w-5 h-5 rounded-full border-2 flex items-center justify-center mt-0.5",
+                      sslSource === "wildcard"
+                        ? "border-primary-500"
+                        : "border-gray-300 dark:border-gray-600"
+                    )}>
+                      {sslSource === "wildcard" && (
+                        <div className="w-2.5 h-2.5 rounded-full bg-primary-500" />
+                      )}
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-900 dark:text-white">
+                        Use existing wildcard certificate
+                      </p>
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                        Select from wildcard certificates already installed on the server
+                      </p>
+                    </div>
+                  </div>
+                </button>
+              </div>
+
+              {/* Actions */}
+              <div className="flex justify-between pt-4">
+                <Button variant="secondary" onClick={() => goToStep("check")} icon={ArrowLeft}>
+                  Back
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={() => goToStep(sslSource === "wildcard" ? "wildcard" : "dns")}
+                  icon={ArrowRight}
+                >
+                  Continue
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Step: Wildcard Certificate Selection */}
+          {step === "wildcard" && (
+            <div className="space-y-4">
+              <div className="text-center mb-4">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                  Select Wildcard Certificate
+                </h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Choose a wildcard certificate to use for {domain}
+                </p>
+              </div>
+
+              {loading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary-500" />
+                </div>
+              ) : availableCerts.length > 0 ? (
+                <div className="space-y-3">
+                  {availableCerts.filter(c => c.is_wildcard).map((cert) => {
+                    const parentDomain = domain.split('.').slice(1).join('.');
+                    const isMatch = cert.domain === parentDomain || cert.san?.includes(`*.${parentDomain}`);
+
+                    return (
+                      <button
+                        key={cert.id || cert.cert_path}
+                        onClick={() => setSelectedCertId(cert.id)}
+                        className={cn(
+                          "w-full p-4 rounded-lg border text-left transition-colors",
+                          selectedCertId === cert.id
+                            ? "border-primary-500 bg-primary-50 dark:bg-primary-900/20"
+                            : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
+                        )}
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className={cn(
+                            "w-5 h-5 rounded-full border-2 flex items-center justify-center mt-0.5",
+                            selectedCertId === cert.id
+                              ? "border-primary-500"
+                              : "border-gray-300 dark:border-gray-600"
+                          )}>
+                            {selectedCertId === cert.id && (
+                              <div className="w-2.5 h-2.5 rounded-full bg-primary-500" />
+                            )}
+                          </div>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <p className="font-medium text-gray-900 dark:text-white">
+                                *.{cert.domain}
+                              </p>
+                              {isMatch && (
+                                <span className="px-2 py-0.5 text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded">
+                                  Matches domain
+                                </span>
+                              )}
+                            </div>
+                            <div className="mt-1 text-sm text-gray-500 dark:text-gray-400 space-y-0.5">
+                              {cert.issuer && <p>Issuer: {cert.issuer}</p>}
+                              {cert.expires_at && (
+                                <p>Expires: {new Date(cert.expires_at).toLocaleDateString()}</p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="h-5 w-5 text-yellow-500 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-medium text-yellow-700 dark:text-yellow-300">
+                        No Wildcard Certificates Found
+                      </p>
+                      <p className="text-sm text-yellow-600 dark:text-yellow-400 mt-1">
+                        No wildcard certificates were found in /etc/letsencrypt/live/.
+                        You can use Let&apos;s Encrypt instead.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex justify-between pt-4">
+                <Button variant="secondary" onClick={() => goToStep("source")} icon={ArrowLeft}>
+                  Back
+                </Button>
+                <div className="flex gap-2">
+                  <Button variant="ghost" onClick={scanCertificates} icon={RefreshCw}>
+                    Rescan
+                  </Button>
+                  <Button
+                    variant="primary"
+                    onClick={applyWildcardCert}
+                    disabled={loading || !selectedCertId}
+                    icon={loading ? Loader2 : ShieldCheck}
+                  >
+                    Apply Certificate
+                  </Button>
+                </div>
+              </div>
             </div>
           )}
 
@@ -482,7 +760,7 @@ export function SSLWizard({
 
                   {/* Actions */}
                   <div className="flex justify-between pt-4">
-                    <Button variant="secondary" onClick={() => goToStep("check")} icon={ArrowLeft}>
+                    <Button variant="secondary" onClick={() => goToStep("source")} icon={ArrowLeft}>
                       Back
                     </Button>
                     <div className="flex gap-2">

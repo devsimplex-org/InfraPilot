@@ -445,8 +445,14 @@ server {
 {{ if .HTTP2Enabled }}    http2 on;
 {{ end }}    server_name {{ .Domain }};
 
+{{ if and .SSLCertPath .SSLKeyPath }}
+    # Custom certificate paths
+    ssl_certificate {{ .SSLCertPath }};
+    ssl_certificate_key {{ .SSLKeyPath }};
+{{ else }}
     ssl_certificate /etc/letsencrypt/live/{{ .Domain }}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/{{ .Domain }}/privkey.pem;
+{{ end }}
 
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_prefer_server_ciphers on;

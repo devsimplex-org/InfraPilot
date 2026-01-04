@@ -28,12 +28,16 @@ type SystemSetting struct {
 
 // InfraPilotDomainSettings represents the InfraPilot domain configuration
 type InfraPilotDomainSettings struct {
-	Domain       string `json:"domain"`
-	SSLEnabled   bool   `json:"ssl_enabled"`
-	ForceSSL     bool   `json:"force_ssl"`
-	HTTP2Enabled bool   `json:"http2_enabled"`
-	ProxyHostID  string `json:"proxy_host_id,omitempty"`
-	Status       string `json:"status,omitempty"` // active, pending, error
+	Domain           string `json:"domain"`
+	SSLEnabled       bool   `json:"ssl_enabled"`
+	ForceSSL         bool   `json:"force_ssl"`
+	HTTP2Enabled     bool   `json:"http2_enabled"`
+	ProxyHostID      string `json:"proxy_host_id,omitempty"`
+	Status           string `json:"status,omitempty"` // active, pending, error
+	SSLSource        string `json:"ssl_source,omitempty"`        // 'letsencrypt', 'wildcard', 'external'
+	SSLCertificateID string `json:"ssl_certificate_id,omitempty"` // Reference to ssl_certificates
+	SSLCertPath      string `json:"ssl_cert_path,omitempty"`
+	SSLKeyPath       string `json:"ssl_key_path,omitempty"`
 }
 
 // getSystemSettings returns all system settings
@@ -92,10 +96,12 @@ func (h *Handler) getInfraPilotDomain(c *gin.Context) {
 
 // UpdateInfraPilotDomainRequest is the request body for updating InfraPilot domain
 type UpdateInfraPilotDomainRequest struct {
-	Domain       string `json:"domain" binding:"required"`
-	SSLEnabled   bool   `json:"ssl_enabled"`
-	ForceSSL     bool   `json:"force_ssl"`
-	HTTP2Enabled bool   `json:"http2_enabled"`
+	Domain           string  `json:"domain" binding:"required"`
+	SSLEnabled       bool    `json:"ssl_enabled"`
+	ForceSSL         bool    `json:"force_ssl"`
+	HTTP2Enabled     bool    `json:"http2_enabled"`
+	SSLSource        string  `json:"ssl_source"`         // 'letsencrypt', 'wildcard', 'external'
+	SSLCertificateID *string `json:"ssl_certificate_id"` // Reference to ssl_certificates (for wildcard/external)
 }
 
 // updateInfraPilotDomain updates the InfraPilot domain configuration
@@ -133,6 +139,25 @@ func (h *Handler) updateInfraPilotDomain(c *gin.Context) {
 		SELECT id, domain FROM proxy_hosts WHERE agent_id = $1 AND is_system_proxy = TRUE
 	`, agentID).Scan(&existingProxyID, &existingDomain)
 
+	// Get certificate paths if using external/wildcard SSL
+	var certPath, keyPath string
+	sslSource := req.SSLSource
+	if sslSource == "" {
+		sslSource = "letsencrypt" // Default
+	}
+
+	if req.SSLCertificateID != nil && *req.SSLCertificateID != "" && (sslSource == "wildcard" || sslSource == "external") {
+		certID, err := uuid.Parse(*req.SSLCertificateID)
+		if err == nil {
+			err = h.db.QueryRow(c.Request.Context(), `
+				SELECT cert_path, key_path FROM ssl_certificates WHERE id = $1 AND org_id = $2
+			`, certID, orgID).Scan(&certPath, &keyPath)
+			if err != nil {
+				h.logger.Warn("Could not find SSL certificate", zap.String("cert_id", *req.SSLCertificateID), zap.Error(err))
+			}
+		}
+	}
+
 	// Start transaction
 	tx, err := h.db.Begin(c.Request.Context())
 	if err != nil {
@@ -143,6 +168,15 @@ func (h *Handler) updateInfraPilotDomain(c *gin.Context) {
 
 	var proxyID uuid.UUID
 
+	// Prepare nullable cert path values
+	var certPathPtr, keyPathPtr *string
+	if certPath != "" {
+		certPathPtr = &certPath
+	}
+	if keyPath != "" {
+		keyPathPtr = &keyPath
+	}
+
 	if existingProxyID != uuid.Nil {
 		// Update existing proxy
 		if existingDomain != req.Domain {
@@ -152,9 +186,10 @@ func (h *Handler) updateInfraPilotDomain(c *gin.Context) {
 
 		_, err = tx.Exec(c.Request.Context(), `
 			UPDATE proxy_hosts
-			SET domain = $1, force_ssl = $2, http2_enabled = $3, updated_at = NOW()
-			WHERE id = $4
-		`, req.Domain, req.ForceSSL, req.HTTP2Enabled, existingProxyID)
+			SET domain = $1, force_ssl = $2, http2_enabled = $3,
+			    ssl_cert_path = $4, ssl_key_path = $5, ssl_source = $6, updated_at = NOW()
+			WHERE id = $7
+		`, req.Domain, req.ForceSSL, req.HTTP2Enabled, certPathPtr, keyPathPtr, sslSource, existingProxyID)
 
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update proxy"})
@@ -167,10 +202,11 @@ func (h *Handler) updateInfraPilotDomain(c *gin.Context) {
 		upstream := "http://frontend:3000" // Will be handled specially in nginx config
 
 		err = tx.QueryRow(c.Request.Context(), `
-			INSERT INTO proxy_hosts (agent_id, domain, upstream_target, force_ssl, http2_enabled, status, is_system_proxy)
-			VALUES ($1, $2, $3, $4, $5, 'active', TRUE)
+			INSERT INTO proxy_hosts (agent_id, domain, upstream_target, force_ssl, http2_enabled,
+			                         ssl_cert_path, ssl_key_path, ssl_source, status, is_system_proxy)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', TRUE)
 			RETURNING id
-		`, agentID, req.Domain, upstream, req.ForceSSL, req.HTTP2Enabled).Scan(&proxyID)
+		`, agentID, req.Domain, upstream, req.ForceSSL, req.HTTP2Enabled, certPathPtr, keyPathPtr, sslSource).Scan(&proxyID)
 
 		if err != nil {
 			h.logger.Error("Failed to create system proxy", zap.Error(err))
@@ -190,12 +226,20 @@ func (h *Handler) updateInfraPilotDomain(c *gin.Context) {
 
 	// Save settings
 	settings := InfraPilotDomainSettings{
-		Domain:       req.Domain,
-		SSLEnabled:   req.SSLEnabled,
-		ForceSSL:     req.ForceSSL,
-		HTTP2Enabled: req.HTTP2Enabled,
-		ProxyHostID:  proxyID.String(),
-		Status:       "active",
+		Domain:           req.Domain,
+		SSLEnabled:       req.SSLEnabled,
+		ForceSSL:         req.ForceSSL,
+		HTTP2Enabled:     req.HTTP2Enabled,
+		ProxyHostID:      proxyID.String(),
+		Status:           "active",
+		SSLSource:        sslSource,
+		SSLCertificateID: "",
+		SSLCertPath:      certPath,
+		SSLKeyPath:       keyPath,
+	}
+
+	if req.SSLCertificateID != nil {
+		settings.SSLCertificateID = *req.SSLCertificateID
 	}
 
 	settingsJSON, _ := json.Marshal(settings)
@@ -223,7 +267,7 @@ func (h *Handler) updateInfraPilotDomain(c *gin.Context) {
 	h.auditLog(c, userID, orgID, "settings.infrapilot_domain.update", "system_settings", proxyID, req)
 
 	// Dispatch the special InfraPilot nginx config to the agent
-	go h.dispatchInfraPilotProxyConfig(c.Request.Context(), agentID, proxyID, req.Domain, req.ForceSSL, req.HTTP2Enabled, req.SSLEnabled)
+	go h.dispatchInfraPilotProxyConfigWithCert(c.Request.Context(), agentID, proxyID, req.Domain, req.ForceSSL, req.HTTP2Enabled, req.SSLEnabled, certPath, keyPath)
 
 	// Update default.conf to serve welcome page for direct IP access
 	go h.dispatchDefaultPageConfig(agentID, orgID, true)
@@ -295,8 +339,13 @@ func (h *Handler) deleteInfraPilotDomain(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "domain configuration deleted"})
 }
 
-// dispatchInfraPilotProxyConfig sends the special InfraPilot nginx config to the agent
+// dispatchInfraPilotProxyConfig sends the special InfraPilot nginx config to the agent (legacy, no custom cert)
 func (h *Handler) dispatchInfraPilotProxyConfig(ctx interface{}, agentID, proxyID uuid.UUID, domain string, forceSSL, http2, sslEnabled bool) {
+	h.dispatchInfraPilotProxyConfigWithCert(ctx, agentID, proxyID, domain, forceSSL, http2, sslEnabled, "", "")
+}
+
+// dispatchInfraPilotProxyConfigWithCert sends the special InfraPilot nginx config with optional custom cert paths
+func (h *Handler) dispatchInfraPilotProxyConfigWithCert(ctx interface{}, agentID, proxyID uuid.UUID, domain string, forceSSL, http2, sslEnabled bool, certPath, keyPath string) {
 	agentIDStr := agentID.String()
 
 	if !agentgrpc.IsAgentConnected(agentIDStr) {
@@ -308,7 +357,7 @@ func (h *Handler) dispatchInfraPilotProxyConfig(ctx interface{}, agentID, proxyI
 	}
 
 	// Generate special InfraPilot nginx config that routes /api to backend
-	config := generateInfraPilotNginxConfig(domain, forceSSL, http2, sslEnabled)
+	config := generateInfraPilotNginxConfig(domain, forceSSL, http2, sslEnabled, certPath, keyPath)
 
 	// Build config path
 	configPath := filepath.Join("/etc/nginx/sites", domain+".conf")
@@ -336,16 +385,22 @@ func (h *Handler) dispatchInfraPilotProxyConfig(ctx interface{}, agentID, proxyI
 	h.logger.Info("Dispatched InfraPilot proxy config to agent",
 		zap.String("agent_id", agentIDStr),
 		zap.String("domain", domain),
+		zap.Bool("custom_cert", certPath != ""),
 	)
 }
 
 // generateInfraPilotNginxConfig creates the special nginx config for InfraPilot's domain
 // This routes /api/* to backend and everything else to frontend
-func generateInfraPilotNginxConfig(domain string, forceSSL, http2, sslEnabled bool) string {
+// certPath and keyPath are optional - if empty, defaults to Let's Encrypt paths for the domain
+func generateInfraPilotNginxConfig(domain string, forceSSL, http2, sslEnabled bool, certPath, keyPath string) string {
 	var config strings.Builder
 
 	config.WriteString("# Managed by InfraPilot - System Proxy\n")
-	config.WriteString(fmt.Sprintf("# Domain: %s\n\n", domain))
+	config.WriteString(fmt.Sprintf("# Domain: %s\n", domain))
+	if certPath != "" {
+		config.WriteString(fmt.Sprintf("# SSL: Custom certificate from %s\n", certPath))
+	}
+	config.WriteString("\n")
 
 	// HTTP server block
 	config.WriteString("server {\n")
@@ -379,9 +434,14 @@ func generateInfraPilotNginxConfig(domain string, forceSSL, http2, sslEnabled bo
 		}
 		config.WriteString(fmt.Sprintf("    server_name %s;\n\n", domain))
 
-		// SSL configuration
-		config.WriteString(fmt.Sprintf("    ssl_certificate /etc/letsencrypt/live/%s/fullchain.pem;\n", domain))
-		config.WriteString(fmt.Sprintf("    ssl_certificate_key /etc/letsencrypt/live/%s/privkey.pem;\n\n", domain))
+		// SSL configuration - use custom paths if provided, otherwise default to Let's Encrypt
+		if certPath != "" && keyPath != "" {
+			config.WriteString(fmt.Sprintf("    ssl_certificate %s;\n", certPath))
+			config.WriteString(fmt.Sprintf("    ssl_certificate_key %s;\n\n", keyPath))
+		} else {
+			config.WriteString(fmt.Sprintf("    ssl_certificate /etc/letsencrypt/live/%s/fullchain.pem;\n", domain))
+			config.WriteString(fmt.Sprintf("    ssl_certificate_key /etc/letsencrypt/live/%s/privkey.pem;\n\n", domain))
+		}
 
 		config.WriteString("    ssl_protocols TLSv1.2 TLSv1.3;\n")
 		config.WriteString("    ssl_prefer_server_ciphers on;\n")

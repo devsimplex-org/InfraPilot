@@ -183,6 +183,13 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				ssl.GET("/status", h.getSSLStatus)
 				ssl.PUT("/settings", h.RequireRole(auth.RoleSuperAdmin), h.updateSSLSettings)
 				ssl.POST("/request", h.RequireRole(auth.RoleSuperAdmin), h.requestSSLCertificate)
+
+				// Certificate management
+				ssl.GET("/certificates", h.listSSLCertificates)
+				ssl.GET("/certificates/scan", h.scanSSLCertificates)
+				ssl.POST("/certificates", h.RequireRole(auth.RoleSuperAdmin), h.registerSSLCertificate)
+				ssl.GET("/certificates/:id", h.getSSLCertificate)
+				ssl.DELETE("/certificates/:id", h.RequireRole(auth.RoleSuperAdmin), h.deleteSSLCertificate)
 			}
 		}
 
@@ -250,14 +257,16 @@ func (h *Handler) dispatchDefaultPageConfigOnStartup(ctx context.Context) {
 			var orgID uuid.UUID
 			var domain string
 			var sslEnabled, forceSSL, http2 bool
+			var sslCertPath, sslKeyPath *string
 
 			err := h.db.QueryRow(ctx, `
-				SELECT ph.id, ph.agent_id, a.org_id, ph.domain, ph.ssl_enabled, ph.force_ssl, ph.http2_enabled
+				SELECT ph.id, ph.agent_id, a.org_id, ph.domain, ph.ssl_enabled, ph.force_ssl, ph.http2_enabled,
+				       ph.ssl_cert_path, ph.ssl_key_path
 				FROM proxy_hosts ph
 				JOIN agents a ON a.id = ph.agent_id
 				WHERE ph.is_system_proxy = TRUE
 				LIMIT 1
-			`).Scan(&proxyID, &agentID, &orgID, &domain, &sslEnabled, &forceSSL, &http2)
+			`).Scan(&proxyID, &agentID, &orgID, &domain, &sslEnabled, &forceSSL, &http2, &sslCertPath, &sslKeyPath)
 
 			if err != nil {
 				// No domain configured, nothing to do
@@ -278,8 +287,18 @@ func (h *Handler) dispatchDefaultPageConfigOnStartup(ctx context.Context) {
 				zap.String("agent_id", agentIDStr),
 			)
 
+			// Get cert paths from settings if available
+			certPath := ""
+			keyPath := ""
+			if sslCertPath != nil {
+				certPath = *sslCertPath
+			}
+			if sslKeyPath != nil {
+				keyPath = *sslKeyPath
+			}
+
 			// Dispatch the InfraPilot system proxy config (routes /api to backend)
-			h.dispatchInfraPilotProxyConfig(ctx, agentID, proxyID, domain, forceSSL, http2, sslEnabled)
+			h.dispatchInfraPilotProxyConfigWithCert(ctx, agentID, proxyID, domain, forceSSL, http2, sslEnabled, certPath, keyPath)
 
 			// Dispatch the default page config (welcome page for IP access)
 			h.dispatchDefaultPageConfig(agentID, orgID, true)

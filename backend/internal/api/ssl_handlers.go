@@ -2,10 +2,14 @@ package api
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -15,6 +19,24 @@ import (
 
 	agentgrpc "github.com/infrapilot/backend/internal/grpc"
 )
+
+// SSLCertificate represents a registered SSL certificate
+type SSLCertificate struct {
+	ID           uuid.UUID  `json:"id"`
+	OrgID        uuid.UUID  `json:"org_id"`
+	Name         string     `json:"name"`
+	Domain       string     `json:"domain"`
+	IsWildcard   bool       `json:"is_wildcard"`
+	CertPath     string     `json:"cert_path"`
+	KeyPath      string     `json:"key_path"`
+	Issuer       string     `json:"issuer,omitempty"`
+	Subject      string     `json:"subject,omitempty"`
+	SAN          string     `json:"san,omitempty"`
+	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
+	AutoDetected bool       `json:"auto_detected"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+}
 
 // SSLCertificateInfo represents SSL certificate information
 type SSLCertificateInfo struct {
@@ -615,10 +637,389 @@ func (h *Handler) verifyDNS(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"domain":      domain,
-		"configured":  len(ips) > 0,
+		"domain":       domain,
+		"configured":   len(ips) > 0,
 		"resolved_ips": ipStrings,
-		"expected_ip": expectedIP,
-		"matches":     matches,
+		"expected_ip":  expectedIP,
+		"matches":      matches,
 	})
+}
+
+// listSSLCertificates returns all registered SSL certificates
+// GET /api/v1/ssl/certificates
+func (h *Handler) listSSLCertificates(c *gin.Context) {
+	orgID := c.MustGet("org_id").(uuid.UUID)
+
+	rows, err := h.db.Query(c.Request.Context(), `
+		SELECT id, org_id, name, domain, is_wildcard, cert_path, key_path,
+		       issuer, subject, san, expires_at, auto_detected, created_at, updated_at
+		FROM ssl_certificates
+		WHERE org_id = $1
+		ORDER BY domain ASC
+	`, orgID)
+	if err != nil {
+		h.logger.Error("Failed to list SSL certificates", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list certificates"})
+		return
+	}
+	defer rows.Close()
+
+	certs := []SSLCertificate{}
+	for rows.Next() {
+		var cert SSLCertificate
+		var issuer, subject, san *string
+		var expiresAt *time.Time
+
+		err := rows.Scan(
+			&cert.ID, &cert.OrgID, &cert.Name, &cert.Domain, &cert.IsWildcard,
+			&cert.CertPath, &cert.KeyPath, &issuer, &subject, &san,
+			&expiresAt, &cert.AutoDetected, &cert.CreatedAt, &cert.UpdatedAt,
+		)
+		if err != nil {
+			h.logger.Error("Failed to scan certificate row", zap.Error(err))
+			continue
+		}
+
+		if issuer != nil {
+			cert.Issuer = *issuer
+		}
+		if subject != nil {
+			cert.Subject = *subject
+		}
+		if san != nil {
+			cert.SAN = *san
+		}
+		cert.ExpiresAt = expiresAt
+
+		certs = append(certs, cert)
+	}
+
+	c.JSON(http.StatusOK, certs)
+}
+
+// scanSSLCertificates scans /etc/letsencrypt/live for available certificates
+// GET /api/v1/ssl/certificates/scan
+func (h *Handler) scanSSLCertificates(c *gin.Context) {
+	orgID := c.MustGet("org_id").(uuid.UUID)
+
+	letsEncryptDir := "/etc/letsencrypt/live"
+
+	// Check if directory exists
+	if _, err := os.Stat(letsEncryptDir); os.IsNotExist(err) {
+		c.JSON(http.StatusOK, gin.H{
+			"certificates": []SSLCertificate{},
+			"message":      "Let's Encrypt directory not found",
+		})
+		return
+	}
+
+	// Read directory entries
+	entries, err := os.ReadDir(letsEncryptDir)
+	if err != nil {
+		h.logger.Error("Failed to read Let's Encrypt directory", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to scan certificates"})
+		return
+	}
+
+	certs := []SSLCertificate{}
+	for _, entry := range entries {
+		if !entry.IsDir() || entry.Name() == "README" {
+			continue
+		}
+
+		domain := entry.Name()
+		certPath := filepath.Join(letsEncryptDir, domain, "fullchain.pem")
+		keyPath := filepath.Join(letsEncryptDir, domain, "privkey.pem")
+
+		// Check if cert and key files exist
+		if _, err := os.Stat(certPath); os.IsNotExist(err) {
+			continue
+		}
+		if _, err := os.Stat(keyPath); os.IsNotExist(err) {
+			continue
+		}
+
+		// Parse the certificate to extract metadata
+		certInfo, err := parseCertificateFile(certPath)
+		if err != nil {
+			h.logger.Warn("Failed to parse certificate", zap.String("path", certPath), zap.Error(err))
+			continue
+		}
+
+		// Check if already registered
+		var existingID uuid.UUID
+		err = h.db.QueryRow(c.Request.Context(), `
+			SELECT id FROM ssl_certificates WHERE org_id = $1 AND cert_path = $2
+		`, orgID, certPath).Scan(&existingID)
+
+		cert := SSLCertificate{
+			OrgID:        orgID,
+			Name:         certInfo.Subject,
+			Domain:       domain,
+			IsWildcard:   certInfo.IsWildcard,
+			CertPath:     certPath,
+			KeyPath:      keyPath,
+			Issuer:       certInfo.Issuer,
+			Subject:      certInfo.Subject,
+			SAN:          strings.Join(certInfo.SANs, ", "),
+			ExpiresAt:    &certInfo.ExpiresAt,
+			AutoDetected: true,
+		}
+
+		if err == nil {
+			cert.ID = existingID
+		}
+
+		certs = append(certs, cert)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"certificates": certs,
+		"scanned_dir":  letsEncryptDir,
+	})
+}
+
+// registerSSLCertificate registers an external SSL certificate
+// POST /api/v1/ssl/certificates
+func (h *Handler) registerSSLCertificate(c *gin.Context) {
+	orgID := c.MustGet("org_id").(uuid.UUID)
+	userID := c.MustGet("user_id").(uuid.UUID)
+
+	var req struct {
+		Name     string `json:"name"`
+		Domain   string `json:"domain"`
+		CertPath string `json:"cert_path" binding:"required"`
+		KeyPath  string `json:"key_path" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Validate cert file exists and is readable
+	if _, err := os.Stat(req.CertPath); os.IsNotExist(err) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "certificate file not found"})
+		return
+	}
+	if _, err := os.Stat(req.KeyPath); os.IsNotExist(err) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "key file not found"})
+		return
+	}
+
+	// Parse certificate to extract metadata
+	certInfo, err := parseCertificateFile(req.CertPath)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("failed to parse certificate: %v", err)})
+		return
+	}
+
+	// Use domain from cert if not provided
+	domain := req.Domain
+	if domain == "" {
+		if len(certInfo.SANs) > 0 {
+			domain = certInfo.SANs[0]
+		} else {
+			domain = certInfo.Subject
+		}
+	}
+
+	// Use name from cert if not provided
+	name := req.Name
+	if name == "" {
+		name = certInfo.Subject
+	}
+
+	// Check for duplicate
+	var existingID uuid.UUID
+	err = h.db.QueryRow(c.Request.Context(), `
+		SELECT id FROM ssl_certificates WHERE org_id = $1 AND cert_path = $2
+	`, orgID, req.CertPath).Scan(&existingID)
+
+	if err == nil {
+		// Update existing
+		_, err = h.db.Exec(c.Request.Context(), `
+			UPDATE ssl_certificates SET
+				name = $1, domain = $2, is_wildcard = $3, key_path = $4,
+				issuer = $5, subject = $6, san = $7, expires_at = $8,
+				auto_detected = FALSE, updated_at = NOW()
+			WHERE id = $9
+		`, name, domain, certInfo.IsWildcard, req.KeyPath,
+			certInfo.Issuer, certInfo.Subject, strings.Join(certInfo.SANs, ", "),
+			certInfo.ExpiresAt, existingID)
+
+		if err != nil {
+			h.logger.Error("Failed to update certificate", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update certificate"})
+			return
+		}
+
+		h.auditLog(c, userID, orgID, "ssl.certificate.update", "ssl_certificates", existingID, req)
+
+		c.JSON(http.StatusOK, gin.H{
+			"id":      existingID,
+			"message": "certificate updated",
+		})
+		return
+	}
+
+	// Insert new
+	var certID uuid.UUID
+	err = h.db.QueryRow(c.Request.Context(), `
+		INSERT INTO ssl_certificates (org_id, name, domain, is_wildcard, cert_path, key_path, issuer, subject, san, expires_at, auto_detected)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, FALSE)
+		RETURNING id
+	`, orgID, name, domain, certInfo.IsWildcard, req.CertPath, req.KeyPath,
+		certInfo.Issuer, certInfo.Subject, strings.Join(certInfo.SANs, ", "),
+		certInfo.ExpiresAt).Scan(&certID)
+
+	if err != nil {
+		h.logger.Error("Failed to register certificate", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to register certificate"})
+		return
+	}
+
+	h.auditLog(c, userID, orgID, "ssl.certificate.register", "ssl_certificates", certID, req)
+
+	c.JSON(http.StatusCreated, gin.H{
+		"id":         certID,
+		"name":       name,
+		"domain":     domain,
+		"is_wildcard": certInfo.IsWildcard,
+		"issuer":     certInfo.Issuer,
+		"expires_at": certInfo.ExpiresAt,
+		"message":    "certificate registered",
+	})
+}
+
+// deleteSSLCertificate removes a registered SSL certificate
+// DELETE /api/v1/ssl/certificates/:id
+func (h *Handler) deleteSSLCertificate(c *gin.Context) {
+	orgID := c.MustGet("org_id").(uuid.UUID)
+	userID := c.MustGet("user_id").(uuid.UUID)
+
+	certID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid certificate ID"})
+		return
+	}
+
+	// Check if certificate is in use by any proxy
+	var inUseCount int
+	h.db.QueryRow(c.Request.Context(), `
+		SELECT COUNT(*) FROM proxy_hosts WHERE ssl_certificate_id = $1
+	`, certID).Scan(&inUseCount)
+
+	if inUseCount > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":    "certificate is in use by proxy hosts",
+			"in_use_count": inUseCount,
+		})
+		return
+	}
+
+	result, err := h.db.Exec(c.Request.Context(), `
+		DELETE FROM ssl_certificates WHERE id = $1 AND org_id = $2
+	`, certID, orgID)
+	if err != nil {
+		h.logger.Error("Failed to delete certificate", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete certificate"})
+		return
+	}
+
+	if result.RowsAffected() == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "certificate not found"})
+		return
+	}
+
+	h.auditLog(c, userID, orgID, "ssl.certificate.delete", "ssl_certificates", certID, nil)
+
+	c.JSON(http.StatusOK, gin.H{"message": "certificate deleted"})
+}
+
+// getSSLCertificate gets a specific SSL certificate by ID
+// GET /api/v1/ssl/certificates/:id
+func (h *Handler) getSSLCertificate(c *gin.Context) {
+	orgID := c.MustGet("org_id").(uuid.UUID)
+
+	certID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid certificate ID"})
+		return
+	}
+
+	var cert SSLCertificate
+	var issuer, subject, san *string
+	var expiresAt *time.Time
+
+	err = h.db.QueryRow(c.Request.Context(), `
+		SELECT id, org_id, name, domain, is_wildcard, cert_path, key_path,
+		       issuer, subject, san, expires_at, auto_detected, created_at, updated_at
+		FROM ssl_certificates
+		WHERE id = $1 AND org_id = $2
+	`, certID, orgID).Scan(
+		&cert.ID, &cert.OrgID, &cert.Name, &cert.Domain, &cert.IsWildcard,
+		&cert.CertPath, &cert.KeyPath, &issuer, &subject, &san,
+		&expiresAt, &cert.AutoDetected, &cert.CreatedAt, &cert.UpdatedAt,
+	)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "certificate not found"})
+		return
+	}
+
+	if issuer != nil {
+		cert.Issuer = *issuer
+	}
+	if subject != nil {
+		cert.Subject = *subject
+	}
+	if san != nil {
+		cert.SAN = *san
+	}
+	cert.ExpiresAt = expiresAt
+
+	c.JSON(http.StatusOK, cert)
+}
+
+// CertificateInfo holds parsed certificate metadata
+type CertificateInfo struct {
+	Subject    string
+	Issuer     string
+	SANs       []string
+	ExpiresAt  time.Time
+	IsWildcard bool
+}
+
+// parseCertificateFile reads and parses a PEM certificate file
+func parseCertificateFile(certPath string) (*CertificateInfo, error) {
+	certPEM, err := os.ReadFile(certPath)
+	if err != nil {
+		return nil, fmt.Errorf("read certificate: %w", err)
+	}
+
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		return nil, fmt.Errorf("failed to decode PEM block")
+	}
+
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("parse certificate: %w", err)
+	}
+
+	info := &CertificateInfo{
+		Subject:   cert.Subject.CommonName,
+		Issuer:    cert.Issuer.CommonName,
+		SANs:      cert.DNSNames,
+		ExpiresAt: cert.NotAfter,
+	}
+
+	// Check if any SAN is a wildcard
+	for _, san := range cert.DNSNames {
+		if strings.HasPrefix(san, "*.") {
+			info.IsWildcard = true
+			break
+		}
+	}
+
+	return info, nil
 }
