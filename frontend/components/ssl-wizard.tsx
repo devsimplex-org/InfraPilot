@@ -234,11 +234,20 @@ export function SSLWizard({
       setError("Please select a certificate");
       return;
     }
+
+    // Find the selected certificate to get its paths
+    const selectedCert = availableCerts.find(c => c.id === selectedCertId);
+    if (!selectedCert) {
+      setError("Selected certificate not found");
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setRequestStatus("pending");
     try {
       // Update the domain config with the selected certificate
+      // Pass cert paths directly for scanned (unregistered) certificates
       await api.updateInfraPilotDomain({
         domain,
         ssl_enabled: true,
@@ -246,6 +255,8 @@ export function SSLWizard({
         http2_enabled: true,
         ssl_source: "wildcard",
         ssl_certificate_id: selectedCertId,
+        ssl_cert_path: selectedCert.cert_path,
+        ssl_key_path: selectedCert.key_path,
       });
       setRequestStatus("success");
       setResultMessage("SSL certificate applied successfully using wildcard certificate");

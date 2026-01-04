@@ -752,7 +752,18 @@ func (h *Handler) scanSSLCertificates(c *gin.Context) {
 			SELECT id FROM ssl_certificates WHERE org_id = $1 AND cert_path = $2
 		`, orgID, certPath).Scan(&existingID)
 
+		// Generate a deterministic UUID from cert_path for unregistered certs
+		// This ensures consistent IDs across scans
+		var certID uuid.UUID
+		if err == nil {
+			certID = existingID
+		} else {
+			// Use UUID v5 with a namespace to generate deterministic ID from cert path
+			certID = uuid.NewSHA1(uuid.NameSpaceURL, []byte(certPath))
+		}
+
 		cert := SSLCertificate{
+			ID:           certID,
 			OrgID:        orgID,
 			Name:         certInfo.Subject,
 			Domain:       domain,
@@ -764,10 +775,6 @@ func (h *Handler) scanSSLCertificates(c *gin.Context) {
 			SAN:          strings.Join(certInfo.SANs, ", "),
 			ExpiresAt:    &certInfo.ExpiresAt,
 			AutoDetected: true,
-		}
-
-		if err == nil {
-			cert.ID = existingID
 		}
 
 		certs = append(certs, cert)

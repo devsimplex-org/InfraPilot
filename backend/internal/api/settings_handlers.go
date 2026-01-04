@@ -102,6 +102,8 @@ type UpdateInfraPilotDomainRequest struct {
 	HTTP2Enabled     bool    `json:"http2_enabled"`
 	SSLSource        string  `json:"ssl_source"`         // 'letsencrypt', 'wildcard', 'external'
 	SSLCertificateID *string `json:"ssl_certificate_id"` // Reference to ssl_certificates (for wildcard/external)
+	SSLCertPath      *string `json:"ssl_cert_path"`      // Direct cert path (for scanned/unregistered certs)
+	SSLKeyPath       *string `json:"ssl_key_path"`       // Direct key path (for scanned/unregistered certs)
 }
 
 // updateInfraPilotDomain updates the InfraPilot domain configuration
@@ -146,14 +148,24 @@ func (h *Handler) updateInfraPilotDomain(c *gin.Context) {
 		sslSource = "letsencrypt" // Default
 	}
 
-	if req.SSLCertificateID != nil && *req.SSLCertificateID != "" && (sslSource == "wildcard" || sslSource == "external") {
+	// First, check if direct paths were provided (for scanned/unregistered certs)
+	if req.SSLCertPath != nil && *req.SSLCertPath != "" {
+		certPath = *req.SSLCertPath
+	}
+	if req.SSLKeyPath != nil && *req.SSLKeyPath != "" {
+		keyPath = *req.SSLKeyPath
+	}
+
+	// If no direct paths but certificate ID provided, look up from database
+	if certPath == "" && req.SSLCertificateID != nil && *req.SSLCertificateID != "" && (sslSource == "wildcard" || sslSource == "external") {
 		certID, err := uuid.Parse(*req.SSLCertificateID)
 		if err == nil {
 			err = h.db.QueryRow(c.Request.Context(), `
 				SELECT cert_path, key_path FROM ssl_certificates WHERE id = $1 AND org_id = $2
 			`, certID, orgID).Scan(&certPath, &keyPath)
 			if err != nil {
-				h.logger.Warn("Could not find SSL certificate", zap.String("cert_id", *req.SSLCertificateID), zap.Error(err))
+				h.logger.Warn("Could not find SSL certificate in database, using direct paths if available",
+					zap.String("cert_id", *req.SSLCertificateID), zap.Error(err))
 			}
 		}
 	}

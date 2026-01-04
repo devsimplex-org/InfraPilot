@@ -1245,6 +1245,8 @@ export const api = {
     http2_enabled?: boolean;
     ssl_source?: SSLSource;
     ssl_certificate_id?: string;
+    ssl_cert_path?: string;
+    ssl_key_path?: string;
   }) =>
     fetchAPI<InfraPilotDomainSettings>("/settings/domain", {
       method: "PUT",
