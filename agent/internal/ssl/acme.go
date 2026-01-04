@@ -17,6 +17,7 @@ import (
 	"github.com/go-acme/lego/v4/certificate"
 	"github.com/go-acme/lego/v4/challenge/http01"
 	"github.com/go-acme/lego/v4/lego"
+	"github.com/go-acme/lego/v4/providers/http/webroot"
 	"github.com/go-acme/lego/v4/registration"
 	"go.uber.org/zap"
 )
@@ -24,6 +25,7 @@ import (
 // CertManager handles SSL certificate operations with Let's Encrypt
 type CertManager struct {
 	CertDir     string // Base directory for certificates (e.g., /etc/letsencrypt)
+	WebRoot     string // Webroot directory for ACME HTTP-01 challenge (e.g., /var/www/acme-challenge)
 	Email       string // Email for Let's Encrypt account
 	Staging     bool   // Use staging server for testing
 	logger      *zap.Logger
@@ -31,9 +33,10 @@ type CertManager struct {
 }
 
 // NewCertManager creates a new certificate manager
-func NewCertManager(certDir, email string, staging bool, logger *zap.Logger) *CertManager {
+func NewCertManager(certDir, webRoot, email string, staging bool, logger *zap.Logger) *CertManager {
 	return &CertManager{
 		CertDir:     certDir,
+		WebRoot:     webRoot,
 		Email:       email,
 		Staging:     staging,
 		logger:      logger,
@@ -87,11 +90,28 @@ func (m *CertManager) RequestCertificate(domain string) error {
 		return fmt.Errorf("failed to create ACME client: %w", err)
 	}
 
-	// Use HTTP-01 challenge
-	// The challenge server will be on port 80, which should be proxied by nginx
-	err = client.Challenge.SetHTTP01Provider(http01.NewProviderServer("", "80"))
-	if err != nil {
-		return fmt.Errorf("failed to set HTTP-01 provider: %w", err)
+	// Use HTTP-01 challenge with webroot
+	// Nginx will serve the challenge files from the webroot directory
+	if m.WebRoot != "" {
+		// Ensure webroot directory exists
+		if err := os.MkdirAll(m.WebRoot, 0755); err != nil {
+			return fmt.Errorf("failed to create webroot directory: %w", err)
+		}
+
+		provider, err := webroot.NewHTTPProvider(m.WebRoot)
+		if err != nil {
+			return fmt.Errorf("failed to create webroot provider: %w", err)
+		}
+		err = client.Challenge.SetHTTP01Provider(provider)
+		if err != nil {
+			return fmt.Errorf("failed to set HTTP-01 provider: %w", err)
+		}
+	} else {
+		// Fallback to standalone server (for backwards compatibility)
+		err = client.Challenge.SetHTTP01Provider(http01.NewProviderServer("", "80"))
+		if err != nil {
+			return fmt.Errorf("failed to set HTTP-01 provider: %w", err)
+		}
 	}
 
 	// Register if needed

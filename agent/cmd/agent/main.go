@@ -128,12 +128,14 @@ func main() {
 	if cfg.IsManagedProxy() {
 		certManager = ssl.NewCertManager(
 			cfg.LetsEncryptDir,
+			cfg.ACMEWebRoot,
 			cfg.LetsEncryptEmail,
 			cfg.LetsEncryptStage,
 			logger,
 		)
 		logger.Info("SSL certificate manager initialized",
 			zap.String("dir", cfg.LetsEncryptDir),
+			zap.String("webroot", cfg.ACMEWebRoot),
 			zap.String("email", cfg.LetsEncryptEmail),
 			zap.Bool("staging", cfg.LetsEncryptStage),
 		)

@@ -422,7 +422,7 @@ func writeInfraPilotLocations(config *strings.Builder) {
 	// ACME challenge for Let's Encrypt
 	config.WriteString("    # ACME challenge for Let's Encrypt\n")
 	config.WriteString("    location /.well-known/acme-challenge/ {\n")
-	config.WriteString("        root /data/letsencrypt/webroot;\n")
+	config.WriteString("        root /var/www/acme-challenge;\n")
 	config.WriteString("    }\n")
 }
 

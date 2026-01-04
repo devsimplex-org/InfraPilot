@@ -65,6 +65,7 @@ services:
       - ./deployments/nginx/base.conf:/etc/nginx/conf.d/default.conf:ro
       - nginx_dev_conf:/etc/nginx/sites
       - nginx_dev_certs:/etc/letsencrypt
+      - acme_webroot:/var/www/acme-challenge
     depends_on:
       - frontend
       - backend
@@ -142,10 +143,14 @@ services:
       PROXY_MODE: managed
       DATA_DIR: /var/lib/infrapilot-agent
       LOG_PERSISTENCE: "true"
+      ACME_WEBROOT: /var/www/acme-challenge
+      CERT_DIR: /etc/letsencrypt
     volumes:
       - ./agent:/app
       - /var/run/docker.sock:/var/run/docker.sock
       - nginx_dev_conf:/etc/nginx/sites
+      - nginx_dev_certs:/etc/letsencrypt
+      - acme_webroot:/var/www/acme-challenge
       - go_mod_cache:/go/pkg/mod
       - agent_dev_data:/var/lib/infrapilot-agent
     depends_on:
@@ -163,5 +168,6 @@ volumes:
   redis_dev_data:
   nginx_dev_conf:
   nginx_dev_certs:
+  acme_webroot:
   go_mod_cache:
   agent_dev_data:
