@@ -124,6 +124,9 @@ func main() {
 		}
 	}()
 
+	// Start background tasks (like dispatching default page config on startup)
+	apiHandler.StartBackgroundTasks(ctx)
+
 	// Start alert evaluator
 	var alertEvaluator *alerts.AlertEvaluator
 	alertEvaluator, err = alerts.NewAlertEvaluator(pool, logger)

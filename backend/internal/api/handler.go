@@ -1,11 +1,16 @@
 package api
 
 import (
+	"context"
+	"time"
+
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 
 	"github.com/infrapilot/backend/internal/auth"
+	agentgrpc "github.com/infrapilot/backend/internal/grpc"
 )
 
 type Handler struct {
@@ -213,4 +218,73 @@ func (h *Handler) healthCheck(c *gin.Context) {
 		"status":  "ok",
 		"edition": "community",
 	})
+}
+
+// StartBackgroundTasks starts background tasks like dispatching default page config
+// This should be called after the HTTP server starts
+func (h *Handler) StartBackgroundTasks(ctx context.Context) {
+	go h.dispatchDefaultPageConfigOnStartup(ctx)
+}
+
+// dispatchDefaultPageConfigOnStartup checks if a domain is configured and dispatches
+// the default page config and system proxy config once an agent connects
+func (h *Handler) dispatchDefaultPageConfigOnStartup(ctx context.Context) {
+	// Wait a bit for the agent to connect
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	dispatched := false
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if dispatched {
+				return
+			}
+
+			// Check if a domain is configured for InfraPilot
+			var agentID uuid.UUID
+			var proxyID uuid.UUID
+			var orgID uuid.UUID
+			var domain string
+			var sslEnabled, forceSSL, http2 bool
+
+			err := h.db.QueryRow(ctx, `
+				SELECT ph.id, ph.agent_id, a.org_id, ph.domain, ph.ssl_enabled, ph.force_ssl, ph.http2_enabled
+				FROM proxy_hosts ph
+				JOIN agents a ON a.id = ph.agent_id
+				WHERE ph.is_system_proxy = TRUE
+				LIMIT 1
+			`).Scan(&proxyID, &agentID, &orgID, &domain, &sslEnabled, &forceSSL, &http2)
+
+			if err != nil {
+				// No domain configured, nothing to do
+				h.logger.Debug("No InfraPilot domain configured yet")
+				return
+			}
+
+			// Check if agent is connected
+			agentIDStr := agentID.String()
+			if !agentgrpc.IsAgentConnected(agentIDStr) {
+				h.logger.Debug("Waiting for agent to connect before dispatching startup config")
+				continue
+			}
+
+			// Agent is connected and domain is configured
+			h.logger.Info("Dispatching startup configs",
+				zap.String("domain", domain),
+				zap.String("agent_id", agentIDStr),
+			)
+
+			// Dispatch the InfraPilot system proxy config (routes /api to backend)
+			h.dispatchInfraPilotProxyConfig(ctx, agentID, proxyID, domain, forceSSL, http2, sslEnabled)
+
+			// Dispatch the default page config (welcome page for IP access)
+			h.dispatchDefaultPageConfig(agentID, orgID, true)
+
+			dispatched = true
+		}
+	}
 }

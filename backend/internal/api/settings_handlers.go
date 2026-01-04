@@ -404,11 +404,12 @@ func generateInfraPilotNginxConfig(domain string, forceSSL, http2, sslEnabled bo
 }
 
 // writeInfraPilotLocations writes the location blocks for InfraPilot
+// Uses localhost addresses for single-container deployment mode
 func writeInfraPilotLocations(config *strings.Builder) {
-	// API routes to backend (uses upstream defined in default.conf)
+	// API routes to backend
 	config.WriteString("    # API routes to backend\n")
 	config.WriteString("    location /api/ {\n")
-	config.WriteString("        proxy_pass http://backend;\n")
+	config.WriteString("        proxy_pass http://127.0.0.1:8080;\n")
 	config.WriteString("        proxy_http_version 1.1;\n")
 	config.WriteString("        proxy_set_header Host $host;\n")
 	config.WriteString("        proxy_set_header X-Real-IP $remote_addr;\n")
@@ -420,17 +421,10 @@ func writeInfraPilotLocations(config *strings.Builder) {
 	config.WriteString("        proxy_buffering off;\n")
 	config.WriteString("    }\n\n")
 
-	// Health check endpoint
-	config.WriteString("    location = /health {\n")
-	config.WriteString("        proxy_pass http://backend/health;\n")
-	config.WriteString("        proxy_http_version 1.1;\n")
-	config.WriteString("        proxy_set_header Host $host;\n")
-	config.WriteString("    }\n\n")
-
-	// Frontend (everything else) (uses upstream defined in default.conf)
+	// Frontend (everything else)
 	config.WriteString("    # Frontend\n")
 	config.WriteString("    location / {\n")
-	config.WriteString("        proxy_pass http://frontend;\n")
+	config.WriteString("        proxy_pass http://127.0.0.1:3000;\n")
 	config.WriteString("        proxy_http_version 1.1;\n")
 	config.WriteString("        proxy_set_header Host $host;\n")
 	config.WriteString("        proxy_set_header X-Real-IP $remote_addr;\n")
@@ -492,7 +486,7 @@ func (h *Handler) dispatchDefaultPageConfig(agentID uuid.UUID, orgID uuid.UUID, 
 		Command: agentgrpc.NginxCommand{
 			Action:        agentgrpc.NginxActionWriteConfig,
 			ConfigContent: welcomeHTML,
-			ConfigPath:    "/usr/share/nginx/html/welcome.html",
+			ConfigPath:    "/var/www/html/welcome.html",
 		},
 	}
 
@@ -629,22 +623,14 @@ func generateWelcomePageHTML(title, heading, message string, showLogo bool) stri
 }
 
 // generateDefaultNginxConfig creates the default.conf that handles IP access
+// Uses localhost addresses for single-container deployment mode
+// Note: /etc/nginx/sites/*.conf and /data/nginx/conf.d/*.conf are included from nginx.conf
 func generateDefaultNginxConfig(domainConfigured bool) string {
 	var config strings.Builder
 
 	config.WriteString("# InfraPilot Base Nginx Configuration\n")
-	config.WriteString("# Auto-generated - do not edit manually\n\n")
-
-	config.WriteString("# Include proxy host configurations managed by InfraPilot\n")
-	config.WriteString("include /etc/nginx/sites/*.conf;\n\n")
-
-	config.WriteString("upstream frontend {\n")
-	config.WriteString("    server frontend:3000;\n")
-	config.WriteString("}\n\n")
-
-	config.WriteString("upstream backend {\n")
-	config.WriteString("    server backend:8080;\n")
-	config.WriteString("}\n\n")
+	config.WriteString("# Auto-generated - do not edit manually\n")
+	config.WriteString("# Note: sites/*.conf and /data/nginx/conf.d/*.conf are included from nginx.conf\n\n")
 
 	// HTTP default server
 	config.WriteString("server {\n")
@@ -655,7 +641,7 @@ func generateDefaultNginxConfig(domainConfigured bool) string {
 	if domainConfigured {
 		// When a domain is configured, serve welcome page for direct IP access
 		config.WriteString("    # Domain is configured - serve welcome page for direct IP access\n")
-		config.WriteString("    root /usr/share/nginx/html;\n\n")
+		config.WriteString("    root /var/www/html;\n\n")
 		config.WriteString("    location / {\n")
 		config.WriteString("        try_files /welcome.html =404;\n")
 		config.WriteString("    }\n")
@@ -664,7 +650,7 @@ func generateDefaultNginxConfig(domainConfigured bool) string {
 		config.WriteString("    # No domain configured - proxy to InfraPilot for initial setup\n")
 		config.WriteString("    # API routes\n")
 		config.WriteString("    location /api/ {\n")
-		config.WriteString("        proxy_pass http://backend;\n")
+		config.WriteString("        proxy_pass http://127.0.0.1:8080;\n")
 		config.WriteString("        proxy_http_version 1.1;\n")
 		config.WriteString("        proxy_set_header Host $host;\n")
 		config.WriteString("        proxy_set_header X-Real-IP $remote_addr;\n")
@@ -676,13 +662,9 @@ func generateDefaultNginxConfig(domainConfigured bool) string {
 		config.WriteString("        proxy_buffering off;\n")
 		config.WriteString("    }\n\n")
 
-		config.WriteString("    location = /api/health {\n")
-		config.WriteString("        proxy_pass http://backend/health;\n")
-		config.WriteString("    }\n\n")
-
 		config.WriteString("    # Frontend\n")
 		config.WriteString("    location / {\n")
-		config.WriteString("        proxy_pass http://frontend;\n")
+		config.WriteString("        proxy_pass http://127.0.0.1:3000;\n")
 		config.WriteString("        proxy_http_version 1.1;\n")
 		config.WriteString("        proxy_set_header Host $host;\n")
 		config.WriteString("        proxy_set_header X-Real-IP $remote_addr;\n")
@@ -694,7 +676,7 @@ func generateDefaultNginxConfig(domainConfigured bool) string {
 
 		config.WriteString("    # Next.js HMR WebSocket\n")
 		config.WriteString("    location /_next/webpack-hmr {\n")
-		config.WriteString("        proxy_pass http://frontend/_next/webpack-hmr;\n")
+		config.WriteString("        proxy_pass http://127.0.0.1:3000/_next/webpack-hmr;\n")
 		config.WriteString("        proxy_http_version 1.1;\n")
 		config.WriteString("        proxy_set_header Upgrade $http_upgrade;\n")
 		config.WriteString("        proxy_set_header Connection \"upgrade\";\n")

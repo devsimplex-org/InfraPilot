@@ -392,13 +392,21 @@ const nginxTemplate = `# Managed by InfraPilot - Do not edit manually
 # Domain: {{ .Domain }}
 
 {{ if and .SSLEnabled .ForceSSL }}
-# HTTP to HTTPS redirect
+# HTTP to HTTPS redirect (with ACME challenge support)
 server {
     listen 80;
     listen [::]:80;
     server_name {{ .Domain }};
 
-    return 301 https://$host$request_uri;
+    # ACME challenge for Let's Encrypt certificate renewal
+    location /.well-known/acme-challenge/ {
+        root /var/www/acme-challenge;
+        try_files $uri =404;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
 }
 {{ else if not .SSLEnabled }}
 # HTTP server
@@ -406,6 +414,12 @@ server {
     listen 80;
     listen [::]:80;
     server_name {{ .Domain }};
+
+    # ACME challenge for Let's Encrypt certificate issuance
+    location /.well-known/acme-challenge/ {
+        root /var/www/acme-challenge;
+        try_files $uri =404;
+    }
 
     location / {
         proxy_pass {{ .Upstream }};
