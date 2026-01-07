@@ -1,0 +1,67 @@
+# =============================================================
+# InfraPilot - Production Deployment
+# =============================================================
+#
+# Quick Start:
+#   1. Generate a secure JWT secret:
+#      openssl rand -base64 32
+#
+#   2. Create .env file:
+#      JWT_SECRET=your-generated-secret-here
+#
+#   3. Start InfraPilot:
+#      docker compose -f docker-compose.infrapilot.yml up -d
+#
+#   4. Access dashboard:
+#      http://your-server-ip
+#
+# =============================================================
+
+services:
+  infrapilot:
+    image: devsimplex/infrapilot:latest
+    container_name: infrapilot
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # Required: Docker socket for container management
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Persistent data (database, configs, certs)
+      - infrapilot_data:/data
+    environment:
+      # Required: JWT secret for authentication (generate with: openssl rand -base64 32)
+      JWT_SECRET: "${JWT_SECRET:?JWT_SECRET is required}"
+
+      # Optional: Let's Encrypt SSL certificates
+      # LETSENCRYPT_EMAIL: admin@yourdomain.com
+      # LETSENCRYPT_STAGING: "false"  # Set to "false" for production certs
+
+      # Optional: Basic auth protection (before first user is created)
+      # BASIC_AUTH_USER: admin
+      # BASIC_AUTH_PASSWORD: changeme
+
+      # Optional: Use external PostgreSQL
+      # DATABASE_URL: postgres://user:pass@host:5432/dbname?sslmode=require
+
+      # Optional: Use external Redis
+      # REDIS_URL: redis://:password@host:6379
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+    networks:
+      - infrapilot
+
+networks:
+  infrapilot:
+    name: infrapilot
+    driver: bridge
+
+volumes:
+  infrapilot_data:
+    name: infrapilot_data

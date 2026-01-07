@@ -721,12 +721,13 @@ func (h *CommandHandler) handleNetworkCommand(ctx context.Context, cmd *agentgrp
 
 // SSLCommand represents an SSL-related command from the backend
 type SSLCommand struct {
-	Action      string `json:"action"`       // request_cert, renew_cert, check_cert, revoke_cert
-	Domain      string `json:"domain"`
-	Email       string `json:"email,omitempty"`
-	DNSProvider string `json:"dns_provider,omitempty"`
-	Staging     bool   `json:"staging,omitempty"`
-	ForceRenew  bool   `json:"force_renew,omitempty"`
+	Action        string `json:"action"` // request_cert, renew_cert, check_cert, start_dns_challenge, complete_dns_challenge
+	Domain        string `json:"domain"`
+	Email         string `json:"email,omitempty"`
+	DNSProvider   string `json:"dns_provider,omitempty"`
+	Staging       bool   `json:"staging,omitempty"`
+	ForceRenew    bool   `json:"force_renew,omitempty"`
+	ChallengeType string `json:"challenge_type,omitempty"` // "http" or "dns" (default: http)
 }
 
 func (h *CommandHandler) handleSSLCommand(ctx context.Context, cmd *agentgrpc.BackendMessage) *agentgrpc.CommandResult {
@@ -823,6 +824,85 @@ func (h *CommandHandler) handleSSLCommand(ctx context.Context, cmd *agentgrpc.Ba
 		return &agentgrpc.CommandResult{
 			Success: true,
 			Message: "certificate info retrieved",
+			Data:    data,
+		}
+
+	case "start_dns_challenge":
+		// Start DNS-01 challenge for wildcard certificates
+		if sslCmd.Email != "" {
+			h.certManager.Email = sslCmd.Email
+		}
+		h.certManager.Staging = sslCmd.Staging
+
+		if h.certManager.Email == "" {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: "Let's Encrypt email not configured",
+			}
+		}
+
+		challenge, err := h.certManager.StartDNSChallenge(sslCmd.Domain)
+		if err != nil {
+			h.logger.Error("Failed to start DNS challenge",
+				zap.String("domain", sslCmd.Domain),
+				zap.Error(err),
+			)
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("failed to start DNS challenge: %v", err),
+			}
+		}
+
+		data, _ := json.Marshal(challenge)
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: "DNS challenge started - add TXT record and complete",
+			Data:    data,
+		}
+
+	case "complete_dns_challenge":
+		// Complete DNS-01 challenge after TXT record is added
+		if sslCmd.Email != "" {
+			h.certManager.Email = sslCmd.Email
+		}
+		h.certManager.Staging = sslCmd.Staging
+
+		if err := h.certManager.RequestCertificateWithDNS(sslCmd.Domain); err != nil {
+			h.logger.Error("Failed to complete DNS challenge",
+				zap.String("domain", sslCmd.Domain),
+				zap.Error(err),
+			)
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("failed to complete DNS challenge: %v", err),
+			}
+		}
+
+		// Reload nginx to pick up the new certificate
+		if h.nginx != nil {
+			if err := h.nginx.Reload(ctx); err != nil {
+				h.logger.Warn("Failed to reload nginx after certificate request", zap.Error(err))
+			}
+		}
+
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: fmt.Sprintf("SSL certificate obtained via DNS-01 for %s", sslCmd.Domain),
+		}
+
+	case "get_dns_challenge":
+		// Get current DNS challenge info
+		challenge, err := h.certManager.GetDNSChallenge(sslCmd.Domain)
+		if err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("no pending DNS challenge: %v", err),
+			}
+		}
+		data, _ := json.Marshal(challenge)
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: "DNS challenge info retrieved",
 			Data:    data,
 		}
 

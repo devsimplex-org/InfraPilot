@@ -412,7 +412,7 @@ export interface SSLRequestOptions {
 }
 
 // SSL Certificate Management types
-export type SSLSource = 'letsencrypt' | 'wildcard' | 'external';
+export type SSLSource = 'letsencrypt' | 'wildcard' | 'external' | 'dns_challenge';
 
 export interface SSLCertificateRecord {
   id: string;
@@ -1320,6 +1320,54 @@ export const api = {
 
   verifyDNS: (domain: string) =>
     fetchAPI<DNSVerifyResult>(`/ssl/verify-dns/${encodeURIComponent(domain)}`),
+
+  // DNS-01 Challenge (for wildcard certificates)
+  startDNSChallenge: async (options: { domain: string; email?: string; staging?: boolean }): Promise<{
+    success: boolean;
+    message?: string;
+    error?: string;
+    domain: string;
+    txt_record?: string;
+    txt_name?: string;
+    instructions?: string;
+  }> => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+    const res = await fetch(`${API_BASE}/ssl/dns-challenge/start`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(options),
+    });
+    return res.json();
+  },
+
+  completeDNSChallenge: async (options: { domain: string; email?: string; staging?: boolean }): Promise<{
+    success: boolean;
+    message?: string;
+    error?: string;
+    domain: string;
+  }> => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+    const res = await fetch(`${API_BASE}/ssl/dns-challenge/complete`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(options),
+    });
+    return res.json();
+  },
+
+  getDNSChallenge: (domain: string) =>
+    fetchAPI<{ success: boolean; domain: string; txt_record?: string; txt_name?: string; created_at?: string; error?: string }>(`/ssl/dns-challenge/${encodeURIComponent(domain)}`),
+
+  verifyDNSTXTRecord: (domain: string, expectedValue?: string) =>
+    fetchAPI<{ verified: boolean; txt_name: string; found: string[]; expected?: string; error?: string }>(
+      `/ssl/dns-challenge/verify/${encodeURIComponent(domain)}${expectedValue ? `?value=${encodeURIComponent(expectedValue)}` : ''}`
+    ),
 
   // SSL Certificate Management
   listSSLCertificates: () =>

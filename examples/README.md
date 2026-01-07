@@ -1,8 +1,25 @@
 # Examples
 
-This folder contains example configurations for advanced use cases.
+This folder contains example configurations for InfraPilot deployments.
 
 ## Files
+
+### `docker-compose.infrapilot.yml`
+
+**Recommended** - Production deployment with the all-in-one InfraPilot image.
+
+```bash
+# Generate a secure JWT secret
+openssl rand -base64 32
+
+# Create .env file with your secret
+echo "JWT_SECRET=your-generated-secret" > .env
+
+# Start InfraPilot
+docker compose -f docker-compose.infrapilot.yml up -d
+
+# Access at http://your-server-ip
+```
 
 ### `docker-compose.sample-app.yml`
 

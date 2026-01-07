@@ -185,6 +185,12 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				ssl.PUT("/settings", h.RequireRole(auth.RoleSuperAdmin), h.updateSSLSettings)
 				ssl.POST("/request", h.RequireRole(auth.RoleSuperAdmin), h.requestSSLCertificate)
 
+				// DNS-01 Challenge (for wildcard certificates)
+				ssl.POST("/dns-challenge/start", h.RequireRole(auth.RoleSuperAdmin), h.startDNSChallenge)
+				ssl.POST("/dns-challenge/complete", h.RequireRole(auth.RoleSuperAdmin), h.completeDNSChallenge)
+				ssl.GET("/dns-challenge/:domain", h.getDNSChallenge)
+				ssl.GET("/dns-challenge/verify/:domain", h.verifyDNSTXTRecord)
+
 				// Certificate management
 				ssl.GET("/certificates", h.listSSLCertificates)
 				ssl.GET("/certificates/scan", h.scanSSLCertificates)

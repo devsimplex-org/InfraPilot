@@ -33,7 +33,7 @@ interface SSLWizardProps {
   proxyId?: string;
 }
 
-type WizardStep = "check" | "source" | "wildcard" | "dns" | "email" | "request" | "complete";
+type WizardStep = "check" | "source" | "wildcard" | "dns" | "email" | "request" | "dns_challenge" | "dns_verify" | "complete";
 
 export function SSLWizard({
   domain,
@@ -71,6 +71,10 @@ export function SSLWizard({
   const [requestStatus, setRequestStatus] = useState<"pending" | "success" | "error" | null>(null);
   const [resultMessage, setResultMessage] = useState<string>("");
 
+  // DNS Challenge state (for wildcard certs)
+  const [dnsChallenge, setDNSChallenge] = useState<{ txt_record: string; txt_name: string } | null>(null);
+  const [txtVerified, setTxtVerified] = useState(false);
+
   // Reset state when dialog opens/closes
   useEffect(() => {
     if (open) {
@@ -88,6 +92,8 @@ export function SSLWizard({
       setRequestStatus(null);
       setResultMessage("");
       setError(null);
+      setDNSChallenge(null);
+      setTxtVerified(false);
       // Start certificate check
       checkCertificate();
     }
@@ -180,7 +186,15 @@ export function SSLWizard({
     setError(null);
     try {
       await api.updateSSLSettings({ email, staging });
-      setStep("request");
+
+      if (sslSource === "dns_challenge") {
+        // For DNS challenge, start the challenge process
+        const parentDomain = domain.split('.').slice(-2).join('.');
+        const wildcardDomain = `*.${parentDomain}`;
+        await startDNSChallenge(wildcardDomain);
+      } else {
+        setStep("request");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save settings");
     } finally {
@@ -214,6 +228,84 @@ export function SSLWizard({
       const error = err as { message?: string; error?: string };
       const errorMessage = error?.error || error?.message || "Failed to request certificate";
       setError(errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const startDNSChallenge = async (wildcardDomain: string) => {
+    setLoading(true);
+    setError(null);
+    setRequestStatus("pending");
+    try {
+      const response = await api.startDNSChallenge({
+        domain: wildcardDomain,
+        email,
+        staging,
+      });
+      if (response.success && response.txt_record && response.txt_name) {
+        setDNSChallenge({
+          txt_record: response.txt_record,
+          txt_name: response.txt_name,
+        });
+        setRequestStatus(null);
+        setStep("dns_verify");
+      } else {
+        setRequestStatus("error");
+        setError(response.error || "Failed to start DNS challenge");
+      }
+    } catch (err: unknown) {
+      setRequestStatus("error");
+      const error = err as { message?: string; error?: string };
+      setError(error?.error || error?.message || "Failed to start DNS challenge");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const verifyTXTRecord = async () => {
+    if (!dnsChallenge) return;
+
+    setLoading(true);
+    setError(null);
+    try {
+      // Extract base domain for wildcard
+      const baseDomain = domain.startsWith("*.") ? domain.substring(2) : domain;
+      const response = await api.verifyDNSTXTRecord(baseDomain, dnsChallenge.txt_record);
+      setTxtVerified(response.verified);
+      if (!response.verified) {
+        setError(`TXT record not found. Found: ${response.found?.join(", ") || "none"}`);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to verify TXT record");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const completeDNSChallenge = async (wildcardDomain: string) => {
+    setLoading(true);
+    setError(null);
+    setRequestStatus("pending");
+    try {
+      const response = await api.completeDNSChallenge({
+        domain: wildcardDomain,
+        email,
+        staging,
+      });
+      if (response.success) {
+        setRequestStatus("success");
+        setResultMessage(response.message || "Wildcard SSL certificate issued successfully");
+        setStep("complete");
+        onSuccess?.();
+      } else {
+        setRequestStatus("error");
+        setError(response.error || "Failed to complete DNS challenge");
+      }
+    } catch (err: unknown) {
+      setRequestStatus("error");
+      const error = err as { message?: string; error?: string };
+      setError(error?.error || error?.message || "Failed to complete DNS challenge");
     } finally {
       setLoading(false);
     }
@@ -301,7 +393,17 @@ export function SSLWizard({
         { key: "request", label: "Apply", icon: Lock },
       ];
     }
-    // Let's Encrypt flow
+    if (sslSource === "dns_challenge") {
+      // Wildcard certificate via DNS-01 challenge
+      return [
+        { key: "check", label: "Check", icon: Shield },
+        { key: "source", label: "Source", icon: FileKey },
+        { key: "email", label: "Email", icon: Mail },
+        { key: "dns_challenge", label: "DNS TXT", icon: Globe },
+        { key: "dns_verify", label: "Verify", icon: Check },
+      ];
+    }
+    // Let's Encrypt HTTP-01 flow
     return [
       { key: "check", label: "Check", icon: Shield },
       { key: "source", label: "Source", icon: FileKey },
@@ -547,7 +649,39 @@ export function SSLWizard({
                   </div>
                 </button>
 
-                {/* Wildcard option */}
+                {/* Wildcard with DNS-01 challenge option */}
+                <button
+                  onClick={() => setSSLSource("dns_challenge")}
+                  className={cn(
+                    "w-full p-4 rounded-lg border text-left transition-colors",
+                    sslSource === "dns_challenge"
+                      ? "border-primary-500 bg-primary-50 dark:bg-primary-900/20"
+                      : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
+                  )}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className={cn(
+                      "w-5 h-5 rounded-full border-2 flex items-center justify-center mt-0.5",
+                      sslSource === "dns_challenge"
+                        ? "border-primary-500"
+                        : "border-gray-300 dark:border-gray-600"
+                    )}>
+                      {sslSource === "dns_challenge" && (
+                        <div className="w-2.5 h-2.5 rounded-full bg-primary-500" />
+                      )}
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-900 dark:text-white">
+                        Request wildcard certificate (DNS verification)
+                      </p>
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                        Get a wildcard certificate (*.domain.com) via DNS TXT record verification
+                      </p>
+                    </div>
+                  </div>
+                </button>
+
+                {/* Use existing wildcard option */}
                 <button
                   onClick={() => setSSLSource("wildcard")}
                   className={cn(
@@ -587,7 +721,15 @@ export function SSLWizard({
                 </Button>
                 <Button
                   variant="primary"
-                  onClick={() => goToStep(sslSource === "wildcard" ? "wildcard" : "dns")}
+                  onClick={() => {
+                    if (sslSource === "wildcard") {
+                      goToStep("wildcard");
+                    } else if (sslSource === "dns_challenge") {
+                      goToStep("email");
+                    } else {
+                      goToStep("dns");
+                    }
+                  }}
                   icon={ArrowRight}
                 >
                   Continue
@@ -882,7 +1024,7 @@ export function SSLWizard({
 
                   {/* Actions */}
                   <div className="flex justify-between pt-4">
-                    <Button variant="secondary" onClick={() => goToStep("dns")} icon={ArrowLeft}>
+                    <Button variant="secondary" onClick={() => goToStep(sslSource === "dns_challenge" ? "source" : "dns")} icon={ArrowLeft}>
                       Back
                     </Button>
                     <Button
@@ -891,9 +1033,137 @@ export function SSLWizard({
                       disabled={loading || !email}
                       icon={loading ? Loader2 : ArrowRight}
                     >
-                      Continue
+                      {sslSource === "dns_challenge" ? "Start DNS Challenge" : "Continue"}
                     </Button>
                   </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Step: DNS Verify (for wildcard with DNS-01) */}
+          {step === "dns_verify" && (
+            <div className="space-y-4">
+              <div className="text-center mb-4">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                  Add DNS TXT Record
+                </h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Add the following TXT record to verify domain ownership
+                </p>
+              </div>
+
+              {dnsChallenge ? (
+                <div className="space-y-4">
+                  {/* TXT Record Info */}
+                  <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 space-y-3">
+                    <div>
+                      <label className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                        Record Type
+                      </label>
+                      <p className="text-gray-900 dark:text-white font-mono">TXT</p>
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                        Name / Host
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <p className="text-gray-900 dark:text-white font-mono text-sm break-all">{dnsChallenge.txt_name}</p>
+                        <button
+                          onClick={() => copyToClipboard(dnsChallenge.txt_name)}
+                          className="p-1 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300"
+                        >
+                          <Copy className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                        Value / Content
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <p className="text-gray-900 dark:text-white font-mono text-sm break-all">{dnsChallenge.txt_record}</p>
+                        <button
+                          onClick={() => copyToClipboard(dnsChallenge.txt_record)}
+                          className="p-1 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300"
+                        >
+                          <Copy className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Instructions */}
+                  <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                    <h4 className="font-medium text-blue-700 dark:text-blue-300 mb-2">
+                      Instructions:
+                    </h4>
+                    <ol className="text-sm text-blue-600 dark:text-blue-400 space-y-1 list-decimal list-inside">
+                      <li>Log in to your DNS provider (Cloudflare, GoDaddy, etc.)</li>
+                      <li>Add a new TXT record with the name and value above</li>
+                      <li>Wait 1-5 minutes for DNS propagation</li>
+                      <li>Click &quot;Verify TXT Record&quot; to check</li>
+                      <li>Once verified, click &quot;Complete Challenge&quot;</li>
+                    </ol>
+                  </div>
+
+                  {/* Verification Status */}
+                  {txtVerified && (
+                    <div className="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg flex items-center gap-2">
+                      <Check className="h-5 w-5 text-green-500" />
+                      <span className="text-sm text-green-700 dark:text-green-400">
+                        TXT record verified! You can now complete the challenge.
+                      </span>
+                    </div>
+                  )}
+
+                  {requestStatus === "pending" && (
+                    <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                      <div className="flex items-center gap-3">
+                        <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
+                        <div>
+                          <p className="font-medium text-blue-700 dark:text-blue-300">
+                            Completing DNS Challenge...
+                          </p>
+                          <p className="text-sm text-blue-600 dark:text-blue-400">
+                            This may take up to 3 minutes
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Actions */}
+                  <div className="flex justify-between pt-4">
+                    <Button variant="secondary" onClick={() => goToStep("email")} icon={ArrowLeft}>
+                      Back
+                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="ghost"
+                        onClick={verifyTXTRecord}
+                        disabled={loading}
+                        icon={loading ? Loader2 : RefreshCw}
+                      >
+                        Verify TXT Record
+                      </Button>
+                      <Button
+                        variant="primary"
+                        onClick={() => {
+                          const parentDomain = domain.split('.').slice(-2).join('.');
+                          completeDNSChallenge(`*.${parentDomain}`);
+                        }}
+                        disabled={loading || requestStatus === "pending"}
+                        icon={loading ? Loader2 : ShieldCheck}
+                      >
+                        Complete Challenge
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary-500" />
                 </div>
               )}
             </div>

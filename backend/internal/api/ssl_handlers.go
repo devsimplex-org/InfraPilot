@@ -996,6 +996,363 @@ type CertificateInfo struct {
 	IsWildcard bool
 }
 
+// DNSChallengeInfo represents DNS-01 challenge information
+type DNSChallengeInfo struct {
+	Domain    string    `json:"domain"`
+	TXTRecord string    `json:"txt_record"`
+	TXTName   string    `json:"txt_name"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// startDNSChallenge starts a DNS-01 challenge for wildcard certificates
+// POST /api/v1/ssl/dns-challenge/start
+func (h *Handler) startDNSChallenge(c *gin.Context) {
+	orgID := c.MustGet("org_id").(uuid.UUID)
+	userID := c.MustGet("user_id").(uuid.UUID)
+
+	var req struct {
+		Domain  string `json:"domain" binding:"required"`
+		Email   string `json:"email"`
+		Staging bool   `json:"staging"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Get email from settings if not provided
+	if req.Email == "" {
+		var settingsJSON []byte
+		h.db.QueryRow(c.Request.Context(), `
+			SELECT setting_value FROM system_settings
+			WHERE org_id = $1 AND setting_key = 'letsencrypt_config'
+		`, orgID).Scan(&settingsJSON)
+
+		if len(settingsJSON) > 0 {
+			var settings struct {
+				Email   string `json:"email"`
+				Staging bool   `json:"staging"`
+			}
+			if err := json.Unmarshal(settingsJSON, &settings); err == nil {
+				req.Email = settings.Email
+				if !req.Staging {
+					req.Staging = settings.Staging
+				}
+			}
+		}
+	}
+
+	if req.Email == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "email is required for Let's Encrypt"})
+		return
+	}
+
+	// Find an active agent
+	var agentID uuid.UUID
+	err := h.db.QueryRow(c.Request.Context(), `
+		SELECT id FROM agents WHERE org_id = $1 AND status = 'active' LIMIT 1
+	`, orgID).Scan(&agentID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no active agent found"})
+		return
+	}
+
+	agentIDStr := agentID.String()
+
+	if !agentgrpc.IsAgentConnected(agentIDStr) {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "agent not connected"})
+		return
+	}
+
+	// Send start DNS challenge command
+	cmd := agentgrpc.NewSSLStartDNSChallengeCommand(req.Domain, req.Email, req.Staging)
+
+	h.logger.Info("Starting DNS challenge",
+		zap.String("agent_id", agentIDStr),
+		zap.String("domain", req.Domain),
+	)
+
+	resp, err := agentgrpc.SendCommand(agentIDStr, cmd, 60*time.Second)
+	if err != nil {
+		h.logger.Error("DNS challenge start failed", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   fmt.Sprintf("failed to start DNS challenge: %v", err),
+		})
+		return
+	}
+
+	// Audit log
+	h.auditLog(c, userID, orgID, "ssl.dns_challenge.start", "domain", uuid.Nil, req)
+
+	// Parse response
+	if result, ok := resp.Response.(*agentgrpc.CommandResult); ok {
+		if result.Success {
+			// Parse challenge data
+			var challenge DNSChallengeInfo
+			if result.Data != nil {
+				json.Unmarshal(result.Data, &challenge)
+			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"success":    true,
+				"message":    result.Message,
+				"domain":     req.Domain,
+				"txt_record": challenge.TXTRecord,
+				"txt_name":   challenge.TXTName,
+				"instructions": fmt.Sprintf(`Add this TXT record to your DNS:
+
+Name:  %s
+Type:  TXT
+Value: %s
+
+After adding the record, wait 1-5 minutes for DNS propagation, then click "Complete Challenge".`, challenge.TXTName, challenge.TXTRecord),
+			})
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"error":   result.Message,
+			})
+		}
+	} else {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "unexpected response format",
+		})
+	}
+}
+
+// completeDNSChallenge completes a DNS-01 challenge after TXT record is added
+// POST /api/v1/ssl/dns-challenge/complete
+func (h *Handler) completeDNSChallenge(c *gin.Context) {
+	orgID := c.MustGet("org_id").(uuid.UUID)
+	userID := c.MustGet("user_id").(uuid.UUID)
+
+	var req struct {
+		Domain  string `json:"domain" binding:"required"`
+		Email   string `json:"email"`
+		Staging bool   `json:"staging"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Get email from settings if not provided
+	if req.Email == "" {
+		var settingsJSON []byte
+		h.db.QueryRow(c.Request.Context(), `
+			SELECT setting_value FROM system_settings
+			WHERE org_id = $1 AND setting_key = 'letsencrypt_config'
+		`, orgID).Scan(&settingsJSON)
+
+		if len(settingsJSON) > 0 {
+			var settings struct {
+				Email   string `json:"email"`
+				Staging bool   `json:"staging"`
+			}
+			if err := json.Unmarshal(settingsJSON, &settings); err == nil {
+				req.Email = settings.Email
+				if !req.Staging {
+					req.Staging = settings.Staging
+				}
+			}
+		}
+	}
+
+	// Find an active agent
+	var agentID uuid.UUID
+	err := h.db.QueryRow(c.Request.Context(), `
+		SELECT id FROM agents WHERE org_id = $1 AND status = 'active' LIMIT 1
+	`, orgID).Scan(&agentID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no active agent found"})
+		return
+	}
+
+	agentIDStr := agentID.String()
+
+	if !agentgrpc.IsAgentConnected(agentIDStr) {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "agent not connected"})
+		return
+	}
+
+	// Send complete DNS challenge command
+	cmd := agentgrpc.NewSSLCompleteDNSChallengeCommand(req.Domain, req.Email, req.Staging)
+
+	h.logger.Info("Completing DNS challenge",
+		zap.String("agent_id", agentIDStr),
+		zap.String("domain", req.Domain),
+	)
+
+	// DNS challenge completion can take time
+	resp, err := agentgrpc.SendCommand(agentIDStr, cmd, 180*time.Second)
+	if err != nil {
+		h.logger.Error("DNS challenge complete failed", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   fmt.Sprintf("failed to complete DNS challenge: %v", err),
+		})
+		return
+	}
+
+	// Audit log
+	h.auditLog(c, userID, orgID, "ssl.dns_challenge.complete", "domain", uuid.Nil, req)
+
+	// Parse response
+	success := false
+	message := ""
+
+	if result, ok := resp.Response.(*agentgrpc.CommandResult); ok {
+		success = result.Success
+		message = result.Message
+	} else if resultMap, ok := resp.Response.(map[string]interface{}); ok {
+		success, _ = resultMap["success"].(bool)
+		message, _ = resultMap["message"].(string)
+	}
+
+	if success {
+		// Update proxy_hosts if applicable
+		var proxyID uuid.UUID
+		var forceSSL, http2Enabled, isSystemProxy bool
+		err := h.db.QueryRow(c.Request.Context(), `
+			UPDATE proxy_hosts SET ssl_enabled = true, force_ssl = true, status = 'active', updated_at = NOW()
+			WHERE agent_id = $1 AND (domain = $2 OR domain LIKE $3)
+			RETURNING id, force_ssl, http2_enabled, is_system_proxy
+		`, agentID, req.Domain, "%."+strings.TrimPrefix(req.Domain, "*.")).Scan(&proxyID, &forceSSL, &http2Enabled, &isSystemProxy)
+
+		if err == nil {
+			h.logger.Info("Updated proxy_hosts for wildcard SSL",
+				zap.String("domain", req.Domain),
+				zap.String("proxy_id", proxyID.String()),
+			)
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": message,
+			"domain":  req.Domain,
+		})
+	} else {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   message,
+		})
+	}
+}
+
+// getDNSChallenge gets the current DNS challenge info for a domain
+// GET /api/v1/ssl/dns-challenge/:domain
+func (h *Handler) getDNSChallenge(c *gin.Context) {
+	orgID := c.MustGet("org_id").(uuid.UUID)
+	domain := c.Param("domain")
+
+	if domain == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "domain is required"})
+		return
+	}
+
+	// Find an active agent
+	var agentID uuid.UUID
+	err := h.db.QueryRow(c.Request.Context(), `
+		SELECT id FROM agents WHERE org_id = $1 AND status = 'active' LIMIT 1
+	`, orgID).Scan(&agentID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no active agent found"})
+		return
+	}
+
+	agentIDStr := agentID.String()
+
+	if !agentgrpc.IsAgentConnected(agentIDStr) {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "agent not connected"})
+		return
+	}
+
+	cmd := agentgrpc.NewSSLGetDNSChallengeCommand(domain)
+	resp, err := agentgrpc.SendCommand(agentIDStr, cmd, 15*time.Second)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to get DNS challenge: %v", err)})
+		return
+	}
+
+	if result, ok := resp.Response.(*agentgrpc.CommandResult); ok {
+		if result.Success {
+			var challenge DNSChallengeInfo
+			if result.Data != nil {
+				json.Unmarshal(result.Data, &challenge)
+			}
+			c.JSON(http.StatusOK, gin.H{
+				"success":    true,
+				"domain":     domain,
+				"txt_record": challenge.TXTRecord,
+				"txt_name":   challenge.TXTName,
+				"created_at": challenge.CreatedAt,
+			})
+		} else {
+			c.JSON(http.StatusNotFound, gin.H{
+				"success": false,
+				"error":   result.Message,
+			})
+		}
+	} else {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"error":   "no pending DNS challenge",
+		})
+	}
+}
+
+// verifyDNSTXTRecord checks if a TXT record exists for the domain
+// GET /api/v1/ssl/dns-challenge/verify/:domain
+func (h *Handler) verifyDNSTXTRecord(c *gin.Context) {
+	domain := c.Param("domain")
+	if domain == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "domain is required"})
+		return
+	}
+
+	expectedValue := c.Query("value")
+
+	// Build the TXT record name
+	txtName := "_acme-challenge." + domain
+	if strings.HasPrefix(domain, "*.") {
+		txtName = "_acme-challenge." + strings.TrimPrefix(domain, "*.")
+	}
+
+	// Lookup TXT records
+	records, err := net.LookupTXT(txtName)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"verified":   false,
+			"txt_name":   txtName,
+			"error":      fmt.Sprintf("DNS lookup failed: %v", err),
+			"found":      []string{},
+		})
+		return
+	}
+
+	// Check if expected value is present
+	verified := false
+	if expectedValue != "" {
+		for _, record := range records {
+			if record == expectedValue {
+				verified = true
+				break
+			}
+		}
+	} else {
+		verified = len(records) > 0
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"verified": verified,
+		"txt_name": txtName,
+		"found":    records,
+		"expected": expectedValue,
+	})
+}
+
 // parseCertificateFile reads and parses a PEM certificate file
 func parseCertificateFile(certPath string) (*CertificateInfo, error) {
 	certPEM, err := os.ReadFile(certPath)

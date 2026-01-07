@@ -579,10 +579,13 @@ func IsAgentConnected(agentID string) bool {
 
 // SSL Command actions
 const (
-	SSLActionCheckCert   = "check_cert"
-	SSLActionRequestCert = "request_cert"
-	SSLActionRenewCert   = "renew_cert"
-	SSLActionRevokeCert  = "revoke_cert"
+	SSLActionCheckCert           = "check_cert"
+	SSLActionRequestCert         = "request_cert"
+	SSLActionRenewCert           = "renew_cert"
+	SSLActionRevokeCert          = "revoke_cert"
+	SSLActionStartDNSChallenge   = "start_dns_challenge"
+	SSLActionCompleteDNSChallenge = "complete_dns_challenge"
+	SSLActionGetDNSChallenge     = "get_dns_challenge"
 )
 
 // SSLCommand represents an SSL-related command
@@ -606,6 +609,17 @@ type SSLCheckResult struct {
 	IsWildcard     bool      `json:"is_wildcard,omitempty"`
 	SANs           []string  `json:"sans,omitempty"`
 	Error          string    `json:"error,omitempty"`
+}
+
+// DNSChallengeResult represents a DNS-01 challenge info
+type DNSChallengeResult struct {
+	Domain    string    `json:"domain"`
+	Token     string    `json:"token"`
+	KeyAuth   string    `json:"key_auth"`
+	TXTRecord string    `json:"txt_record"`
+	TXTName   string    `json:"txt_name"`
+	CreatedAt time.Time `json:"created_at"`
+	Verified  bool      `json:"verified"`
 }
 
 // NewSSLCheckCommand creates a command to check SSL certificate status
@@ -644,6 +658,46 @@ func NewSSLRenewCommand(domain string, forceRenew bool) *BackendMessage {
 			Action:     SSLActionRenewCert,
 			Domain:     domain,
 			ForceRenew: forceRenew,
+		},
+	}
+}
+
+// NewSSLStartDNSChallengeCommand creates a command to start a DNS-01 challenge
+func NewSSLStartDNSChallengeCommand(domain, email string, staging bool) *BackendMessage {
+	return &BackendMessage{
+		RequestId: uuid.New().String(),
+		Type:      "ssl",
+		Command: SSLCommand{
+			Action:  SSLActionStartDNSChallenge,
+			Domain:  domain,
+			Email:   email,
+			Staging: staging,
+		},
+	}
+}
+
+// NewSSLCompleteDNSChallengeCommand creates a command to complete a DNS-01 challenge
+func NewSSLCompleteDNSChallengeCommand(domain, email string, staging bool) *BackendMessage {
+	return &BackendMessage{
+		RequestId: uuid.New().String(),
+		Type:      "ssl",
+		Command: SSLCommand{
+			Action:  SSLActionCompleteDNSChallenge,
+			Domain:  domain,
+			Email:   email,
+			Staging: staging,
+		},
+	}
+}
+
+// NewSSLGetDNSChallengeCommand creates a command to get the current DNS challenge info
+func NewSSLGetDNSChallengeCommand(domain string) *BackendMessage {
+	return &BackendMessage{
+		RequestId: uuid.New().String(),
+		Type:      "ssl",
+		Command: SSLCommand{
+			Action: SSLActionGetDNSChallenge,
+			Domain: domain,
 		},
 	}
 }
