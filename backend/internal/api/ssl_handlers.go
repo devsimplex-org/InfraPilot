@@ -1085,39 +1085,47 @@ func (h *Handler) startDNSChallenge(c *gin.Context) {
 	// Audit log
 	h.auditLog(c, userID, orgID, "ssl.dns_challenge.start", "domain", uuid.Nil, req)
 
-	// Parse response
-	if result, ok := resp.Response.(*agentgrpc.CommandResult); ok {
-		if result.Success {
-			// Parse challenge data
-			var challenge DNSChallengeInfo
-			if result.Data != nil {
-				json.Unmarshal(result.Data, &challenge)
-			}
+	// Parse response - handle both direct struct and JSON unmarshaled map
+	success := false
+	message := ""
+	var challenge DNSChallengeInfo
 
-			c.JSON(http.StatusOK, gin.H{
-				"success":    true,
-				"message":    result.Message,
-				"domain":     req.Domain,
-				"txt_record": challenge.TXTRecord,
-				"txt_name":   challenge.TXTName,
-				"instructions": fmt.Sprintf(`Add this TXT record to your DNS:
+	if result, ok := resp.Response.(*agentgrpc.CommandResult); ok {
+		success = result.Success
+		message = result.Message
+		if result.Data != nil {
+			json.Unmarshal(result.Data, &challenge)
+		}
+	} else if resultMap, ok := resp.Response.(map[string]interface{}); ok {
+		success, _ = resultMap["success"].(bool)
+		message, _ = resultMap["message"].(string)
+		// Parse the data field which contains challenge info
+		if data, ok := resultMap["data"].(map[string]interface{}); ok {
+			challenge.TXTName, _ = data["txt_name"].(string)
+			challenge.TXTRecord, _ = data["txt_record"].(string)
+			challenge.Domain, _ = data["domain"].(string)
+		}
+	}
+
+	if success {
+		c.JSON(http.StatusOK, gin.H{
+			"success":    true,
+			"message":    message,
+			"domain":     req.Domain,
+			"txt_record": challenge.TXTRecord,
+			"txt_name":   challenge.TXTName,
+			"instructions": fmt.Sprintf(`Add this TXT record to your DNS:
 
 Name:  %s
 Type:  TXT
 Value: %s
 
 After adding the record, wait 1-5 minutes for DNS propagation, then click "Complete Challenge".`, challenge.TXTName, challenge.TXTRecord),
-			})
-		} else {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"success": false,
-				"error":   result.Message,
-			})
-		}
+		})
 	} else {
-		c.JSON(http.StatusInternalServerError, gin.H{
+		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"error":   "unexpected response format",
+			"error":   message,
 		})
 	}
 }
@@ -1276,29 +1284,39 @@ func (h *Handler) getDNSChallenge(c *gin.Context) {
 		return
 	}
 
+	// Parse response - handle both direct struct and JSON unmarshaled map
+	success := false
+	message := ""
+	var challenge DNSChallengeInfo
+
 	if result, ok := resp.Response.(*agentgrpc.CommandResult); ok {
-		if result.Success {
-			var challenge DNSChallengeInfo
-			if result.Data != nil {
-				json.Unmarshal(result.Data, &challenge)
-			}
-			c.JSON(http.StatusOK, gin.H{
-				"success":    true,
-				"domain":     domain,
-				"txt_record": challenge.TXTRecord,
-				"txt_name":   challenge.TXTName,
-				"created_at": challenge.CreatedAt,
-			})
-		} else {
-			c.JSON(http.StatusNotFound, gin.H{
-				"success": false,
-				"error":   result.Message,
-			})
+		success = result.Success
+		message = result.Message
+		if result.Data != nil {
+			json.Unmarshal(result.Data, &challenge)
 		}
+	} else if resultMap, ok := resp.Response.(map[string]interface{}); ok {
+		success, _ = resultMap["success"].(bool)
+		message, _ = resultMap["message"].(string)
+		if data, ok := resultMap["data"].(map[string]interface{}); ok {
+			challenge.TXTName, _ = data["txt_name"].(string)
+			challenge.TXTRecord, _ = data["txt_record"].(string)
+			challenge.Domain, _ = data["domain"].(string)
+		}
+	}
+
+	if success {
+		c.JSON(http.StatusOK, gin.H{
+			"success":    true,
+			"domain":     domain,
+			"txt_record": challenge.TXTRecord,
+			"txt_name":   challenge.TXTName,
+			"created_at": challenge.CreatedAt,
+		})
 	} else {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
-			"error":   "no pending DNS challenge",
+			"error":   message,
 		})
 	}
 }
