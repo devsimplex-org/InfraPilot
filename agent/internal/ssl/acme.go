@@ -794,16 +794,56 @@ type presetDNSProvider struct {
 }
 
 func (p *presetDNSProvider) Present(domain, token, keyAuth string) error {
-	// TXT record should already be in place - just log
 	txtValue := dns01.GetChallengeInfo(domain, keyAuth).Value
 	txtName := "_acme-challenge." + dns01.UnFqdn(domain)
 
-	p.manager.logger.Info("DNS-01 using preset TXT record",
+	p.manager.logger.Info("DNS-01 verifying preset TXT record before ACME submission",
 		zap.String("domain", domain),
 		zap.String("txt_name", txtName),
 		zap.String("txt_value", txtValue),
 	)
-	return nil
+
+	// Verify DNS TXT record exists before submitting to ACME
+	// Retry a few times with short intervals since record should already be in place
+	maxRetries := 6
+	retryInterval := 5 * time.Second
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		records, err := net.LookupTXT(txtName)
+		if err == nil {
+			for _, record := range records {
+				if record == txtValue {
+					p.manager.logger.Info("DNS TXT record verified successfully",
+						zap.String("txt_name", txtName),
+						zap.Int("attempt", attempt),
+					)
+					return nil
+				}
+			}
+			p.manager.logger.Warn("DNS TXT record found but value mismatch",
+				zap.String("txt_name", txtName),
+				zap.String("expected", txtValue),
+				zap.Strings("found", records),
+				zap.Int("attempt", attempt),
+			)
+		} else {
+			p.manager.logger.Warn("DNS TXT record lookup failed",
+				zap.String("txt_name", txtName),
+				zap.Error(err),
+				zap.Int("attempt", attempt),
+			)
+		}
+
+		if attempt < maxRetries {
+			p.manager.logger.Debug("Retrying DNS verification...",
+				zap.Int("attempt", attempt),
+				zap.Int("max_retries", maxRetries),
+			)
+			time.Sleep(retryInterval)
+		}
+	}
+
+	return fmt.Errorf("DNS TXT record verification failed: record '%s' with value '%s' not found after %d attempts - please ensure the DNS record is properly configured and has propagated", txtName, txtValue, maxRetries)
 }
 
 func (p *presetDNSProvider) CleanUp(domain, token, keyAuth string) error {
