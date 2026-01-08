@@ -1369,18 +1369,32 @@ export default function ProxiesPage() {
                   {selectedContainer && containerNetworks?.[0] && (
                     <div
                       className={cn(
-                        "flex items-center gap-2 px-3 py-2 rounded-lg border text-sm",
+                        "flex items-center justify-between px-3 py-2 rounded-lg border text-sm",
                         nginxNetworkCheck?.connected
                           ? "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 text-green-700 dark:text-green-400"
                           : "bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800 text-yellow-700 dark:text-yellow-400"
                       )}
                     >
-                      {nginxNetworkCheck?.connected ? <Check className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
-                      <span>
-                        {nginxNetworkCheck?.connected
-                          ? `Connected to ${containerNetworks[0].network_name}`
-                          : `Nginx not on ${containerNetworks[0].network_name}`}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        {nginxNetworkCheck?.connected ? <Check className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
+                        <span>
+                          {nginxNetworkCheck?.connected
+                            ? `Connected to ${containerNetworks[0].network_name}`
+                            : `Nginx not on ${containerNetworks[0].network_name}`}
+                        </span>
+                      </div>
+                      {!nginxNetworkCheck?.connected && (
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="sm"
+                          icon={Network}
+                          onClick={() => attachNetworkMutation.mutate(containerNetworks[0].network_id)}
+                          disabled={attachNetworkMutation.isPending}
+                        >
+                          {attachNetworkMutation.isPending ? "Attaching..." : "Attach"}
+                        </Button>
+                      )}
                     </div>
                   )}
                   {selectedContainer && (

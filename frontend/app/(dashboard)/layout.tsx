@@ -14,6 +14,9 @@ import {
   Menu,
   X,
   Activity,
+  Network,
+  HardDrive,
+  Image,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuthStore } from "@/lib/auth";
@@ -25,6 +28,9 @@ import { api } from "@/lib/api";
 const navigation = [
   { name: "Overview", href: "/", icon: LayoutDashboard },
   { name: "Containers", href: "/containers", icon: Container },
+  { name: "Networks", href: "/docker/networks", icon: Network },
+  { name: "Volumes", href: "/docker/volumes", icon: HardDrive },
+  { name: "Images", href: "/docker/images", icon: Image },
   { name: "Proxies", href: "/proxies", icon: Globe },
   { name: "Logs", href: "/logs", icon: FileText },
   { name: "Alerts", href: "/alerts", icon: Bell },

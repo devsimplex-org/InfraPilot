@@ -408,14 +408,50 @@ type MetricsResponse struct {
 // ============ Command Stream Types ============
 
 type BackendMessage struct {
-	RequestId string      `json:"request_id"`
-	Command   interface{} `json:"command"` // One of: NginxCommand, DockerCommand, NetworkCommand, etc.
-	Type      string      `json:"type"`    // "nginx", "docker", "network"
+	RequestId string          `json:"request_id"`
+	Command   json.RawMessage `json:"command"` // One of: NginxCommand, DockerCommand, NetworkCommand, etc.
+	Type      string          `json:"type"`    // "nginx", "docker", "network"
 }
 
 type AgentMessage struct {
-	RequestId string      `json:"request_id"`
-	Response  interface{} `json:"response"` // One of: CommandResult, ErrorResponse, etc.
+	RequestId string          `json:"request_id"`
+	Response  json.RawMessage `json:"response"` // One of: CommandResult, ErrorResponse, etc.
+}
+
+// GetCommandResult parses the Response as CommandResult
+func (m *AgentMessage) GetCommandResult() (*CommandResult, error) {
+	if m.Response == nil {
+		return nil, nil
+	}
+	var result CommandResult
+	if err := json.Unmarshal(m.Response, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// GetSSLCheckResult parses the Response as SSLCheckResult
+func (m *AgentMessage) GetSSLCheckResult() (*SSLCheckResult, error) {
+	if m.Response == nil {
+		return nil, nil
+	}
+	var result SSLCheckResult
+	if err := json.Unmarshal(m.Response, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// GetDNSChallengeResult parses the Response as DNSChallengeResult
+func (m *AgentMessage) GetDNSChallengeResult() (*DNSChallengeResult, error) {
+	if m.Response == nil {
+		return nil, nil
+	}
+	var result DNSChallengeResult
+	if err := json.Unmarshal(m.Response, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
 }
 
 // NginxCommand actions (string-based for JSON serialization)
@@ -466,6 +502,35 @@ const (
 	NetworkActionDetachNginxNetwork   = "detach_nginx"
 )
 
+// DockerResourceCommand actions for networks, volumes, images
+const (
+	// Network operations
+	DockerActionInspectNetwork = "inspect_network"
+	DockerActionCreateNetwork  = "create_network"
+	DockerActionDeleteNetwork  = "delete_network"
+	// Volume operations
+	DockerActionListVolumes    = "list_volumes"
+	DockerActionInspectVolume  = "inspect_volume"
+	DockerActionCreateVolume   = "create_volume"
+	DockerActionDeleteVolume   = "delete_volume"
+	// Image operations
+	DockerActionListImages   = "list_images"
+	DockerActionInspectImage = "inspect_image"
+	DockerActionPullImage    = "pull_image"
+	DockerActionDeleteImage  = "delete_image"
+)
+
+// DockerResourceCommand represents a Docker resource command (networks, volumes, images)
+type DockerResourceCommand struct {
+	Action     string                 `json:"action"`
+	NetworkID  string                 `json:"network_id,omitempty"`
+	VolumeName string                 `json:"volume_name,omitempty"`
+	ImageRef   string                 `json:"image_ref,omitempty"`
+	ImageID    string                 `json:"image_id,omitempty"`
+	Force      bool                   `json:"force,omitempty"`
+	Options    map[string]interface{} `json:"options,omitempty"`
+}
+
 type NetworkCommand struct {
 	Action      string `json:"action"`
 	NetworkID   string `json:"network_id,omitempty"`
@@ -508,16 +573,25 @@ type UnimplementedAgentServiceServer struct{}
 
 // ============ Command Helpers ============
 
+// mustMarshal marshals v to json.RawMessage, panics on error
+func mustMarshal(v interface{}) json.RawMessage {
+	data, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return data
+}
+
 // NewNginxWriteConfigCommand creates a command to write nginx config
 func NewNginxWriteConfigCommand(configContent, configPath string) *BackendMessage {
 	return &BackendMessage{
 		RequestId: uuid.New().String(),
 		Type:      "nginx",
-		Command: NginxCommand{
+		Command: mustMarshal(NginxCommand{
 			Action:        NginxActionWriteConfig,
 			ConfigContent: configContent,
 			ConfigPath:    configPath,
-		},
+		}),
 	}
 }
 
@@ -526,9 +600,9 @@ func NewNginxTestConfigCommand() *BackendMessage {
 	return &BackendMessage{
 		RequestId: uuid.New().String(),
 		Type:      "nginx",
-		Command: NginxCommand{
+		Command: mustMarshal(NginxCommand{
 			Action: NginxActionTestConfig,
-		},
+		}),
 	}
 }
 
@@ -537,9 +611,9 @@ func NewNginxReloadCommand() *BackendMessage {
 	return &BackendMessage{
 		RequestId: uuid.New().String(),
 		Type:      "nginx",
-		Command: NginxCommand{
+		Command: mustMarshal(NginxCommand{
 			Action: NginxActionReload,
-		},
+		}),
 	}
 }
 
@@ -548,12 +622,12 @@ func NewNginxSSLCommand(domain, email, dnsProvider string) *BackendMessage {
 	return &BackendMessage{
 		RequestId: uuid.New().String(),
 		Type:      "nginx",
-		Command: NginxCommand{
+		Command: mustMarshal(NginxCommand{
 			Action:      NginxActionRequestSSL,
 			Domain:      domain,
 			Email:       email,
 			DNSProvider: dnsProvider,
-		},
+		}),
 	}
 }
 
@@ -562,10 +636,10 @@ func NewNetworkAttachCommand(networkID string) *BackendMessage {
 	return &BackendMessage{
 		RequestId: uuid.New().String(),
 		Type:      "network",
-		Command: NetworkCommand{
+		Command: mustMarshal(NetworkCommand{
 			Action:    NetworkActionAttachNginxNetwork,
 			NetworkID: networkID,
-		},
+		}),
 	}
 }
 
@@ -627,10 +701,10 @@ func NewSSLCheckCommand(domain string) *BackendMessage {
 	return &BackendMessage{
 		RequestId: uuid.New().String(),
 		Type:      "ssl",
-		Command: SSLCommand{
+		Command: mustMarshal(SSLCommand{
 			Action: SSLActionCheckCert,
 			Domain: domain,
-		},
+		}),
 	}
 }
 
@@ -639,13 +713,13 @@ func NewSSLRequestCommand(domain, email, dnsProvider string, staging bool) *Back
 	return &BackendMessage{
 		RequestId: uuid.New().String(),
 		Type:      "ssl",
-		Command: SSLCommand{
+		Command: mustMarshal(SSLCommand{
 			Action:      SSLActionRequestCert,
 			Domain:      domain,
 			Email:       email,
 			DNSProvider: dnsProvider,
 			Staging:     staging,
-		},
+		}),
 	}
 }
 
@@ -654,11 +728,11 @@ func NewSSLRenewCommand(domain string, forceRenew bool) *BackendMessage {
 	return &BackendMessage{
 		RequestId: uuid.New().String(),
 		Type:      "ssl",
-		Command: SSLCommand{
+		Command: mustMarshal(SSLCommand{
 			Action:     SSLActionRenewCert,
 			Domain:     domain,
 			ForceRenew: forceRenew,
-		},
+		}),
 	}
 }
 
@@ -667,12 +741,12 @@ func NewSSLStartDNSChallengeCommand(domain, email string, staging bool) *Backend
 	return &BackendMessage{
 		RequestId: uuid.New().String(),
 		Type:      "ssl",
-		Command: SSLCommand{
+		Command: mustMarshal(SSLCommand{
 			Action:  SSLActionStartDNSChallenge,
 			Domain:  domain,
 			Email:   email,
 			Staging: staging,
-		},
+		}),
 	}
 }
 
@@ -681,12 +755,12 @@ func NewSSLCompleteDNSChallengeCommand(domain, email string, staging bool) *Back
 	return &BackendMessage{
 		RequestId: uuid.New().String(),
 		Type:      "ssl",
-		Command: SSLCommand{
+		Command: mustMarshal(SSLCommand{
 			Action:  SSLActionCompleteDNSChallenge,
 			Domain:  domain,
 			Email:   email,
 			Staging: staging,
-		},
+		}),
 	}
 }
 
@@ -695,9 +769,9 @@ func NewSSLGetDNSChallengeCommand(domain string) *BackendMessage {
 	return &BackendMessage{
 		RequestId: uuid.New().String(),
 		Type:      "ssl",
-		Command: SSLCommand{
+		Command: mustMarshal(SSLCommand{
 			Action: SSLActionGetDNSChallenge,
 			Domain: domain,
-		},
+		}),
 	}
 }

@@ -212,7 +212,7 @@ func (h *Handler) checkLocalSSL(c *gin.Context, orgID uuid.UUID, domain string) 
 	}
 
 	// Parse response
-	if result, ok := resp.Response.(*agentgrpc.SSLCheckResult); ok {
+	if result, err := resp.GetSSLCheckResult(); err == nil && result != nil {
 		info.Exists = result.Exists
 		info.Issuer = result.Issuer
 		info.ExpiresAt = result.ExpiresAt
@@ -439,12 +439,9 @@ func (h *Handler) requestSSLCertificate(c *gin.Context) {
 	success := false
 	message := ""
 
-	if result, ok := resp.Response.(*agentgrpc.CommandResult); ok {
+	if result, err := resp.GetCommandResult(); err == nil && result != nil {
 		success = result.Success
 		message = result.Message
-	} else if resultMap, ok := resp.Response.(map[string]interface{}); ok {
-		success, _ = resultMap["success"].(bool)
-		message, _ = resultMap["message"].(string)
 	}
 
 	if success {
@@ -998,10 +995,17 @@ type CertificateInfo struct {
 
 // DNSChallengeInfo represents DNS-01 challenge information
 type DNSChallengeInfo struct {
-	Domain    string    `json:"domain"`
-	TXTRecord string    `json:"txt_record"`
-	TXTName   string    `json:"txt_name"`
-	CreatedAt time.Time `json:"created_at"`
+	Domain     string         `json:"domain"`
+	TXTRecord  string         `json:"txt_record"`
+	TXTName    string         `json:"txt_name"`
+	TXTRecords []DNSTXTRecord `json:"txt_records,omitempty"`
+	CreatedAt  time.Time      `json:"created_at"`
+}
+
+// DNSTXTRecord represents a single TXT record for DNS challenge
+type DNSTXTRecord struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 // startDNSChallenge starts a DNS-01 challenge for wildcard certificates
@@ -1072,7 +1076,7 @@ func (h *Handler) startDNSChallenge(c *gin.Context) {
 		zap.String("domain", req.Domain),
 	)
 
-	resp, err := agentgrpc.SendCommand(agentIDStr, cmd, 60*time.Second)
+	resp, err := agentgrpc.SendCommand(agentIDStr, cmd, 90*time.Second)
 	if err != nil {
 		h.logger.Error("DNS challenge start failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -1090,37 +1094,41 @@ func (h *Handler) startDNSChallenge(c *gin.Context) {
 	message := ""
 	var challenge DNSChallengeInfo
 
-	if result, ok := resp.Response.(*agentgrpc.CommandResult); ok {
+	if result, err := resp.GetCommandResult(); err == nil && result != nil {
 		success = result.Success
 		message = result.Message
 		if result.Data != nil {
 			json.Unmarshal(result.Data, &challenge)
 		}
-	} else if resultMap, ok := resp.Response.(map[string]interface{}); ok {
-		success, _ = resultMap["success"].(bool)
-		message, _ = resultMap["message"].(string)
-		// Parse the data field which contains challenge info
-		if data, ok := resultMap["data"].(map[string]interface{}); ok {
-			challenge.TXTName, _ = data["txt_name"].(string)
-			challenge.TXTRecord, _ = data["txt_record"].(string)
-			challenge.Domain, _ = data["domain"].(string)
-		}
 	}
 
 	if success {
-		c.JSON(http.StatusOK, gin.H{
-			"success":    true,
-			"message":    message,
-			"domain":     req.Domain,
-			"txt_record": challenge.TXTRecord,
-			"txt_name":   challenge.TXTName,
-			"instructions": fmt.Sprintf(`Add this TXT record to your DNS:
+		// Build instructions based on number of TXT records
+		var instructions string
+		if len(challenge.TXTRecords) > 1 {
+			instructions = "Add these TXT records to your DNS:\n\n"
+			for i, rec := range challenge.TXTRecords {
+				instructions += fmt.Sprintf("Record %d:\n  Name:  %s\n  Type:  TXT\n  Value: %s\n\n", i+1, rec.Name, rec.Value)
+			}
+			instructions += "IMPORTANT: For wildcard certificates, you need to add ALL records listed above.\nAfter adding all records, wait 1-5 minutes for DNS propagation, then click \"Complete Challenge\"."
+		} else {
+			instructions = fmt.Sprintf(`Add this TXT record to your DNS:
 
 Name:  %s
 Type:  TXT
 Value: %s
 
-After adding the record, wait 1-5 minutes for DNS propagation, then click "Complete Challenge".`, challenge.TXTName, challenge.TXTRecord),
+After adding the record, wait 1-5 minutes for DNS propagation, then click "Complete Challenge".`, challenge.TXTName, challenge.TXTRecord)
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"success":     true,
+			"message":     message,
+			"domain":      req.Domain,
+			"txt_record":  challenge.TXTRecord,
+			"txt_name":    challenge.TXTName,
+			"txt_records": challenge.TXTRecords,
+			"instructions": instructions,
 		})
 	} else {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -1211,12 +1219,9 @@ func (h *Handler) completeDNSChallenge(c *gin.Context) {
 	success := false
 	message := ""
 
-	if result, ok := resp.Response.(*agentgrpc.CommandResult); ok {
+	if result, err := resp.GetCommandResult(); err == nil && result != nil {
 		success = result.Success
 		message = result.Message
-	} else if resultMap, ok := resp.Response.(map[string]interface{}); ok {
-		success, _ = resultMap["success"].(bool)
-		message, _ = resultMap["message"].(string)
 	}
 
 	if success {
@@ -1289,19 +1294,11 @@ func (h *Handler) getDNSChallenge(c *gin.Context) {
 	message := ""
 	var challenge DNSChallengeInfo
 
-	if result, ok := resp.Response.(*agentgrpc.CommandResult); ok {
+	if result, err := resp.GetCommandResult(); err == nil && result != nil {
 		success = result.Success
 		message = result.Message
 		if result.Data != nil {
 			json.Unmarshal(result.Data, &challenge)
-		}
-	} else if resultMap, ok := resp.Response.(map[string]interface{}); ok {
-		success, _ = resultMap["success"].(bool)
-		message, _ = resultMap["message"].(string)
-		if data, ok := resultMap["data"].(map[string]interface{}); ok {
-			challenge.TXTName, _ = data["txt_name"].(string)
-			challenge.TXTRecord, _ = data["txt_record"].(string)
-			challenge.Domain, _ = data["domain"].(string)
 		}
 	}
 

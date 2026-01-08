@@ -765,7 +765,7 @@ func (h *Handler) testProxyConfig(c *gin.Context) {
 	}
 
 	// Parse response
-	if result, ok := resp.Response.(*agentgrpc.CommandResult); ok {
+	if result, err := resp.GetCommandResult(); err == nil && result != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"valid":   result.Success,
 			"message": result.Message,
@@ -1083,7 +1083,7 @@ func (h *Handler) testNginxConfig(c *gin.Context) {
 		return
 	}
 
-	if result, ok := resp.Response.(*agentgrpc.CommandResult); ok {
+	if result, err := resp.GetCommandResult(); err == nil && result != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": result.Success,
 			"message": result.Message,
@@ -1144,7 +1144,7 @@ func (h *Handler) reloadNginx(c *gin.Context) {
 	// Audit log
 	h.auditLog(c, userID, orgID, "nginx.reload", "agent", agentID, nil)
 
-	if result, ok := resp.Response.(*agentgrpc.CommandResult); ok {
+	if result, err := resp.GetCommandResult(); err == nil && result != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": result.Success,
 			"message": result.Message,

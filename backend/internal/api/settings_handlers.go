@@ -375,14 +375,15 @@ func (h *Handler) dispatchInfraPilotProxyConfigWithCert(ctx interface{}, agentID
 	configPath := filepath.Join("/etc/nginx/sites", domain+".conf")
 
 	// Create command with config content
+	cmdPayload, _ := json.Marshal(agentgrpc.NginxCommand{
+		Action:        agentgrpc.NginxActionWriteConfig,
+		ConfigContent: config,
+		ConfigPath:    configPath,
+	})
 	cmd := &agentgrpc.BackendMessage{
 		RequestId: uuid.New().String(),
 		Type:      "nginx",
-		Command: agentgrpc.NginxCommand{
-			Action:        agentgrpc.NginxActionWriteConfig,
-			ConfigContent: config,
-			ConfigPath:    configPath,
-		},
+		Command:   cmdPayload,
 	}
 
 	// Send command
@@ -552,14 +553,15 @@ func (h *Handler) dispatchDefaultPageConfig(agentID uuid.UUID, orgID uuid.UUID, 
 	welcomeHTML := h.getWelcomePageHTML(orgID)
 
 	// Write welcome.html to nginx's html directory
+	htmlPayload, _ := json.Marshal(agentgrpc.NginxCommand{
+		Action:        agentgrpc.NginxActionWriteConfig,
+		ConfigContent: welcomeHTML,
+		ConfigPath:    "/var/www/html/welcome.html",
+	})
 	htmlCmd := &agentgrpc.BackendMessage{
 		RequestId: uuid.New().String(),
 		Type:      "nginx",
-		Command: agentgrpc.NginxCommand{
-			Action:        agentgrpc.NginxActionWriteConfig,
-			ConfigContent: welcomeHTML,
-			ConfigPath:    "/var/www/html/welcome.html",
-		},
+		Command:   htmlPayload,
 	}
 
 	if err := agentgrpc.SendCommandAsync(agentIDStr, htmlCmd); err != nil {
@@ -569,14 +571,15 @@ func (h *Handler) dispatchDefaultPageConfig(agentID uuid.UUID, orgID uuid.UUID, 
 
 	// Generate and dispatch updated default.conf
 	defaultConf := generateDefaultNginxConfig(domainConfigured)
+	confPayload, _ := json.Marshal(agentgrpc.NginxCommand{
+		Action:        agentgrpc.NginxActionWriteConfig,
+		ConfigContent: defaultConf,
+		ConfigPath:    "/etc/nginx/conf.d/default.conf",
+	})
 	confCmd := &agentgrpc.BackendMessage{
 		RequestId: uuid.New().String(),
 		Type:      "nginx",
-		Command: agentgrpc.NginxCommand{
-			Action:        agentgrpc.NginxActionWriteConfig,
-			ConfigContent: defaultConf,
-			ConfigPath:    "/etc/nginx/conf.d/default.conf",
-		},
+		Command:   confPayload,
 	}
 
 	if err := agentgrpc.SendCommandAsync(agentIDStr, confCmd); err != nil {

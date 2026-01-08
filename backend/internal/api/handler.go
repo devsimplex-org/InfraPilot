@@ -111,6 +111,28 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				agents.POST("/:id/networks/detach", h.RequireModifyProxy(), h.detachNginxNetwork)
 				agents.GET("/:id/networks/:nid/check-nginx", h.checkNginxNetwork)
 
+				// Docker Resources (networks, volumes, images)
+				docker := agents.Group("/:id/docker")
+				{
+					// Networks (full CRUD)
+					docker.GET("/networks", h.listDockerNetworks)
+					docker.GET("/networks/:nid", h.inspectDockerNetwork)
+					docker.POST("/networks", h.RequireModifyContainers(), h.createDockerNetwork)
+					docker.DELETE("/networks/:nid", h.RequireModifyContainers(), h.deleteDockerNetwork)
+
+					// Volumes
+					docker.GET("/volumes", h.listDockerVolumes)
+					docker.GET("/volumes/:name", h.inspectDockerVolume)
+					docker.POST("/volumes", h.RequireModifyContainers(), h.createDockerVolume)
+					docker.DELETE("/volumes/:name", h.RequireModifyContainers(), h.deleteDockerVolume)
+
+					// Images
+					docker.GET("/images", h.listDockerImages)
+					docker.GET("/images/:imgid", h.inspectDockerImage)
+					docker.POST("/images/pull", h.RequireModifyContainers(), h.pullDockerImage)
+					docker.DELETE("/images/:imgid", h.RequireModifyContainers(), h.deleteDockerImage)
+				}
+
 				// Logs
 				agents.GET("/:id/logs/nginx", h.getNginxLogsReal)
 				agents.GET("/:id/logs/unified", h.getUnifiedLogsReal)

@@ -44,13 +44,25 @@ type CertManager struct {
 
 // DNSChallenge represents a pending DNS-01 challenge
 type DNSChallenge struct {
-	Domain     string    `json:"domain"`
-	Token      string    `json:"token"`
-	KeyAuth    string    `json:"key_auth"`
-	TXTRecord  string    `json:"txt_record"`
-	TXTName    string    `json:"txt_name"`
-	CreatedAt  time.Time `json:"created_at"`
-	Verified   bool      `json:"verified"`
+	Domain     string            `json:"domain"`
+	Token      string            `json:"token"`
+	KeyAuth    string            `json:"key_auth"`
+	TXTRecord  string            `json:"txt_record"`   // Primary TXT record (for backward compat)
+	TXTName    string            `json:"txt_name"`     // Primary TXT name
+	TXTRecords []DNSTXTRecord    `json:"txt_records"`  // All TXT records needed (for wildcard)
+	CreatedAt  time.Time         `json:"created_at"`
+	Verified   bool              `json:"verified"`
+
+	// Internal state for managing the ACME order flow
+	proceedCh  chan struct{}     `json:"-"` // Signal to proceed with verification
+	resultCh   chan error        `json:"-"` // Result of the ACME operation
+	cancelCh   chan struct{}     `json:"-"` // Cancel the operation
+}
+
+// DNSTXTRecord represents a single TXT record needed for DNS challenge
+type DNSTXTRecord struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 // NewCertManager creates a new certificate manager
@@ -468,15 +480,20 @@ func (p *manualDNSProvider) CleanUp(domain, token, keyAuth string) error {
 // Ensure manualDNSProvider implements the interface
 var _ challenge.Provider = (*manualDNSProvider)(nil)
 
-// captureDNSProvider captures DNS challenge info and waits for user confirmation
-type captureDNSProvider struct {
-	manager     *CertManager
-	domain      string
-	challengeCh chan *DNSChallenge
-	doneCh      chan struct{}
+// multiCaptureDNSProvider captures ALL DNS challenge info and waits for user to signal proceed
+type multiCaptureDNSProvider struct {
+	manager        *CertManager
+	primaryDomain  string
+	txtRecords     []DNSTXTRecord
+	txtRecordsMu   sync.Mutex
+	allCapturedCh  chan struct{}     // Closed when all challenges captured
+	proceedCh      chan struct{}     // Signal to proceed with verification
+	cancelCh       chan struct{}     // Signal to cancel
+	expectedCount  int               // Number of domains to capture
+	capturedCount  int
 }
 
-func (p *captureDNSProvider) Present(domain, token, keyAuth string) error {
+func (p *multiCaptureDNSProvider) Present(domain, token, keyAuth string) error {
 	// Calculate the TXT record value
 	txtValue := dns01.GetChallengeInfo(domain, keyAuth).Value
 	txtName := "_acme-challenge." + dns01.UnFqdn(domain)
@@ -487,84 +504,103 @@ func (p *captureDNSProvider) Present(domain, token, keyAuth string) error {
 		zap.String("txt_value", txtValue),
 	)
 
-	// Create and store the challenge
-	challenge := &DNSChallenge{
-		Domain:    p.domain,
-		Token:     token,
-		KeyAuth:   keyAuth,
-		TXTRecord: txtValue,
-		TXTName:   txtName,
-		CreatedAt: time.Now(),
-		Verified:  false,
+	// Store this TXT record
+	p.txtRecordsMu.Lock()
+	p.txtRecords = append(p.txtRecords, DNSTXTRecord{Name: txtName, Value: txtValue})
+	p.capturedCount++
+	allCaptured := p.capturedCount >= p.expectedCount
+	p.txtRecordsMu.Unlock()
+
+	// If all challenges captured, signal that we're ready
+	if allCaptured {
+		close(p.allCapturedCh)
 	}
 
-	p.manager.dnsChallengesMu.Lock()
-	p.manager.dnsChallenges[p.domain] = challenge
-	p.manager.dnsChallengesMu.Unlock()
-
-	// Send challenge info to the waiting caller (non-blocking)
-	select {
-	case p.challengeCh <- challenge:
-	default:
-	}
-
-	// Now wait for DNS propagation or timeout
-	// We poll for the TXT record to appear
-	p.manager.logger.Info("Waiting for DNS TXT record propagation...",
-		zap.String("txt_name", txtName),
-		zap.String("expected_value", txtValue),
-	)
-
-	// Poll for up to 10 minutes (user needs time to add the record)
-	deadline := time.Now().Add(10 * time.Minute)
-	checkInterval := 10 * time.Second
-
-	for time.Now().Before(deadline) {
-		// Check if TXT record exists
-		records, err := net.LookupTXT(txtName)
-		if err == nil {
-			for _, record := range records {
-				if record == txtValue {
-					p.manager.logger.Info("DNS TXT record verified",
-						zap.String("txt_name", txtName),
-					)
-					return nil
-				}
-			}
-		}
-
-		p.manager.logger.Debug("TXT record not found yet, retrying...",
-			zap.String("txt_name", txtName),
-			zap.Strings("found", records),
-		)
-
-		select {
-		case <-p.doneCh:
-			return fmt.Errorf("challenge cancelled")
-		case <-time.After(checkInterval):
-			// Continue polling
-		}
-	}
-
-	return fmt.Errorf("timeout waiting for DNS TXT record: %s", txtName)
+	// DON'T block here - return immediately so ACME can call Present() for other domains
+	// The blocking happens in the preCheck function instead
+	return nil
 }
 
-func (p *captureDNSProvider) CleanUp(domain, token, keyAuth string) error {
+// preCheck is called before ACME verifies each challenge - this is where we wait for user
+func (p *multiCaptureDNSProvider) preCheck(domain, fqdn, value string, check dns01.PreCheckFunc) (bool, error) {
+	p.manager.logger.Info("Pre-check waiting for user to add DNS TXT record...",
+		zap.String("domain", domain),
+		zap.String("fqdn", fqdn),
+	)
+
+	select {
+	case <-p.proceedCh:
+		// User signaled to proceed - verify DNS record exists
+		p.manager.logger.Info("Proceed signal received, verifying DNS record",
+			zap.String("fqdn", fqdn),
+		)
+	case <-p.cancelCh:
+		return false, fmt.Errorf("challenge cancelled by user")
+	case <-time.After(30 * time.Minute):
+		return false, fmt.Errorf("timeout waiting for user to complete DNS challenge")
+	}
+
+	// Verify DNS TXT record exists (retry a few times)
+	maxRetries := 6
+	retryInterval := 5 * time.Second
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		records, err := net.LookupTXT(fqdn)
+		if err == nil {
+			for _, record := range records {
+				if record == value {
+					p.manager.logger.Info("DNS TXT record verified successfully",
+						zap.String("fqdn", fqdn),
+						zap.Int("attempt", attempt),
+					)
+					return true, nil
+				}
+			}
+			p.manager.logger.Warn("DNS TXT record found but value mismatch",
+				zap.String("fqdn", fqdn),
+				zap.String("expected", value),
+				zap.Strings("found", records),
+				zap.Int("attempt", attempt),
+			)
+		} else {
+			p.manager.logger.Warn("DNS TXT record lookup failed",
+				zap.String("fqdn", fqdn),
+				zap.Error(err),
+				zap.Int("attempt", attempt),
+			)
+		}
+
+		if attempt < maxRetries {
+			time.Sleep(retryInterval)
+		}
+	}
+
+	return false, fmt.Errorf("DNS TXT record verification failed: record '%s' with value '%s' not found after %d attempts", fqdn, value, maxRetries)
+}
+
+func (p *multiCaptureDNSProvider) CleanUp(domain, token, keyAuth string) error {
 	p.manager.logger.Info("DNS-01 challenge cleanup (manual - user should remove TXT record)",
 		zap.String("domain", domain),
 	)
 	return nil
 }
 
-var _ challenge.Provider = (*captureDNSProvider)(nil)
+var _ challenge.Provider = (*multiCaptureDNSProvider)(nil)
 
-// StartDNSChallenge initializes a DNS-01 challenge and returns the TXT record info
-// This creates the ACME account and calculates what TXT record will be needed
+// StartDNSChallenge initializes a DNS-01 challenge and returns ALL TXT record info
+// For wildcard certificates, this returns multiple TXT records that all need to be added
 func (m *CertManager) StartDNSChallenge(domain string) (*DNSChallenge, error) {
 	m.logger.Info("Starting DNS-01 challenge",
 		zap.String("domain", domain),
 		zap.Bool("staging", m.Staging),
 	)
+
+	// Cancel any existing challenge for this domain
+	m.dnsChallengesMu.Lock()
+	if existingChallenge, exists := m.dnsChallenges[domain]; exists && existingChallenge.cancelCh != nil {
+		close(existingChallenge.cancelCh)
+	}
+	m.dnsChallengesMu.Unlock()
 
 	// Get or create user
 	user, err := m.getOrCreateUser()
@@ -597,81 +633,119 @@ func (m *CertManager) StartDNSChallenge(domain string) (*DNSChallenge, error) {
 		}
 		user.Registration = reg
 
-		// Save account
 		if err := m.saveAccount(user); err != nil {
 			m.logger.Warn("Failed to save account", zap.Error(err))
 		}
 	}
 
-	// Calculate the TXT record name
+	// For wildcard certificates, include both the wildcard and base domain
+	domains := []string{domain}
+	expectedCount := 1
+	if strings.HasPrefix(domain, "*.") {
+		baseDomain := strings.TrimPrefix(domain, "*.")
+		domains = []string{domain, baseDomain}
+		expectedCount = 2
+	}
+
+	// Create the multi-capture provider
+	provider := &multiCaptureDNSProvider{
+		manager:       m,
+		primaryDomain: domain,
+		txtRecords:    make([]DNSTXTRecord, 0, expectedCount),
+		allCapturedCh: make(chan struct{}),
+		proceedCh:     make(chan struct{}),
+		cancelCh:      make(chan struct{}),
+		expectedCount: expectedCount,
+	}
+
+	err = client.Challenge.SetDNS01Provider(provider,
+		dns01.AddRecursiveNameservers([]string{"8.8.8.8:53", "1.1.1.1:53"}),
+		dns01.WrapPreCheck(provider.preCheck),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to set DNS-01 provider: %w", err)
+	}
+
+	// Create result channel for the goroutine
+	resultCh := make(chan error, 1)
+
+	// Start the obtain process in a goroutine - this will call Present() for each domain
+	go func() {
+		request := certificate.ObtainRequest{
+			Domains: domains,
+			Bundle:  true,
+		}
+		certificates, obtainErr := client.Certificate.Obtain(request)
+		if obtainErr != nil {
+			m.logger.Error("Certificate obtain failed",
+				zap.String("domain", domain),
+				zap.Error(obtainErr),
+			)
+			resultCh <- obtainErr
+			return
+		}
+
+		// Save certificates
+		saveDomain := domain
+		if strings.HasPrefix(domain, "*.") {
+			saveDomain = strings.TrimPrefix(domain, "*.")
+		}
+
+		if err := m.saveCertificate(saveDomain, certificates); err != nil {
+			resultCh <- fmt.Errorf("failed to save certificate: %w", err)
+			return
+		}
+
+		m.logger.Info("SSL certificate obtained successfully with DNS-01",
+			zap.String("domain", domain),
+			zap.Strings("domains", domains),
+		)
+		resultCh <- nil
+	}()
+
+	// Wait for all challenges to be captured
+	select {
+	case <-provider.allCapturedCh:
+		m.logger.Info("All DNS challenges captured",
+			zap.String("domain", domain),
+			zap.Int("count", len(provider.txtRecords)),
+		)
+	case <-time.After(60 * time.Second):
+		close(provider.cancelCh)
+		return nil, fmt.Errorf("timeout waiting for ACME challenges to be captured")
+	}
+
+	// Calculate primary TXT name
 	baseDomain := domain
 	if strings.HasPrefix(domain, "*.") {
 		baseDomain = strings.TrimPrefix(domain, "*.")
 	}
 	txtName := "_acme-challenge." + baseDomain
 
-	// Create a placeholder challenge - the actual TXT value will be determined
-	// during the certificate request, but we provide the name so user can prepare
-	challenge := &DNSChallenge{
-		Domain:    domain,
-		TXTName:   txtName,
-		TXTRecord: "[Will be provided when challenge starts]",
-		CreatedAt: time.Now(),
-		Verified:  false,
+	// Get the first TXT record value for backward compatibility
+	txtRecord := ""
+	if len(provider.txtRecords) > 0 {
+		txtRecord = provider.txtRecords[0].Value
 	}
 
-	// Store it
+	// Create and store the challenge with all TXT records
+	challenge := &DNSChallenge{
+		Domain:     domain,
+		TXTName:    txtName,
+		TXTRecord:  txtRecord,
+		TXTRecords: provider.txtRecords,
+		CreatedAt:  time.Now(),
+		Verified:   false,
+		proceedCh:  provider.proceedCh,
+		resultCh:   resultCh,
+		cancelCh:   provider.cancelCh,
+	}
+
 	m.dnsChallengesMu.Lock()
 	m.dnsChallenges[domain] = challenge
 	m.dnsChallengesMu.Unlock()
 
-	// To get the actual TXT value, we need to start the ACME process
-	// We'll use a channel-based provider that captures the challenge info
-
-	captureProvider := &captureDNSProvider{
-		manager:     m,
-		domain:      domain,
-		challengeCh: make(chan *DNSChallenge, 1),
-		doneCh:      make(chan struct{}),
-	}
-
-	err = client.Challenge.SetDNS01Provider(captureProvider,
-		dns01.AddRecursiveNameservers([]string{"8.8.8.8:53", "1.1.1.1:53"}),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to set DNS-01 provider: %w", err)
-	}
-
-	// For wildcard certificates, include both the wildcard and base domain
-	domains := []string{domain}
-	if strings.HasPrefix(domain, "*.") {
-		baseDomain := strings.TrimPrefix(domain, "*.")
-		domains = []string{domain, baseDomain}
-	}
-
-	// Start the obtain process in a goroutine
-	go func() {
-		request := certificate.ObtainRequest{
-			Domains: domains,
-			Bundle:  true,
-		}
-		// This will call Present() which captures the challenge and then blocks
-		_, obtainErr := client.Certificate.Obtain(request)
-		if obtainErr != nil {
-			m.logger.Debug("Certificate obtain completed",
-				zap.String("domain", domain),
-				zap.Error(obtainErr),
-			)
-		}
-	}()
-
-	// Wait for the challenge info to be captured
-	select {
-	case capturedChallenge := <-captureProvider.challengeCh:
-		return capturedChallenge, nil
-	case <-time.After(30 * time.Second):
-		return nil, fmt.Errorf("timeout waiting for ACME challenge")
-	}
+	return challenge, nil
 }
 
 // GetDNSChallenge returns the current DNS challenge for a domain
@@ -687,104 +761,57 @@ func (m *CertManager) GetDNSChallenge(domain string) (*DNSChallenge, error) {
 	return challenge, nil
 }
 
-// RequestCertificateWithDNS requests a certificate using DNS-01 challenge
-// The TXT record must already be in place before calling this
+// RequestCertificateWithDNS signals the pending DNS challenge to proceed and waits for the result
+// This should be called after the user has added the TXT records to their DNS
 func (m *CertManager) RequestCertificateWithDNS(domain string) error {
-	m.logger.Info("Requesting SSL certificate with DNS-01",
+	m.logger.Info("Completing DNS-01 challenge",
 		zap.String("domain", domain),
-		zap.Bool("staging", m.Staging),
 	)
 
-	// Get or create user
-	user, err := m.getOrCreateUser()
-	if err != nil {
-		return fmt.Errorf("failed to get user: %w", err)
+	// Get the stored challenge
+	m.dnsChallengesMu.RLock()
+	challenge, exists := m.dnsChallenges[domain]
+	m.dnsChallengesMu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("no pending DNS challenge for domain: %s - please start a DNS challenge first", domain)
 	}
 
-	// Create lego config
-	config := lego.NewConfig(user)
-	if m.Staging {
-		config.CADirURL = lego.LEDirectoryStaging
-	} else {
-		config.CADirURL = lego.LEDirectoryProduction
-	}
-	config.Certificate.KeyType = certcrypto.RSA2048
-
-	// Create client
-	client, err := lego.NewClient(config)
-	if err != nil {
-		return fmt.Errorf("failed to create ACME client: %w", err)
+	if challenge.proceedCh == nil || challenge.resultCh == nil {
+		return fmt.Errorf("DNS challenge state is invalid - please start a new DNS challenge")
 	}
 
-	// Create a provider that just returns success (TXT record should already be in place)
-	dnsProvider := &presetDNSProvider{
-		manager: m,
-		domain:  domain,
-	}
-
-	err = client.Challenge.SetDNS01Provider(dnsProvider,
-		dns01.AddRecursiveNameservers([]string{"8.8.8.8:53", "1.1.1.1:53"}),
-		dns01.DisableCompletePropagationRequirement(),
+	// Signal the waiting goroutine to proceed with verification
+	m.logger.Info("Signaling DNS challenge to proceed",
+		zap.String("domain", domain),
+		zap.Int("txt_records", len(challenge.TXTRecords)),
 	)
-	if err != nil {
-		return fmt.Errorf("failed to set DNS-01 provider: %w", err)
-	}
 
-	// Register if needed
-	if user.Registration == nil {
-		reg, err := client.Registration.Register(registration.RegisterOptions{
-			TermsOfServiceAgreed: true,
-		})
+	// Close proceedCh to signal all waiting Present() calls to proceed
+	close(challenge.proceedCh)
+
+	// Wait for the result with a timeout
+	select {
+	case err := <-challenge.resultCh:
+		// Clean up challenge state
+		m.dnsChallengesMu.Lock()
+		delete(m.dnsChallenges, domain)
+		m.dnsChallengesMu.Unlock()
+
 		if err != nil {
-			return fmt.Errorf("failed to register: %w", err)
+			return fmt.Errorf("DNS challenge failed: %w", err)
 		}
-		user.Registration = reg
-
-		if err := m.saveAccount(user); err != nil {
-			m.logger.Warn("Failed to save account", zap.Error(err))
+		return nil
+	case <-time.After(5 * time.Minute):
+		// Cancel the challenge
+		if challenge.cancelCh != nil {
+			close(challenge.cancelCh)
 		}
+		m.dnsChallengesMu.Lock()
+		delete(m.dnsChallenges, domain)
+		m.dnsChallengesMu.Unlock()
+		return fmt.Errorf("timeout waiting for DNS challenge to complete")
 	}
-
-	// For wildcard certificates, include both the wildcard and base domain
-	domains := []string{domain}
-	if strings.HasPrefix(domain, "*.") {
-		// For wildcard, also include the base domain
-		baseDomain := strings.TrimPrefix(domain, "*.")
-		domains = []string{domain, baseDomain}
-	}
-
-	// Request certificate
-	request := certificate.ObtainRequest{
-		Domains: domains,
-		Bundle:  true,
-	}
-
-	certificates, err := client.Certificate.Obtain(request)
-	if err != nil {
-		return fmt.Errorf("failed to obtain certificate: %w", err)
-	}
-
-	// Save certificates - use base domain for wildcard certs
-	saveDomain := domain
-	if strings.HasPrefix(domain, "*.") {
-		saveDomain = strings.TrimPrefix(domain, "*.")
-	}
-
-	if err := m.saveCertificate(saveDomain, certificates); err != nil {
-		return fmt.Errorf("failed to save certificate: %w", err)
-	}
-
-	// Clean up challenge state
-	m.dnsChallengesMu.Lock()
-	delete(m.dnsChallenges, domain)
-	m.dnsChallengesMu.Unlock()
-
-	m.logger.Info("SSL certificate obtained successfully with DNS-01",
-		zap.String("domain", domain),
-		zap.Strings("domains", domains),
-	)
-
-	return nil
 }
 
 // presetDNSProvider is a DNS provider for when TXT records are already in place

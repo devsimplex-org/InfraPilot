@@ -204,6 +204,66 @@ export interface NginxNetworkAttachment {
   error_message?: string;
 }
 
+// Extended Docker Resource Types
+
+export interface DockerNetworkDetail extends DockerNetwork {
+  attachable: boolean;
+  ipam: {
+    driver: string;
+    configs: Array<{
+      subnet: string;
+      gateway: string;
+      ip_range?: string;
+    }>;
+  };
+  options: Record<string, string>;
+  labels: Record<string, string>;
+  created_at: string;
+}
+
+export interface NetworkEndpoint {
+  name: string;
+  endpoint_id: string;
+  mac_address: string;
+  ipv4_address: string;
+  ipv6_address?: string;
+}
+
+export interface CreateNetworkRequest {
+  name: string;
+  driver?: string;
+  internal?: boolean;
+  attachable?: boolean;
+  labels?: Record<string, string>;
+}
+
+export interface DockerVolume {
+  name: string;
+  driver: string;
+  mountpoint: string;
+  scope: string;
+  labels: Record<string, string>;
+  created_at: string;
+  used_by: string[];
+}
+
+export interface CreateVolumeRequest {
+  name: string;
+  driver?: string;
+  driver_opts?: Record<string, string>;
+  labels?: Record<string, string>;
+}
+
+export interface DockerImage {
+  id: string;
+  tags: string[];
+  size: number;
+  size_mb: number;
+  created: string;
+  repo_digests: string[];
+  used_by: string[];
+}
+
 export interface SecurityHeaders {
   id?: string;
   proxy_host_id?: string;
@@ -1114,6 +1174,68 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ network_id: networkId }),
       }
+    ),
+
+  // Docker Resources (Networks, Volumes, Images)
+
+  // Docker Networks
+  getDockerNetworks: (agentId: string) =>
+    fetchAPI<DockerNetwork[]>(`/agents/${agentId}/docker/networks`),
+
+  getDockerNetwork: (agentId: string, networkId: string) =>
+    fetchAPI<DockerNetworkDetail>(`/agents/${agentId}/docker/networks/${networkId}`),
+
+  createDockerNetwork: (agentId: string, data: CreateNetworkRequest) =>
+    fetchAPI<DockerNetwork>(`/agents/${agentId}/docker/networks`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  deleteDockerNetwork: (agentId: string, networkId: string, force?: boolean) =>
+    fetchAPI<{ success: boolean; message: string }>(
+      `/agents/${agentId}/docker/networks/${networkId}${force ? "?force=true" : ""}`,
+      { method: "DELETE" }
+    ),
+
+  // Docker Volumes
+  getDockerVolumes: (agentId: string) =>
+    fetchAPI<DockerVolume[]>(`/agents/${agentId}/docker/volumes`),
+
+  getDockerVolume: (agentId: string, name: string) =>
+    fetchAPI<DockerVolume>(`/agents/${agentId}/docker/volumes/${encodeURIComponent(name)}`),
+
+  createDockerVolume: (agentId: string, data: CreateVolumeRequest) =>
+    fetchAPI<DockerVolume>(`/agents/${agentId}/docker/volumes`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  deleteDockerVolume: (agentId: string, name: string, force?: boolean) =>
+    fetchAPI<{ success: boolean; message: string }>(
+      `/agents/${agentId}/docker/volumes/${encodeURIComponent(name)}${force ? "?force=true" : ""}`,
+      { method: "DELETE" }
+    ),
+
+  // Docker Images
+  getDockerImages: (agentId: string) =>
+    fetchAPI<DockerImage[]>(`/agents/${agentId}/docker/images`),
+
+  getDockerImage: (agentId: string, imageId: string) =>
+    fetchAPI<DockerImage>(`/agents/${agentId}/docker/images/${encodeURIComponent(imageId)}`),
+
+  pullDockerImage: (agentId: string, image: string) =>
+    fetchAPI<{ success: boolean; message: string }>(
+      `/agents/${agentId}/docker/images/pull`,
+      {
+        method: "POST",
+        body: JSON.stringify({ image }),
+      }
+    ),
+
+  deleteDockerImage: (agentId: string, imageId: string, force?: boolean) =>
+    fetchAPI<{ success: boolean; message: string }>(
+      `/agents/${agentId}/docker/images/${encodeURIComponent(imageId)}${force ? "?force=true" : ""}`,
+      { method: "DELETE" }
     ),
 
   // Logs
