@@ -55,8 +55,8 @@ services:
       # CORS origins
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost,https://localhost}
     volumes:
-      # Persistent data (database, certs, config)
-      - infrapilot_data:/data
+      # Persistent data on host (database, certs, config)
+      - ${DATA_DIR:-./data}:/data
 
       # Docker socket for container management
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -66,6 +66,3 @@ services:
       timeout: 10s
       start_period: 60s
       retries: 3
-
-volumes:
-  infrapilot_data:
