@@ -238,8 +238,9 @@ $BASIC_AUTH_BLOCK
         proxy_pass http://backend/health;
     }
 
-    # API routes
+    # API routes (uses JWT auth, disable basic auth)
     location /api/ {
+        auth_basic off;
         proxy_pass http://backend;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
