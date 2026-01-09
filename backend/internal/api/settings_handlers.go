@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -408,10 +409,38 @@ func (h *Handler) dispatchInfraPilotProxyConfigWithCert(ctx interface{}, agentID
 func generateInfraPilotNginxConfig(domain string, forceSSL, http2, sslEnabled bool, certPath, keyPath string) string {
 	var config strings.Builder
 
+	// If no cert path specified, determine the correct Let's Encrypt path
+	// For subdomains, check if there's a wildcard cert for the parent domain
+	effectiveCertPath := certPath
+	effectiveKeyPath := keyPath
+	if effectiveCertPath == "" && sslEnabled {
+		// For subdomains, first check if wildcard cert exists for parent domain
+		parts := strings.Split(domain, ".")
+		if len(parts) > 2 {
+			// It's a subdomain - check if wildcard cert exists for parent domain
+			parentDomain := strings.Join(parts[1:], ".")
+			wildcardCertPath := fmt.Sprintf("/etc/letsencrypt/live/%s/fullchain.pem", parentDomain)
+			wildcardKeyPath := fmt.Sprintf("/etc/letsencrypt/live/%s/privkey.pem", parentDomain)
+			// Check if wildcard cert exists on filesystem
+			if _, err := os.Stat(wildcardCertPath); err == nil {
+				// Wildcard cert exists - use it
+				effectiveCertPath = wildcardCertPath
+				effectiveKeyPath = wildcardKeyPath
+			}
+		}
+		// If no wildcard cert found, use exact domain path
+		if effectiveCertPath == "" {
+			effectiveCertPath = fmt.Sprintf("/etc/letsencrypt/live/%s/fullchain.pem", domain)
+			effectiveKeyPath = fmt.Sprintf("/etc/letsencrypt/live/%s/privkey.pem", domain)
+		}
+	}
+
 	config.WriteString("# Managed by InfraPilot - System Proxy\n")
 	config.WriteString(fmt.Sprintf("# Domain: %s\n", domain))
 	if certPath != "" {
 		config.WriteString(fmt.Sprintf("# SSL: Custom certificate from %s\n", certPath))
+	} else if effectiveCertPath != "" {
+		config.WriteString(fmt.Sprintf("# SSL: Auto-detected certificate from %s\n", effectiveCertPath))
 	}
 	config.WriteString("\n")
 
@@ -447,14 +476,9 @@ func generateInfraPilotNginxConfig(domain string, forceSSL, http2, sslEnabled bo
 		}
 		config.WriteString(fmt.Sprintf("    server_name %s;\n\n", domain))
 
-		// SSL configuration - use custom paths if provided, otherwise default to Let's Encrypt
-		if certPath != "" && keyPath != "" {
-			config.WriteString(fmt.Sprintf("    ssl_certificate %s;\n", certPath))
-			config.WriteString(fmt.Sprintf("    ssl_certificate_key %s;\n\n", keyPath))
-		} else {
-			config.WriteString(fmt.Sprintf("    ssl_certificate /etc/letsencrypt/live/%s/fullchain.pem;\n", domain))
-			config.WriteString(fmt.Sprintf("    ssl_certificate_key /etc/letsencrypt/live/%s/privkey.pem;\n\n", domain))
-		}
+		// SSL configuration - use effective paths (custom, wildcard, or exact domain)
+		config.WriteString(fmt.Sprintf("    ssl_certificate %s;\n", effectiveCertPath))
+		config.WriteString(fmt.Sprintf("    ssl_certificate_key %s;\n\n", effectiveKeyPath))
 
 		config.WriteString("    ssl_protocols TLSv1.2 TLSv1.3;\n")
 		config.WriteString("    ssl_prefer_server_ciphers on;\n")

@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -964,14 +966,32 @@ func generateNginxConfig(proxy ProxyHost, headers SecurityHeaders) string {
 		config += fmt.Sprintf("    listen [::]:%s;\n", listen)
 		config += fmt.Sprintf("    server_name %s;\n\n", proxy.Domain)
 
-		// SSL configuration
-		certPath := "/etc/letsencrypt/live/" + proxy.Domain + "/fullchain.pem"
-		keyPath := "/etc/letsencrypt/live/" + proxy.Domain + "/privkey.pem"
-		if proxy.SSLCertPath != nil {
+		// SSL configuration - determine effective cert paths
+		var certPath, keyPath string
+		if proxy.SSLCertPath != nil && *proxy.SSLCertPath != "" {
 			certPath = *proxy.SSLCertPath
 		}
-		if proxy.SSLKeyPath != nil {
+		if proxy.SSLKeyPath != nil && *proxy.SSLKeyPath != "" {
 			keyPath = *proxy.SSLKeyPath
+		}
+		// If no explicit paths, check for wildcard cert at parent domain for subdomains
+		if certPath == "" {
+			parts := strings.Split(proxy.Domain, ".")
+			if len(parts) > 2 {
+				// It's a subdomain - check if wildcard cert exists for parent domain
+				parentDomain := strings.Join(parts[1:], ".")
+				wildcardCertPath := fmt.Sprintf("/etc/letsencrypt/live/%s/fullchain.pem", parentDomain)
+				if _, err := os.Stat(wildcardCertPath); err == nil {
+					// Wildcard cert exists - use it
+					certPath = wildcardCertPath
+					keyPath = fmt.Sprintf("/etc/letsencrypt/live/%s/privkey.pem", parentDomain)
+				}
+			}
+			// If no wildcard cert found, use exact domain path
+			if certPath == "" {
+				certPath = "/etc/letsencrypt/live/" + proxy.Domain + "/fullchain.pem"
+				keyPath = "/etc/letsencrypt/live/" + proxy.Domain + "/privkey.pem"
+			}
 		}
 
 		config += fmt.Sprintf("    ssl_certificate %s;\n", certPath)

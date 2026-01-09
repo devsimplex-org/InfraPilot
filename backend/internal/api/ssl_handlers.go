@@ -1225,6 +1225,59 @@ func (h *Handler) completeDNSChallenge(c *gin.Context) {
 	}
 
 	if success {
+		// Auto-register the certificate in ssl_certificates table
+		// For wildcards like *.example.com, the cert is stored under example.com
+		certDomain := strings.TrimPrefix(req.Domain, "*.")
+		certPath := fmt.Sprintf("/etc/letsencrypt/live/%s/fullchain.pem", certDomain)
+		keyPath := fmt.Sprintf("/etc/letsencrypt/live/%s/privkey.pem", certDomain)
+		isWildcard := strings.HasPrefix(req.Domain, "*.")
+
+		// Parse the certificate to get metadata
+		certInfo, certErr := parseCertificateFile(certPath)
+		if certErr == nil {
+			// Register or update the certificate
+			var certName string
+			if isWildcard {
+				certName = "Wildcard: " + certDomain
+			} else {
+				certName = certDomain
+			}
+
+			_, dbErr := h.db.Exec(c.Request.Context(), `
+				INSERT INTO ssl_certificates (org_id, name, domain, is_wildcard, cert_path, key_path, issuer, subject, san, expires_at, auto_detected)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, TRUE)
+				ON CONFLICT (org_id, cert_path) DO UPDATE SET
+					name = EXCLUDED.name,
+					domain = EXCLUDED.domain,
+					is_wildcard = EXCLUDED.is_wildcard,
+					key_path = EXCLUDED.key_path,
+					issuer = EXCLUDED.issuer,
+					subject = EXCLUDED.subject,
+					san = EXCLUDED.san,
+					expires_at = EXCLUDED.expires_at,
+					updated_at = NOW()
+			`, orgID, certName, certDomain, isWildcard, certPath, keyPath,
+				certInfo.Issuer, certInfo.Subject, strings.Join(certInfo.SANs, ", "), certInfo.ExpiresAt)
+
+			if dbErr != nil {
+				h.logger.Warn("Failed to auto-register SSL certificate after DNS challenge",
+					zap.Error(dbErr),
+					zap.String("domain", req.Domain),
+				)
+			} else {
+				h.logger.Info("Auto-registered SSL certificate after DNS challenge",
+					zap.String("domain", req.Domain),
+					zap.String("cert_path", certPath),
+					zap.Bool("is_wildcard", isWildcard),
+				)
+			}
+		} else {
+			h.logger.Warn("Could not parse certificate for auto-registration",
+				zap.Error(certErr),
+				zap.String("cert_path", certPath),
+			)
+		}
+
 		// Update proxy_hosts if applicable
 		var proxyID uuid.UUID
 		var forceSSL, http2Enabled, isSystemProxy bool
@@ -1242,9 +1295,11 @@ func (h *Handler) completeDNSChallenge(c *gin.Context) {
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"success": true,
-			"message": message,
-			"domain":  req.Domain,
+			"success":   true,
+			"message":   message,
+			"domain":    req.Domain,
+			"cert_path": certPath,
+			"key_path":  keyPath,
 		})
 	} else {
 		c.JSON(http.StatusBadRequest, gin.H{
