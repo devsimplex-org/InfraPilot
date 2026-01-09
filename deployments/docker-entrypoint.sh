@@ -73,6 +73,12 @@ chmod 755 /var/log/supervisor
 chmod 755 /var/log/nginx
 chmod 755 /run/postgresql
 
+# Symlink letsencrypt directory for persistence
+if [ ! -L /etc/letsencrypt ]; then
+    rm -rf /etc/letsencrypt
+    ln -s "$DATA_DIR/letsencrypt" /etc/letsencrypt
+fi
+
 # -------------------------------------------------------------
 # Initialize Embedded PostgreSQL (if enabled)
 # -------------------------------------------------------------
