@@ -15,15 +15,17 @@ import (
 
 // ProxyHost represents a proxy configuration from the backend
 type ProxyHost struct {
-	ID             string `json:"id"`
-	AgentID        string `json:"agent_id"`
-	Domain         string `json:"domain"`
-	UpstreamTarget string `json:"upstream_target"`
-	SSLEnabled     bool   `json:"ssl_enabled"`
-	ForceSSL       bool   `json:"force_ssl"`
-	HTTP2Enabled   bool   `json:"http2_enabled"`
-	Status         string `json:"status"`
-	IsSystemProxy  bool   `json:"is_system_proxy"`
+	ID             string  `json:"id"`
+	AgentID        string  `json:"agent_id"`
+	Domain         string  `json:"domain"`
+	UpstreamTarget string  `json:"upstream_target"`
+	SSLEnabled     bool    `json:"ssl_enabled"`
+	SSLCertPath    *string `json:"ssl_cert_path,omitempty"`
+	SSLKeyPath     *string `json:"ssl_key_path,omitempty"`
+	ForceSSL       bool    `json:"force_ssl"`
+	HTTP2Enabled   bool    `json:"http2_enabled"`
+	Status         string  `json:"status"`
+	IsSystemProxy  bool    `json:"is_system_proxy"`
 }
 
 // ProxySyncer periodically syncs proxy configurations from the backend
@@ -107,6 +109,14 @@ func (s *ProxySyncer) syncProxies(ctx context.Context) {
 			SSLEnabled:   proxy.SSLEnabled,
 			ForceSSL:     proxy.ForceSSL,
 			HTTP2Enabled: proxy.HTTP2Enabled,
+		}
+
+		// Use custom SSL paths if provided (e.g., for wildcard certs)
+		if proxy.SSLCertPath != nil && *proxy.SSLCertPath != "" {
+			config.SSLCertPath = *proxy.SSLCertPath
+		}
+		if proxy.SSLKeyPath != nil && *proxy.SSLKeyPath != "" {
+			config.SSLKeyPath = *proxy.SSLKeyPath
 		}
 
 		// Generate config hash to check if changed
