@@ -1451,6 +1451,7 @@ export const api = {
     domain: string;
     txt_record?: string;
     txt_name?: string;
+    txt_records?: { name: string; value: string }[];
     instructions?: string;
   }> => {
     const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;

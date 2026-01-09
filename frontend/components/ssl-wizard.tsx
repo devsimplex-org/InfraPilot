@@ -72,7 +72,11 @@ export function SSLWizard({
   const [resultMessage, setResultMessage] = useState<string>("");
 
   // DNS Challenge state (for wildcard certs)
-  const [dnsChallenge, setDNSChallenge] = useState<{ txt_record: string; txt_name: string } | null>(null);
+  const [dnsChallenge, setDNSChallenge] = useState<{
+    txt_record: string;
+    txt_name: string;
+    txt_records?: { name: string; value: string }[];
+  } | null>(null);
   const [txtVerified, setTxtVerified] = useState(false);
 
   // Reset state when dialog opens/closes
@@ -247,6 +251,7 @@ export function SSLWizard({
         setDNSChallenge({
           txt_record: response.txt_record,
           txt_name: response.txt_name,
+          txt_records: response.txt_records || [],
         });
         setRequestStatus(null);
         setStep("dns_verify");
@@ -1055,43 +1060,93 @@ export function SSLWizard({
 
               {dnsChallenge ? (
                 <div className="space-y-4">
-                  {/* TXT Record Info */}
-                  <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 space-y-3">
-                    <div>
-                      <label className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
-                        Record Type
-                      </label>
-                      <p className="text-gray-900 dark:text-white font-mono">TXT</p>
+                  {/* TXT Record Info - Show ALL records for wildcard */}
+                  {dnsChallenge.txt_records && dnsChallenge.txt_records.length > 1 ? (
+                    <div className="space-y-3">
+                      <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle className="h-4 w-4 text-yellow-600 flex-shrink-0 mt-0.5" />
+                          <span className="text-sm text-yellow-700 dark:text-yellow-300">
+                            <strong>Important:</strong> Wildcard certificates require {dnsChallenge.txt_records.length} TXT records with the same name but different values. Add ALL records below.
+                          </span>
+                        </div>
+                      </div>
+                      {dnsChallenge.txt_records.map((record, index) => (
+                        <div key={index} className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 space-y-3">
+                          <div className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-400">
+                            <span className="px-2 py-0.5 bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 rounded">
+                              Record {index + 1} of {dnsChallenge.txt_records!.length}
+                            </span>
+                          </div>
+                          <div>
+                            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                              Name / Host
+                            </label>
+                            <div className="flex items-center gap-2">
+                              <p className="text-gray-900 dark:text-white font-mono text-sm break-all">{record.name}</p>
+                              <button
+                                onClick={() => copyToClipboard(record.name)}
+                                className="p-1 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300"
+                              >
+                                <Copy className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </div>
+                          <div>
+                            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                              Value / Content
+                            </label>
+                            <div className="flex items-center gap-2">
+                              <p className="text-gray-900 dark:text-white font-mono text-sm break-all">{record.value}</p>
+                              <button
+                                onClick={() => copyToClipboard(record.value)}
+                                className="p-1 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300"
+                              >
+                                <Copy className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                    <div>
-                      <label className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
-                        Name / Host
-                      </label>
-                      <div className="flex items-center gap-2">
-                        <p className="text-gray-900 dark:text-white font-mono text-sm break-all">{dnsChallenge.txt_name}</p>
-                        <button
-                          onClick={() => copyToClipboard(dnsChallenge.txt_name)}
-                          className="p-1 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300"
-                        >
-                          <Copy className="h-4 w-4" />
-                        </button>
+                  ) : (
+                    <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 space-y-3">
+                      <div>
+                        <label className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                          Record Type
+                        </label>
+                        <p className="text-gray-900 dark:text-white font-mono">TXT</p>
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                          Name / Host
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <p className="text-gray-900 dark:text-white font-mono text-sm break-all">{dnsChallenge.txt_name}</p>
+                          <button
+                            onClick={() => copyToClipboard(dnsChallenge.txt_name)}
+                            className="p-1 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300"
+                          >
+                            <Copy className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                          Value / Content
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <p className="text-gray-900 dark:text-white font-mono text-sm break-all">{dnsChallenge.txt_record}</p>
+                          <button
+                            onClick={() => copyToClipboard(dnsChallenge.txt_record)}
+                            className="p-1 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300"
+                          >
+                            <Copy className="h-4 w-4" />
+                          </button>
+                        </div>
                       </div>
                     </div>
-                    <div>
-                      <label className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
-                        Value / Content
-                      </label>
-                      <div className="flex items-center gap-2">
-                        <p className="text-gray-900 dark:text-white font-mono text-sm break-all">{dnsChallenge.txt_record}</p>
-                        <button
-                          onClick={() => copyToClipboard(dnsChallenge.txt_record)}
-                          className="p-1 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300"
-                        >
-                          <Copy className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
+                  )}
 
                   {/* Instructions */}
                   <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">

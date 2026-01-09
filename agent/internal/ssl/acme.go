@@ -486,10 +486,11 @@ type multiCaptureDNSProvider struct {
 	primaryDomain  string
 	txtRecords     []DNSTXTRecord
 	txtRecordsMu   sync.Mutex
-	allCapturedCh  chan struct{}     // Closed when all challenges captured
-	proceedCh      chan struct{}     // Signal to proceed with verification
-	cancelCh       chan struct{}     // Signal to cancel
-	expectedCount  int               // Number of domains to capture
+	fqdnToValues   map[string][]string // Map fqdn to ALL expected TXT values (for wildcards, same FQDN has multiple values)
+	allCapturedCh  chan struct{}       // Closed when all challenges captured
+	proceedCh      chan struct{}       // Signal to proceed with verification
+	cancelCh       chan struct{}       // Signal to cancel
+	expectedCount  int                 // Number of domains to capture
 	capturedCount  int
 }
 
@@ -498,15 +499,21 @@ func (p *multiCaptureDNSProvider) Present(domain, token, keyAuth string) error {
 	txtValue := dns01.GetChallengeInfo(domain, keyAuth).Value
 	txtName := "_acme-challenge." + dns01.UnFqdn(domain)
 
+	// FQDN format used by preCheck (with trailing dot)
+	fqdn := dns01.ToFqdn(txtName)
+
 	p.manager.logger.Info("DNS-01 challenge captured",
 		zap.String("domain", domain),
 		zap.String("txt_name", txtName),
+		zap.String("fqdn", fqdn),
 		zap.String("txt_value", txtValue),
 	)
 
-	// Store this TXT record
+	// Store this TXT record and the fqdn->values mapping for preCheck
+	// For wildcards, the same FQDN may have multiple values (one for *.domain and one for domain)
 	p.txtRecordsMu.Lock()
 	p.txtRecords = append(p.txtRecords, DNSTXTRecord{Name: txtName, Value: txtValue})
+	p.fqdnToValues[fqdn] = append(p.fqdnToValues[fqdn], txtValue) // Append, don't overwrite!
 	p.capturedCount++
 	allCaptured := p.capturedCount >= p.expectedCount
 	p.txtRecordsMu.Unlock()
@@ -523,9 +530,34 @@ func (p *multiCaptureDNSProvider) Present(domain, token, keyAuth string) error {
 
 // preCheck is called before ACME verifies each challenge - this is where we wait for user
 func (p *multiCaptureDNSProvider) preCheck(domain, fqdn, value string, check dns01.PreCheckFunc) (bool, error) {
+	// Use the ACME-provided value directly - ACME knows exactly what value to verify for this domain
+	// The stored values (fqdnToValues) are for showing to the user in the UI
+	// For wildcards, ACME calls preCheck separately for each domain with the correct value for that domain
+	expectedValue := value
+
+	p.txtRecordsMu.Lock()
+	storedValues, hasStored := p.fqdnToValues[fqdn]
+	p.txtRecordsMu.Unlock()
+
+	if hasStored {
+		p.manager.logger.Info("Pre-check for DNS challenge",
+			zap.String("domain", domain),
+			zap.String("fqdn", fqdn),
+			zap.String("expected_value", expectedValue),
+			zap.Strings("all_stored_values", storedValues),
+		)
+	} else {
+		p.manager.logger.Info("Pre-check for DNS challenge (no stored values)",
+			zap.String("domain", domain),
+			zap.String("fqdn", fqdn),
+			zap.String("expected_value", expectedValue),
+		)
+	}
+
 	p.manager.logger.Info("Pre-check waiting for user to add DNS TXT record...",
 		zap.String("domain", domain),
 		zap.String("fqdn", fqdn),
+		zap.String("expected_value", expectedValue),
 	)
 
 	select {
@@ -548,7 +580,7 @@ func (p *multiCaptureDNSProvider) preCheck(domain, fqdn, value string, check dns
 		records, err := net.LookupTXT(fqdn)
 		if err == nil {
 			for _, record := range records {
-				if record == value {
+				if record == expectedValue {
 					p.manager.logger.Info("DNS TXT record verified successfully",
 						zap.String("fqdn", fqdn),
 						zap.Int("attempt", attempt),
@@ -558,7 +590,7 @@ func (p *multiCaptureDNSProvider) preCheck(domain, fqdn, value string, check dns
 			}
 			p.manager.logger.Warn("DNS TXT record found but value mismatch",
 				zap.String("fqdn", fqdn),
-				zap.String("expected", value),
+				zap.String("expected", expectedValue),
 				zap.Strings("found", records),
 				zap.Int("attempt", attempt),
 			)
@@ -575,7 +607,7 @@ func (p *multiCaptureDNSProvider) preCheck(domain, fqdn, value string, check dns
 		}
 	}
 
-	return false, fmt.Errorf("DNS TXT record verification failed: record '%s' with value '%s' not found after %d attempts", fqdn, value, maxRetries)
+	return false, fmt.Errorf("DNS TXT record verification failed: record '%s' with value '%s' not found after %d attempts", fqdn, expectedValue, maxRetries)
 }
 
 func (p *multiCaptureDNSProvider) CleanUp(domain, token, keyAuth string) error {
@@ -652,6 +684,7 @@ func (m *CertManager) StartDNSChallenge(domain string) (*DNSChallenge, error) {
 		manager:       m,
 		primaryDomain: domain,
 		txtRecords:    make([]DNSTXTRecord, 0, expectedCount),
+		fqdnToValues:  make(map[string][]string),
 		allCapturedCh: make(chan struct{}),
 		proceedCh:     make(chan struct{}),
 		cancelCh:      make(chan struct{}),
@@ -703,16 +736,49 @@ func (m *CertManager) StartDNSChallenge(domain string) (*DNSChallenge, error) {
 		resultCh <- nil
 	}()
 
-	// Wait for all challenges to be captured
+	// Wait for challenges to be captured
+	// Note: ACME may skip some domains if authorizations are already valid from previous attempts
+	// So we wait for either all challenges OR at least one with a shorter secondary timeout
 	select {
 	case <-provider.allCapturedCh:
 		m.logger.Info("All DNS challenges captured",
 			zap.String("domain", domain),
 			zap.Int("count", len(provider.txtRecords)),
 		)
-	case <-time.After(60 * time.Second):
-		close(provider.cancelCh)
-		return nil, fmt.Errorf("timeout waiting for ACME challenges to be captured")
+	case <-time.After(10 * time.Second):
+		// After 10 seconds, check if we have at least one challenge
+		provider.txtRecordsMu.Lock()
+		count := len(provider.txtRecords)
+		provider.txtRecordsMu.Unlock()
+
+		if count > 0 {
+			m.logger.Info("Got partial challenges (some may be pre-authorized)",
+				zap.String("domain", domain),
+				zap.Int("count", count),
+				zap.Int("expected", expectedCount),
+			)
+		} else {
+			// No challenges captured at all - wait a bit more
+			select {
+			case <-provider.allCapturedCh:
+				m.logger.Info("All DNS challenges captured (delayed)",
+					zap.String("domain", domain),
+					zap.Int("count", len(provider.txtRecords)),
+				)
+			case <-time.After(20 * time.Second):
+				provider.txtRecordsMu.Lock()
+				count = len(provider.txtRecords)
+				provider.txtRecordsMu.Unlock()
+				if count == 0 {
+					close(provider.cancelCh)
+					return nil, fmt.Errorf("timeout waiting for ACME challenges to be captured")
+				}
+				m.logger.Info("Got challenges after extended wait",
+					zap.String("domain", domain),
+					zap.Int("count", count),
+				)
+			}
+		}
 	}
 
 	// Calculate primary TXT name
