@@ -123,16 +123,19 @@ func main() {
 	}
 
 	// Initialize SSL/ACME certificate manager
+	// Always initialize in managed mode - email can be set later via commands
 	var certManager *ssl.CertManager
-	if cfg.IsManagedProxy() && cfg.LetsEncryptEmail != "" {
+	if cfg.IsManagedProxy() {
 		certManager = ssl.NewCertManager(
 			cfg.LetsEncryptDir,
+			cfg.ACMEWebRoot,
 			cfg.LetsEncryptEmail,
 			cfg.LetsEncryptStage,
 			logger,
 		)
 		logger.Info("SSL certificate manager initialized",
 			zap.String("dir", cfg.LetsEncryptDir),
+			zap.String("webroot", cfg.ACMEWebRoot),
 			zap.String("email", cfg.LetsEncryptEmail),
 			zap.Bool("staging", cfg.LetsEncryptStage),
 		)
@@ -339,12 +342,23 @@ func (h *CommandHandler) HandleCheckNginxNetwork(ctx context.Context, networkID 
 		return false, ErrExternalProxyMode
 	}
 
+	// In managed mode (nginx_container_name == "local"), use the current container ID
+	containerName := h.nginxContainerName
+	if containerName == "local" {
+		hostname, err := os.Hostname()
+		if err != nil {
+			h.logger.Error("Failed to get container ID", zap.Error(err))
+			return false, err
+		}
+		containerName = hostname
+	}
+
 	h.logger.Info("Checking nginx network connection",
 		zap.String("network_id", networkID),
-		zap.String("nginx_container", h.nginxContainerName),
+		zap.String("nginx_container", containerName),
 	)
 
-	connected, err := h.docker.IsContainerOnNetwork(ctx, h.nginxContainerName, networkID)
+	connected, err := h.docker.IsContainerOnNetwork(ctx, containerName, networkID)
 	if err != nil {
 		h.logger.Error("Failed to check nginx network",
 			zap.Error(err),
@@ -371,9 +385,24 @@ func (h *CommandHandler) HandleAttachNginxNetwork(ctx context.Context, networkID
 		}, nil
 	}
 
+	// In managed mode (nginx_container_name == "local"), use the current container ID
+	// The hostname in Docker is typically the container ID
+	containerName := h.nginxContainerName
+	if containerName == "local" {
+		hostname, err := os.Hostname()
+		if err != nil {
+			return &docker.NetworkAttachResult{
+				Success:      false,
+				NetworkID:    networkID,
+				ErrorMessage: "failed to get container ID: " + err.Error(),
+			}, nil
+		}
+		containerName = hostname
+	}
+
 	h.logger.Info("Attaching nginx to network",
 		zap.String("network_id", networkID),
-		zap.String("nginx_container", h.nginxContainerName),
+		zap.String("container", containerName),
 	)
 
 	// Safety validation
@@ -391,7 +420,7 @@ func (h *CommandHandler) HandleAttachNginxNetwork(ctx context.Context, networkID
 	}
 
 	// Check for duplicate attachment
-	alreadyConnected, err := h.docker.IsContainerOnNetwork(ctx, h.nginxContainerName, networkID)
+	alreadyConnected, err := h.docker.IsContainerOnNetwork(ctx, containerName, networkID)
 	if err != nil {
 		h.logger.Error("Failed to check existing connection", zap.Error(err))
 		return &docker.NetworkAttachResult{
@@ -401,16 +430,23 @@ func (h *CommandHandler) HandleAttachNginxNetwork(ctx context.Context, networkID
 		}, nil
 	}
 	if alreadyConnected {
-		h.logger.Warn("Nginx already connected to network", zap.String("network_id", networkID))
+		h.logger.Info("Nginx already connected to network", zap.String("network_id", networkID))
+		// Get network details for response
+		netInfo, _ := h.docker.InspectNetwork(ctx, networkID)
+		networkName := networkID
+		if netInfo != nil {
+			networkName = netInfo.Name
+		}
 		return &docker.NetworkAttachResult{
-			Success:      false,
+			Success:      true,
 			NetworkID:    networkID,
-			ErrorMessage: "nginx is already attached to this network",
+			NetworkName:  networkName,
+			Message:      "nginx is already attached to this network",
 		}, nil
 	}
 
 	// Perform attachment
-	if err := h.docker.ConnectNetwork(ctx, networkID, h.nginxContainerName); err != nil {
+	if err := h.docker.ConnectNetwork(ctx, networkID, containerName); err != nil {
 		h.logger.Error("Failed to attach nginx to network",
 			zap.String("network_id", networkID),
 			zap.Error(err),
@@ -448,12 +484,22 @@ func (h *CommandHandler) HandleDetachNginxNetwork(ctx context.Context, networkID
 		return ErrExternalProxyMode
 	}
 
+	// In managed mode (nginx_container_name == "local"), use the current container ID
+	containerName := h.nginxContainerName
+	if containerName == "local" {
+		hostname, err := os.Hostname()
+		if err != nil {
+			return fmt.Errorf("failed to get container ID: %w", err)
+		}
+		containerName = hostname
+	}
+
 	h.logger.Info("Detaching nginx from network",
 		zap.String("network_id", networkID),
-		zap.String("nginx_container", h.nginxContainerName),
+		zap.String("container", containerName),
 	)
 
-	if err := h.docker.DisconnectNetwork(ctx, networkID, h.nginxContainerName); err != nil {
+	if err := h.docker.DisconnectNetwork(ctx, networkID, containerName); err != nil {
 		h.logger.Error("Failed to detach nginx from network",
 			zap.String("network_id", networkID),
 			zap.Error(err),
@@ -480,6 +526,8 @@ func (h *CommandHandler) HandleCommand(ctx context.Context, cmd *agentgrpc.Backe
 		return h.handleNetworkCommand(ctx, cmd)
 	case "docker":
 		return h.handleDockerCommand(ctx, cmd)
+	case "ssl":
+		return h.handleSSLCommand(ctx, cmd)
 	default:
 		h.logger.Warn("Unknown command type", zap.String("type", cmd.Type))
 		return &agentgrpc.CommandResult{
@@ -714,13 +762,467 @@ func (h *CommandHandler) handleNetworkCommand(ctx context.Context, cmd *agentgrp
 	}
 }
 
-func (h *CommandHandler) handleDockerCommand(ctx context.Context, cmd *agentgrpc.BackendMessage) *agentgrpc.CommandResult {
-	// Docker commands are already handled via HTTP API directly using Docker SDK
-	// This is a placeholder for any additional Docker operations via gRPC
-	return &agentgrpc.CommandResult{
-		Success: false,
-		Message: "docker commands via gRPC not implemented - use HTTP API",
+// SSLCommand represents an SSL-related command from the backend
+type SSLCommand struct {
+	Action        string `json:"action"` // request_cert, renew_cert, check_cert, start_dns_challenge, complete_dns_challenge
+	Domain        string `json:"domain"`
+	Email         string `json:"email,omitempty"`
+	DNSProvider   string `json:"dns_provider,omitempty"`
+	Staging       bool   `json:"staging,omitempty"`
+	ForceRenew    bool   `json:"force_renew,omitempty"`
+	ChallengeType string `json:"challenge_type,omitempty"` // "http" or "dns" (default: http)
+}
+
+func (h *CommandHandler) handleSSLCommand(ctx context.Context, cmd *agentgrpc.BackendMessage) *agentgrpc.CommandResult {
+	var sslCmd SSLCommand
+	if err := json.Unmarshal(cmd.Command, &sslCmd); err != nil {
+		return &agentgrpc.CommandResult{
+			Success: false,
+			Message: fmt.Sprintf("failed to parse ssl command: %v", err),
+		}
 	}
+
+	h.logger.Info("Handling SSL command",
+		zap.String("action", sslCmd.Action),
+		zap.String("domain", sslCmd.Domain),
+	)
+
+	// Check if cert manager is initialized
+	if h.certManager == nil {
+		return &agentgrpc.CommandResult{
+			Success: false,
+			Message: "SSL certificate manager not initialized",
+		}
+	}
+
+	switch sslCmd.Action {
+	case "request_cert":
+		// Update cert manager config if email/staging provided
+		if sslCmd.Email != "" {
+			h.certManager.Email = sslCmd.Email
+		}
+		h.certManager.Staging = sslCmd.Staging
+
+		// Validate email is set
+		if h.certManager.Email == "" {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: "Let's Encrypt email not configured",
+			}
+		}
+
+		// Request the certificate
+		if err := h.certManager.RequestCertificate(sslCmd.Domain); err != nil {
+			h.logger.Error("Failed to request certificate",
+				zap.String("domain", sslCmd.Domain),
+				zap.Error(err),
+			)
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("failed to request certificate: %v", err),
+			}
+		}
+
+		// Reload nginx to pick up the new certificate
+		if h.nginx != nil {
+			if err := h.nginx.Reload(ctx); err != nil {
+				h.logger.Warn("Failed to reload nginx after certificate request", zap.Error(err))
+			}
+		}
+
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: fmt.Sprintf("SSL certificate requested for %s", sslCmd.Domain),
+		}
+
+	case "renew_cert":
+		if err := h.certManager.RenewCertificate(sslCmd.Domain); err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("failed to renew certificate: %v", err),
+			}
+		}
+
+		// Reload nginx to pick up the renewed certificate
+		if h.nginx != nil {
+			if err := h.nginx.Reload(ctx); err != nil {
+				h.logger.Warn("Failed to reload nginx after certificate renewal", zap.Error(err))
+			}
+		}
+
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: fmt.Sprintf("SSL certificate renewed for %s", sslCmd.Domain),
+		}
+
+	case "check_cert":
+		info, err := h.certManager.GetCertificateInfo(sslCmd.Domain)
+		if err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("failed to check certificate: %v", err),
+			}
+		}
+		data, _ := json.Marshal(info)
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: "certificate info retrieved",
+			Data:    data,
+		}
+
+	case "start_dns_challenge":
+		// Start DNS-01 challenge for wildcard certificates
+		if sslCmd.Email != "" {
+			h.certManager.Email = sslCmd.Email
+		}
+		h.certManager.Staging = sslCmd.Staging
+
+		if h.certManager.Email == "" {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: "Let's Encrypt email not configured",
+			}
+		}
+
+		challenge, err := h.certManager.StartDNSChallenge(sslCmd.Domain)
+		if err != nil {
+			h.logger.Error("Failed to start DNS challenge",
+				zap.String("domain", sslCmd.Domain),
+				zap.Error(err),
+			)
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("failed to start DNS challenge: %v", err),
+			}
+		}
+
+		data, _ := json.Marshal(challenge)
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: "DNS challenge started - add TXT record and complete",
+			Data:    data,
+		}
+
+	case "complete_dns_challenge":
+		// Complete DNS-01 challenge after TXT record is added
+		if sslCmd.Email != "" {
+			h.certManager.Email = sslCmd.Email
+		}
+		h.certManager.Staging = sslCmd.Staging
+
+		if err := h.certManager.RequestCertificateWithDNS(sslCmd.Domain); err != nil {
+			h.logger.Error("Failed to complete DNS challenge",
+				zap.String("domain", sslCmd.Domain),
+				zap.Error(err),
+			)
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("failed to complete DNS challenge: %v", err),
+			}
+		}
+
+		// Reload nginx to pick up the new certificate
+		if h.nginx != nil {
+			if err := h.nginx.Reload(ctx); err != nil {
+				h.logger.Warn("Failed to reload nginx after certificate request", zap.Error(err))
+			}
+		}
+
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: fmt.Sprintf("SSL certificate obtained via DNS-01 for %s", sslCmd.Domain),
+		}
+
+	case "get_dns_challenge":
+		// Get current DNS challenge info
+		challenge, err := h.certManager.GetDNSChallenge(sslCmd.Domain)
+		if err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("no pending DNS challenge: %v", err),
+			}
+		}
+		data, _ := json.Marshal(challenge)
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: "DNS challenge info retrieved",
+			Data:    data,
+		}
+
+	default:
+		return &agentgrpc.CommandResult{
+			Success: false,
+			Message: fmt.Sprintf("unknown ssl action: %s", sslCmd.Action),
+		}
+	}
+}
+
+// DockerCommand represents a Docker resource command from the backend
+type DockerCommand struct {
+	Action     string                 `json:"action"`
+	NetworkID  string                 `json:"network_id,omitempty"`
+	VolumeName string                 `json:"volume_name,omitempty"`
+	ImageRef   string                 `json:"image_ref,omitempty"`
+	ImageID    string                 `json:"image_id,omitempty"`
+	Force      bool                   `json:"force,omitempty"`
+	Options    map[string]interface{} `json:"options,omitempty"`
+}
+
+func (h *CommandHandler) handleDockerCommand(ctx context.Context, cmd *agentgrpc.BackendMessage) *agentgrpc.CommandResult {
+	var dockerCmd DockerCommand
+	if err := json.Unmarshal(cmd.Command, &dockerCmd); err != nil {
+		return &agentgrpc.CommandResult{
+			Success: false,
+			Message: fmt.Sprintf("failed to parse docker command: %v", err),
+		}
+	}
+
+	h.logger.Info("Handling docker command", zap.String("action", dockerCmd.Action))
+
+	switch dockerCmd.Action {
+	// ============ Network Operations ============
+	case "inspect_network":
+		network, err := h.docker.InspectNetworkDetail(ctx, dockerCmd.NetworkID)
+		if err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: err.Error(),
+			}
+		}
+		data, _ := json.Marshal(network)
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: "network inspected",
+			Data:    data,
+		}
+
+	case "create_network":
+		opts := docker.NetworkCreateOptions{
+			Name:   getStringOption(dockerCmd.Options, "name"),
+			Driver: getStringOption(dockerCmd.Options, "driver"),
+		}
+		if opts.Name == "" {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: "network name is required",
+			}
+		}
+		network, err := h.docker.CreateNetwork(ctx, opts)
+		if err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: err.Error(),
+			}
+		}
+		data, _ := json.Marshal(network)
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: "network created",
+			Data:    data,
+		}
+
+	case "delete_network":
+		// Check if network is in use
+		inUse, containers, err := h.docker.IsNetworkInUse(ctx, dockerCmd.NetworkID)
+		if err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: err.Error(),
+			}
+		}
+		if inUse && !dockerCmd.Force {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("network is in use by containers: %v", containers),
+			}
+		}
+		if err := h.docker.DeleteNetwork(ctx, dockerCmd.NetworkID); err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: err.Error(),
+			}
+		}
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: "network deleted",
+		}
+
+	// ============ Volume Operations ============
+	case "list_volumes":
+		volumes, err := h.docker.ListVolumes(ctx)
+		if err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: err.Error(),
+			}
+		}
+		data, _ := json.Marshal(volumes)
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: "volumes listed",
+			Data:    data,
+		}
+
+	case "inspect_volume":
+		volume, err := h.docker.InspectVolume(ctx, dockerCmd.VolumeName)
+		if err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: err.Error(),
+			}
+		}
+		data, _ := json.Marshal(volume)
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: "volume inspected",
+			Data:    data,
+		}
+
+	case "create_volume":
+		opts := docker.VolumeCreateOptions{
+			Name:   getStringOption(dockerCmd.Options, "name"),
+			Driver: getStringOption(dockerCmd.Options, "driver"),
+		}
+		if opts.Name == "" {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: "volume name is required",
+			}
+		}
+		volume, err := h.docker.CreateVolume(ctx, opts)
+		if err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: err.Error(),
+			}
+		}
+		data, _ := json.Marshal(volume)
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: "volume created",
+			Data:    data,
+		}
+
+	case "delete_volume":
+		// Check if volume is in use
+		inUse, containers, err := h.docker.IsVolumeInUse(ctx, dockerCmd.VolumeName)
+		if err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: err.Error(),
+			}
+		}
+		if inUse && !dockerCmd.Force {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("volume is in use by containers: %v", containers),
+			}
+		}
+		if err := h.docker.DeleteVolume(ctx, dockerCmd.VolumeName, dockerCmd.Force); err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: err.Error(),
+			}
+		}
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: "volume deleted",
+		}
+
+	// ============ Image Operations ============
+	case "list_images":
+		images, err := h.docker.ListImages(ctx)
+		if err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: err.Error(),
+			}
+		}
+		data, _ := json.Marshal(images)
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: "images listed",
+			Data:    data,
+		}
+
+	case "inspect_image":
+		image, err := h.docker.InspectImage(ctx, dockerCmd.ImageID)
+		if err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: err.Error(),
+			}
+		}
+		data, _ := json.Marshal(image)
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: "image inspected",
+			Data:    data,
+		}
+
+	case "pull_image":
+		if dockerCmd.ImageRef == "" {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: "image reference is required",
+			}
+		}
+		if err := h.docker.PullImage(ctx, dockerCmd.ImageRef); err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: err.Error(),
+			}
+		}
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: fmt.Sprintf("image %s pulled successfully", dockerCmd.ImageRef),
+		}
+
+	case "delete_image":
+		// Check if image is in use
+		inUse, containers, err := h.docker.IsImageInUse(ctx, dockerCmd.ImageID)
+		if err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: err.Error(),
+			}
+		}
+		if inUse && !dockerCmd.Force {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("image is in use by containers: %v", containers),
+			}
+		}
+		if err := h.docker.DeleteImage(ctx, dockerCmd.ImageID, dockerCmd.Force); err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: err.Error(),
+			}
+		}
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: "image deleted",
+		}
+
+	default:
+		return &agentgrpc.CommandResult{
+			Success: false,
+			Message: fmt.Sprintf("unknown docker action: %s", dockerCmd.Action),
+		}
+	}
+}
+
+// getStringOption safely extracts a string value from options map
+func getStringOption(options map[string]interface{}, key string) string {
+	if options == nil {
+		return ""
+	}
+	if val, ok := options[key]; ok {
+		if str, ok := val.(string); ok {
+			return str
+		}
+	}
+	return ""
 }
 
 // ============ Certificate Renewal ============

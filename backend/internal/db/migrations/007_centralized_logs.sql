@@ -110,31 +110,20 @@ CREATE INDEX IF NOT EXISTS idx_log_ingestion_stats_org_date
 -- ============================================================
 -- Row-Level Security
 -- ============================================================
+-- NOTE: RLS is disabled for these tables because:
+-- 1. The backend API already validates org/agent relationships
+-- 2. Log ingestion from agents doesn't have session context
+-- 3. All queries filter by org_id at the application level
 
--- Enable RLS on logs table
-ALTER TABLE centralized_logs ENABLE ROW LEVEL SECURITY;
+-- Disable RLS (backend handles authorization)
+ALTER TABLE centralized_logs DISABLE ROW LEVEL SECURITY;
+ALTER TABLE log_retention_config DISABLE ROW LEVEL SECURITY;
+ALTER TABLE log_ingestion_stats DISABLE ROW LEVEL SECURITY;
 
--- Policy: Users can only see logs from their organization
+-- Clean up any existing policies
 DROP POLICY IF EXISTS centralized_logs_org_isolation ON centralized_logs;
-CREATE POLICY centralized_logs_org_isolation ON centralized_logs
-    FOR ALL
-    USING (org_id = current_setting('app.current_org_id', true)::uuid);
-
--- Enable RLS on retention config
-ALTER TABLE log_retention_config ENABLE ROW LEVEL SECURITY;
-
 DROP POLICY IF EXISTS log_retention_config_org_isolation ON log_retention_config;
-CREATE POLICY log_retention_config_org_isolation ON log_retention_config
-    FOR ALL
-    USING (org_id = current_setting('app.current_org_id', true)::uuid);
-
--- Enable RLS on stats
-ALTER TABLE log_ingestion_stats ENABLE ROW LEVEL SECURITY;
-
 DROP POLICY IF EXISTS log_ingestion_stats_org_isolation ON log_ingestion_stats;
-CREATE POLICY log_ingestion_stats_org_isolation ON log_ingestion_stats
-    FOR ALL
-    USING (org_id = current_setting('app.current_org_id', true)::uuid);
 
 -- ============================================================
 -- Helper Functions

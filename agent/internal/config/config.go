@@ -23,6 +23,7 @@ type Config struct {
 	LetsEncryptDir   string // Directory for Let's Encrypt certs
 	LetsEncryptEmail string // Email for Let's Encrypt account
 	LetsEncryptStage bool   // Use staging server for testing
+	ACMEWebRoot      string // Webroot for ACME HTTP-01 challenge
 }
 
 // IsManagedProxy returns true if InfraPilot should manage the proxy
@@ -50,6 +51,7 @@ func Load() (*Config, error) {
 		LetsEncryptDir:   getEnv("LETSENCRYPT_DIR", "/etc/letsencrypt"),
 		LetsEncryptEmail: getEnv("LETSENCRYPT_EMAIL", ""),
 		LetsEncryptStage: getEnvBool("LETSENCRYPT_STAGING", false),
+		ACMEWebRoot:      getEnv("ACME_WEBROOT", "/var/www/acme-challenge"),
 	}
 
 	return cfg, nil

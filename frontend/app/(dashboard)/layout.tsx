@@ -14,15 +14,23 @@ import {
   Menu,
   X,
   Activity,
+  Network,
+  HardDrive,
+  Image,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuthStore } from "@/lib/auth";
-import { cn } from "@/lib/utils";
+import { cn, isIPAddress } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { AlertBar } from "@/components/ui/alert-bar";
+import { api } from "@/lib/api";
 
 const navigation = [
   { name: "Overview", href: "/", icon: LayoutDashboard },
   { name: "Containers", href: "/containers", icon: Container },
+  { name: "Networks", href: "/docker/networks", icon: Network },
+  { name: "Volumes", href: "/docker/volumes", icon: HardDrive },
+  { name: "Images", href: "/docker/images", icon: Image },
   { name: "Proxies", href: "/proxies", icon: Globe },
   { name: "Logs", href: "/logs", icon: FileText },
   { name: "Alerts", href: "/alerts", icon: Bell },
@@ -41,6 +49,39 @@ export default function DashboardLayout({
   const { user, logout, accessToken } = useAuthStore();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isChecking, setIsChecking] = useState(true);
+  const [showDomainWarning, setShowDomainWarning] = useState(false);
+
+  // Check if accessing via IP address
+  useEffect(() => {
+    const checkDomainAccess = async () => {
+      // Check if we've already dismissed this warning
+      const dismissed = localStorage.getItem("ip_warning_dismissed");
+      if (dismissed) return;
+
+      // Check if current hostname is an IP address
+      const hostname = window.location.hostname;
+      if (!isIPAddress(hostname)) return;
+
+      // Check if domain is configured
+      try {
+        const domainSettings = await api.getInfraPilotDomain();
+        // If no domain configured or accessing via IP instead of configured domain, show warning
+        if (!domainSettings.domain) {
+          setShowDomainWarning(true);
+        }
+      } catch {
+        // If can't fetch settings, show warning (likely no domain configured)
+        setShowDomainWarning(true);
+      }
+    };
+
+    checkDomainAccess();
+  }, []);
+
+  const handleDismissWarning = () => {
+    setShowDomainWarning(false);
+    localStorage.setItem("ip_warning_dismissed", "true");
+  };
 
   useEffect(() => {
     const validateAuth = async () => {
@@ -190,8 +231,17 @@ export default function DashboardLayout({
           <div className="w-10" />
         </header>
 
-        <main className="flex-1 overflow-hidden">
-          <div className="h-full overflow-auto p-4 lg:p-8">{children}</div>
+        <main className="flex-1 overflow-hidden flex flex-col">
+          {showDomainWarning && (
+            <AlertBar
+              variant="warning"
+              message="You're accessing InfraPilot via IP address. Configure a domain for better security and SSL support."
+              action={{ label: "Set Up Domain", href: "/proxies" }}
+              dismissible
+              onDismiss={handleDismissWarning}
+            />
+          )}
+          <div className="flex-1 overflow-auto p-4 lg:p-8">{children}</div>
         </main>
       </div>
     </div>

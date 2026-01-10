@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -29,6 +31,7 @@ type ProxyHost struct {
 	HTTP2Enabled   bool       `json:"http2_enabled"`
 	ConfigHash     *string    `json:"config_hash,omitempty"`
 	Status         string     `json:"status"`
+	IsSystemProxy  bool       `json:"is_system_proxy"`
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
 }
@@ -87,7 +90,7 @@ func (h *Handler) listProxyHosts(c *gin.Context) {
 	rows, err := h.db.Query(c.Request.Context(), `
 		SELECT id, agent_id, domain, upstream_target, ssl_enabled, ssl_cert_path,
 		       ssl_key_path, ssl_expires_at, force_ssl, http2_enabled, config_hash,
-		       status, created_at, updated_at
+		       status, is_system_proxy, created_at, updated_at
 		FROM proxy_hosts
 		WHERE agent_id = $1
 		ORDER BY domain ASC
@@ -104,7 +107,7 @@ func (h *Handler) listProxyHosts(c *gin.Context) {
 		if err := rows.Scan(
 			&p.ID, &p.AgentID, &p.Domain, &p.UpstreamTarget, &p.SSLEnabled,
 			&p.SSLCertPath, &p.SSLKeyPath, &p.SSLExpiresAt, &p.ForceSSL,
-			&p.HTTP2Enabled, &p.ConfigHash, &p.Status, &p.CreatedAt, &p.UpdatedAt,
+			&p.HTTP2Enabled, &p.ConfigHash, &p.Status, &p.IsSystemProxy, &p.CreatedAt, &p.UpdatedAt,
 		); err != nil {
 			continue
 		}
@@ -545,6 +548,101 @@ func (h *Handler) requestSSL(c *gin.Context) {
 	})
 }
 
+// ApplyWildcardSSLRequest is the request body for applying wildcard SSL
+type ApplyWildcardSSLRequest struct {
+	SSLEnabled   bool   `json:"ssl_enabled"`
+	ForceSSL     bool   `json:"force_ssl"`
+	HTTP2Enabled bool   `json:"http2_enabled"`
+	SSLSource    string `json:"ssl_source"`
+	SSLCertPath  string `json:"ssl_cert_path" binding:"required"`
+	SSLKeyPath   string `json:"ssl_key_path" binding:"required"`
+}
+
+// applyWildcardSSL applies a wildcard SSL certificate to a proxy host
+func (h *Handler) applyWildcardSSL(c *gin.Context) {
+	orgID := c.MustGet("org_id").(uuid.UUID)
+	userID := c.MustGet("user_id").(uuid.UUID)
+	agentIDStr := c.Param("id")
+	proxyIDStr := c.Param("pid")
+
+	agentID, err := uuid.Parse(agentIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid agent ID"})
+		return
+	}
+
+	proxyID, err := uuid.Parse(proxyIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid proxy ID"})
+		return
+	}
+
+	var req ApplyWildcardSSLRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Verify agent belongs to org
+	var exists bool
+	err = h.db.QueryRow(c.Request.Context(), `
+		SELECT EXISTS(SELECT 1 FROM agents WHERE id = $1 AND org_id = $2)
+	`, agentID, orgID).Scan(&exists)
+
+	if err != nil || !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "agent not found"})
+		return
+	}
+
+	// Get proxy details
+	var domain, upstream string
+	err = h.db.QueryRow(c.Request.Context(), `
+		SELECT domain, upstream_target FROM proxy_hosts WHERE id = $1 AND agent_id = $2
+	`, proxyID, agentID).Scan(&domain, &upstream)
+
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "proxy host not found"})
+		return
+	}
+
+	// Update proxy_hosts with SSL settings
+	_, err = h.db.Exec(c.Request.Context(), `
+		UPDATE proxy_hosts SET
+			ssl_enabled = $1,
+			force_ssl = $2,
+			http2_enabled = $3,
+			ssl_source = $4,
+			ssl_cert_path = $5,
+			ssl_key_path = $6,
+			status = 'active',
+			updated_at = NOW()
+		WHERE id = $7
+	`, req.SSLEnabled, req.ForceSSL, req.HTTP2Enabled, req.SSLSource,
+		req.SSLCertPath, req.SSLKeyPath, proxyID)
+
+	if err != nil {
+		h.logger.Error("Failed to update proxy SSL settings", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update proxy"})
+		return
+	}
+
+	// Dispatch updated nginx config to agent
+	go h.dispatchProxyConfigWithCert(c.Request.Context(), agentID, proxyID, domain, upstream,
+		req.ForceSSL, req.HTTP2Enabled, req.SSLEnabled, req.SSLCertPath, req.SSLKeyPath)
+
+	// Audit log
+	h.auditLog(c, userID, orgID, "proxy.ssl_wildcard", "proxy_host", proxyID, gin.H{
+		"domain":    domain,
+		"cert_path": req.SSLCertPath,
+	})
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":   "Wildcard SSL certificate applied",
+		"domain":    domain,
+		"cert_path": req.SSLCertPath,
+	})
+}
+
 // getProxyConfig returns the generated nginx config for a proxy host
 func (h *Handler) getProxyConfig(c *gin.Context) {
 	orgID := c.MustGet("org_id").(uuid.UUID)
@@ -669,7 +767,7 @@ func (h *Handler) testProxyConfig(c *gin.Context) {
 	}
 
 	// Parse response
-	if result, ok := resp.Response.(*agentgrpc.CommandResult); ok {
+	if result, err := resp.GetCommandResult(); err == nil && result != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"valid":   result.Success,
 			"message": result.Message,
@@ -868,14 +966,32 @@ func generateNginxConfig(proxy ProxyHost, headers SecurityHeaders) string {
 		config += fmt.Sprintf("    listen [::]:%s;\n", listen)
 		config += fmt.Sprintf("    server_name %s;\n\n", proxy.Domain)
 
-		// SSL configuration
-		certPath := "/etc/letsencrypt/live/" + proxy.Domain + "/fullchain.pem"
-		keyPath := "/etc/letsencrypt/live/" + proxy.Domain + "/privkey.pem"
-		if proxy.SSLCertPath != nil {
+		// SSL configuration - determine effective cert paths
+		var certPath, keyPath string
+		if proxy.SSLCertPath != nil && *proxy.SSLCertPath != "" {
 			certPath = *proxy.SSLCertPath
 		}
-		if proxy.SSLKeyPath != nil {
+		if proxy.SSLKeyPath != nil && *proxy.SSLKeyPath != "" {
 			keyPath = *proxy.SSLKeyPath
+		}
+		// If no explicit paths, check for wildcard cert at parent domain for subdomains
+		if certPath == "" {
+			parts := strings.Split(proxy.Domain, ".")
+			if len(parts) > 2 {
+				// It's a subdomain - check if wildcard cert exists for parent domain
+				parentDomain := strings.Join(parts[1:], ".")
+				wildcardCertPath := fmt.Sprintf("/etc/letsencrypt/live/%s/fullchain.pem", parentDomain)
+				if _, err := os.Stat(wildcardCertPath); err == nil {
+					// Wildcard cert exists - use it
+					certPath = wildcardCertPath
+					keyPath = fmt.Sprintf("/etc/letsencrypt/live/%s/privkey.pem", parentDomain)
+				}
+			}
+			// If no wildcard cert found, use exact domain path
+			if certPath == "" {
+				certPath = "/etc/letsencrypt/live/" + proxy.Domain + "/fullchain.pem"
+				keyPath = "/etc/letsencrypt/live/" + proxy.Domain + "/privkey.pem"
+			}
 		}
 
 		config += fmt.Sprintf("    ssl_certificate %s;\n", certPath)
@@ -987,7 +1103,7 @@ func (h *Handler) testNginxConfig(c *gin.Context) {
 		return
 	}
 
-	if result, ok := resp.Response.(*agentgrpc.CommandResult); ok {
+	if result, err := resp.GetCommandResult(); err == nil && result != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": result.Success,
 			"message": result.Message,
@@ -1048,7 +1164,7 @@ func (h *Handler) reloadNginx(c *gin.Context) {
 	// Audit log
 	h.auditLog(c, userID, orgID, "nginx.reload", "agent", agentID, nil)
 
-	if result, ok := resp.Response.(*agentgrpc.CommandResult); ok {
+	if result, err := resp.GetCommandResult(); err == nil && result != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": result.Success,
 			"message": result.Message,
@@ -1128,6 +1244,76 @@ func (h *Handler) dispatchProxyConfig(ctx context.Context, agentID, proxyID uuid
 	h.logger.Info("Dispatched proxy config to agent",
 		zap.String("agent_id", agentIDStr),
 		zap.String("domain", domain),
+	)
+}
+
+// dispatchProxyConfigWithCert sends nginx config with custom certificate paths to the agent
+func (h *Handler) dispatchProxyConfigWithCert(ctx context.Context, agentID, proxyID uuid.UUID, domain, upstream string, forceSSL, http2, sslEnabled bool, certPath, keyPath string) {
+	agentIDStr := agentID.String()
+
+	if !agentgrpc.IsAgentConnected(agentIDStr) {
+		h.logger.Warn("Agent not connected, cannot dispatch proxy config",
+			zap.String("agent_id", agentIDStr),
+			zap.String("domain", domain),
+		)
+		return
+	}
+
+	// Fetch security headers for complete config
+	var headers SecurityHeaders
+	h.db.QueryRow(ctx, `
+		SELECT id, proxy_host_id, hsts_enabled, hsts_max_age, x_frame_options,
+		       x_content_type_options, x_xss_protection, content_security_policy
+		FROM proxy_security_headers
+		WHERE proxy_host_id = $1
+	`, proxyID).Scan(
+		&headers.ID, &headers.ProxyHostID, &headers.HSTSEnabled, &headers.HSTSMaxAge,
+		&headers.XFrameOptions, &headers.XContentTypeOptions, &headers.XXSSProtection,
+		&headers.ContentSecurityPolicy,
+	)
+
+	// Build proxy host for config generation
+	proxy := ProxyHost{
+		Domain:         domain,
+		UpstreamTarget: upstream,
+		ForceSSL:       forceSSL,
+		HTTP2Enabled:   http2,
+		SSLEnabled:     sslEnabled,
+		SSLCertPath:    &certPath,
+		SSLKeyPath:     &keyPath,
+	}
+
+	// Generate nginx config with custom cert paths
+	config := generateNginxConfig(proxy, headers)
+
+	// Build config path
+	configPath := filepath.Join("/etc/nginx/conf.d", domain+".conf")
+
+	// Create command with config content
+	cmdPayload, _ := json.Marshal(agentgrpc.NginxCommand{
+		Action:        agentgrpc.NginxActionWriteConfig,
+		ConfigContent: config,
+		ConfigPath:    configPath,
+	})
+
+	cmd := &agentgrpc.BackendMessage{
+		RequestId: uuid.New().String(),
+		Command:   cmdPayload,
+	}
+
+	// Send command (non-blocking)
+	if err := agentgrpc.SendCommandAsync(agentIDStr, cmd); err != nil {
+		h.logger.Error("Failed to dispatch proxy config with cert",
+			zap.Error(err),
+			zap.String("domain", domain),
+		)
+		return
+	}
+
+	h.logger.Info("Dispatched proxy config with custom cert to agent",
+		zap.String("agent_id", agentIDStr),
+		zap.String("domain", domain),
+		zap.String("cert_path", certPath),
 	)
 }
 

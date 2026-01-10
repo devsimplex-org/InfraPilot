@@ -204,6 +204,66 @@ export interface NginxNetworkAttachment {
   error_message?: string;
 }
 
+// Extended Docker Resource Types
+
+export interface DockerNetworkDetail extends DockerNetwork {
+  attachable: boolean;
+  ipam: {
+    driver: string;
+    configs: Array<{
+      subnet: string;
+      gateway: string;
+      ip_range?: string;
+    }>;
+  };
+  options: Record<string, string>;
+  labels: Record<string, string>;
+  created_at: string;
+}
+
+export interface NetworkEndpoint {
+  name: string;
+  endpoint_id: string;
+  mac_address: string;
+  ipv4_address: string;
+  ipv6_address?: string;
+}
+
+export interface CreateNetworkRequest {
+  name: string;
+  driver?: string;
+  internal?: boolean;
+  attachable?: boolean;
+  labels?: Record<string, string>;
+}
+
+export interface DockerVolume {
+  name: string;
+  driver: string;
+  mountpoint: string;
+  scope: string;
+  labels: Record<string, string>;
+  created_at: string;
+  used_by: string[];
+}
+
+export interface CreateVolumeRequest {
+  name: string;
+  driver?: string;
+  driver_opts?: Record<string, string>;
+  labels?: Record<string, string>;
+}
+
+export interface DockerImage {
+  id: string;
+  tags: string[];
+  size: number;
+  size_mb: number;
+  created: string;
+  repo_digests: string[];
+  used_by: string[];
+}
+
 export interface SecurityHeaders {
   id?: string;
   proxy_host_id?: string;
@@ -380,6 +440,83 @@ export interface SystemHealth {
   cpu_cores: number;
 }
 
+// SSL/Certificate types
+export interface SSLCertificateInfo {
+  exists: boolean;
+  domain: string;
+  issuer?: string;
+  subject?: string;
+  expires_at?: string;
+  days_left?: number;
+  is_wildcard?: boolean;
+  valid_for_domain: boolean;
+  error?: string;
+  sans?: string[];
+}
+
+export interface SSLStatus {
+  letsencrypt_email: string;
+  letsencrypt_staging: boolean;
+  account_configured: boolean;
+  cert_directory: string;
+}
+
+export interface SSLRequestOptions {
+  domain: string;
+  email?: string;
+  dns_provider?: string;
+  staging?: boolean;
+  force_renew?: boolean;
+  ssl_source?: 'letsencrypt' | 'wildcard' | 'external';
+  certificate_id?: string;
+}
+
+// SSL Certificate Management types
+export type SSLSource = 'letsencrypt' | 'wildcard' | 'external' | 'dns_challenge';
+
+export interface SSLCertificateRecord {
+  id: string;
+  org_id: string;
+  name: string;
+  domain: string;
+  is_wildcard: boolean;
+  cert_path: string;
+  key_path: string;
+  issuer?: string;
+  subject?: string;
+  san?: string;
+  expires_at?: string;
+  auto_detected: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SSLCertificateScanResult {
+  certificates: SSLCertificateRecord[];
+  scanned_dir: string;
+}
+
+export interface DNSInstructions {
+  domain: string;
+  server_ip: string;
+  records: Array<{
+    type: string;
+    name: string;
+    value: string;
+    ttl: number;
+  }>;
+  instructions: string;
+}
+
+export interface DNSVerifyResult {
+  domain: string;
+  configured: boolean;
+  resolved_ips: string[];
+  expected_ip: string;
+  matches: boolean;
+  error?: string;
+}
+
 // Setup types
 export interface SetupStatusResponse {
   setup_required: boolean;
@@ -401,6 +538,27 @@ export interface InfraPilotDomainSettings {
   http2_enabled: boolean;
   proxy_host_id?: string;
   status?: string;
+  ssl_source?: SSLSource;
+  ssl_certificate_id?: string;
+  ssl_cert_path?: string;
+  ssl_key_path?: string;
+}
+
+// Default Pages types
+export type DefaultPageType = "welcome" | "404" | "500" | "502" | "503" | "maintenance";
+
+export interface DefaultPage {
+  id?: string;
+  org_id?: string;
+  page_type: DefaultPageType;
+  enabled: boolean;
+  title: string;
+  heading: string;
+  message: string;
+  show_logo: boolean;
+  custom_css?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 // SSO types
@@ -866,6 +1024,23 @@ export const api = {
       method: "POST",
     }),
 
+  applyWildcardSSL: (
+    agentId: string,
+    proxyId: string,
+    data: {
+      ssl_enabled: boolean;
+      force_ssl: boolean;
+      http2_enabled: boolean;
+      ssl_source: SSLSource;
+      ssl_cert_path: string;
+      ssl_key_path: string;
+    }
+  ) =>
+    fetchAPI(`/agents/${agentId}/proxies/${proxyId}/ssl/wildcard`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
   getProxyConfig: (agentId: string, proxyId: string) =>
     fetchAPI<{ domain: string; config: string }>(
       `/agents/${agentId}/proxies/${proxyId}/config`
@@ -999,6 +1174,68 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ network_id: networkId }),
       }
+    ),
+
+  // Docker Resources (Networks, Volumes, Images)
+
+  // Docker Networks
+  getDockerNetworks: (agentId: string) =>
+    fetchAPI<DockerNetwork[]>(`/agents/${agentId}/docker/networks`),
+
+  getDockerNetwork: (agentId: string, networkId: string) =>
+    fetchAPI<DockerNetworkDetail>(`/agents/${agentId}/docker/networks/${networkId}`),
+
+  createDockerNetwork: (agentId: string, data: CreateNetworkRequest) =>
+    fetchAPI<DockerNetwork>(`/agents/${agentId}/docker/networks`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  deleteDockerNetwork: (agentId: string, networkId: string, force?: boolean) =>
+    fetchAPI<{ success: boolean; message: string }>(
+      `/agents/${agentId}/docker/networks/${networkId}${force ? "?force=true" : ""}`,
+      { method: "DELETE" }
+    ),
+
+  // Docker Volumes
+  getDockerVolumes: (agentId: string) =>
+    fetchAPI<DockerVolume[]>(`/agents/${agentId}/docker/volumes`),
+
+  getDockerVolume: (agentId: string, name: string) =>
+    fetchAPI<DockerVolume>(`/agents/${agentId}/docker/volumes/${encodeURIComponent(name)}`),
+
+  createDockerVolume: (agentId: string, data: CreateVolumeRequest) =>
+    fetchAPI<DockerVolume>(`/agents/${agentId}/docker/volumes`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  deleteDockerVolume: (agentId: string, name: string, force?: boolean) =>
+    fetchAPI<{ success: boolean; message: string }>(
+      `/agents/${agentId}/docker/volumes/${encodeURIComponent(name)}${force ? "?force=true" : ""}`,
+      { method: "DELETE" }
+    ),
+
+  // Docker Images
+  getDockerImages: (agentId: string) =>
+    fetchAPI<DockerImage[]>(`/agents/${agentId}/docker/images`),
+
+  getDockerImage: (agentId: string, imageId: string) =>
+    fetchAPI<DockerImage>(`/agents/${agentId}/docker/images/${encodeURIComponent(imageId)}`),
+
+  pullDockerImage: (agentId: string, image: string) =>
+    fetchAPI<{ success: boolean; message: string }>(
+      `/agents/${agentId}/docker/images/pull`,
+      {
+        method: "POST",
+        body: JSON.stringify({ image }),
+      }
+    ),
+
+  deleteDockerImage: (agentId: string, imageId: string, force?: boolean) =>
+    fetchAPI<{ success: boolean; message: string }>(
+      `/agents/${agentId}/docker/images/${encodeURIComponent(imageId)}${force ? "?force=true" : ""}`,
+      { method: "DELETE" }
     ),
 
   // Logs
@@ -1145,6 +1382,10 @@ export const api = {
     ssl_enabled?: boolean;
     force_ssl?: boolean;
     http2_enabled?: boolean;
+    ssl_source?: SSLSource;
+    ssl_certificate_id?: string;
+    ssl_cert_path?: string;
+    ssl_key_path?: string;
   }) =>
     fetchAPI<InfraPilotDomainSettings>("/settings/domain", {
       method: "PUT",
@@ -1155,6 +1396,138 @@ export const api = {
     fetchAPI<{ message: string }>("/settings/domain", {
       method: "DELETE",
     }),
+
+  // SSL/TLS Certificate Management
+  checkSSL: (domain: string, remote: boolean = false) =>
+    fetchAPI<SSLCertificateInfo>(`/ssl/check/${encodeURIComponent(domain)}${remote ? '?remote=true' : ''}`),
+
+  checkWildcardSSL: (domain: string) =>
+    fetchAPI<{ domain: string; certificates: SSLCertificateInfo[] }>(
+      `/ssl/check-wildcard/${encodeURIComponent(domain)}`
+    ),
+
+  getSSLStatus: () =>
+    fetchAPI<SSLStatus>("/ssl/status"),
+
+  updateSSLSettings: (data: { email: string; staging: boolean }) =>
+    fetchAPI<{ email: string; staging: boolean; message: string }>("/ssl/settings", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  requestSSLCertificate: async (options: SSLRequestOptions): Promise<{
+    success: boolean;
+    message?: string;
+    error?: string;
+    domain: string;
+    email?: string;
+    staging?: boolean;
+  }> => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+    const res = await fetch(`${API_BASE}/ssl/request`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(options),
+    });
+    const data = await res.json();
+    // Return the full response regardless of status code
+    return data;
+  },
+
+  getDNSInstructions: (domain: string) =>
+    fetchAPI<DNSInstructions>(`/ssl/dns-instructions/${encodeURIComponent(domain)}`),
+
+  verifyDNS: (domain: string) =>
+    fetchAPI<DNSVerifyResult>(`/ssl/verify-dns/${encodeURIComponent(domain)}`),
+
+  // DNS-01 Challenge (for wildcard certificates)
+  startDNSChallenge: async (options: { domain: string; email?: string; staging?: boolean }): Promise<{
+    success: boolean;
+    message?: string;
+    error?: string;
+    domain: string;
+    txt_record?: string;
+    txt_name?: string;
+    txt_records?: { name: string; value: string }[];
+    instructions?: string;
+  }> => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+    const res = await fetch(`${API_BASE}/ssl/dns-challenge/start`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(options),
+    });
+    return res.json();
+  },
+
+  completeDNSChallenge: async (options: { domain: string; email?: string; staging?: boolean }): Promise<{
+    success: boolean;
+    message?: string;
+    error?: string;
+    domain: string;
+  }> => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+    const res = await fetch(`${API_BASE}/ssl/dns-challenge/complete`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(options),
+    });
+    return res.json();
+  },
+
+  getDNSChallenge: (domain: string) =>
+    fetchAPI<{ success: boolean; domain: string; txt_record?: string; txt_name?: string; created_at?: string; error?: string }>(`/ssl/dns-challenge/${encodeURIComponent(domain)}`),
+
+  verifyDNSTXTRecord: (domain: string, expectedValue?: string) =>
+    fetchAPI<{ verified: boolean; txt_name: string; found: string[]; expected?: string; error?: string }>(
+      `/ssl/dns-challenge/verify/${encodeURIComponent(domain)}${expectedValue ? `?value=${encodeURIComponent(expectedValue)}` : ''}`
+    ),
+
+  // SSL Certificate Management
+  listSSLCertificates: () =>
+    fetchAPI<SSLCertificateRecord[]>("/ssl/certificates"),
+
+  scanSSLCertificates: () =>
+    fetchAPI<SSLCertificateScanResult>("/ssl/certificates/scan"),
+
+  registerSSLCertificate: (data: { name?: string; domain?: string; cert_path: string; key_path: string }) =>
+    fetchAPI<{ id: string; name: string; domain: string; is_wildcard: boolean; issuer?: string; expires_at?: string; message: string }>("/ssl/certificates", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  getSSLCertificate: (id: string) =>
+    fetchAPI<SSLCertificateRecord>(`/ssl/certificates/${id}`),
+
+  deleteSSLCertificate: (id: string) =>
+    fetchAPI<{ message: string }>(`/ssl/certificates/${id}`, {
+      method: "DELETE",
+    }),
+
+  // Default Pages
+  getDefaultPages: () =>
+    fetchAPI<DefaultPage[]>("/settings/default-pages"),
+
+  getDefaultPage: (pageType: string) =>
+    fetchAPI<DefaultPage>(`/settings/default-pages/${pageType}`),
+
+  updateDefaultPage: (pageType: string, data: Partial<DefaultPage>) =>
+    fetchAPI<DefaultPage>(`/settings/default-pages/${pageType}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  previewDefaultPage: (pageType: string) =>
+    fetchAPI<{ html: string }>(`/settings/default-pages/${pageType}/preview`),
 
   // Nginx Management
   testNginxConfig: (agentId: string) =>
