@@ -1,11 +1,16 @@
 package api
 
 import (
+	"context"
+	"time"
+
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 
 	"github.com/infrapilot/backend/internal/auth"
+	agentgrpc "github.com/infrapilot/backend/internal/grpc"
 )
 
 type Handler struct {
@@ -70,6 +75,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				agents.PUT("/:id/proxies/:pid", h.RequireModifyProxy(), h.updateProxyHost)
 				agents.DELETE("/:id/proxies/:pid", h.RequireModifyProxy(), h.deleteProxyHost)
 				agents.POST("/:id/proxies/:pid/ssl", h.RequireModifyProxy(), h.requestSSL)
+				agents.POST("/:id/proxies/:pid/ssl/wildcard", h.RequireModifyProxy(), h.applyWildcardSSL)
 				agents.GET("/:id/proxies/:pid/config", h.getProxyConfig)
 				agents.POST("/:id/proxies/:pid/test", h.RequireModifyProxy(), h.testProxyConfig)
 				agents.GET("/:id/proxies/:pid/security-headers", h.getSecurityHeaders)
@@ -104,6 +110,28 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				agents.POST("/:id/networks/attach", h.RequireModifyProxy(), h.attachNginxNetwork)
 				agents.POST("/:id/networks/detach", h.RequireModifyProxy(), h.detachNginxNetwork)
 				agents.GET("/:id/networks/:nid/check-nginx", h.checkNginxNetwork)
+
+				// Docker Resources (networks, volumes, images)
+				docker := agents.Group("/:id/docker")
+				{
+					// Networks (full CRUD)
+					docker.GET("/networks", h.listDockerNetworks)
+					docker.GET("/networks/:nid", h.inspectDockerNetwork)
+					docker.POST("/networks", h.RequireModifyContainers(), h.createDockerNetwork)
+					docker.DELETE("/networks/:nid", h.RequireModifyContainers(), h.deleteDockerNetwork)
+
+					// Volumes
+					docker.GET("/volumes", h.listDockerVolumes)
+					docker.GET("/volumes/:name", h.inspectDockerVolume)
+					docker.POST("/volumes", h.RequireModifyContainers(), h.createDockerVolume)
+					docker.DELETE("/volumes/:name", h.RequireModifyContainers(), h.deleteDockerVolume)
+
+					// Images
+					docker.GET("/images", h.listDockerImages)
+					docker.GET("/images/:imgid", h.inspectDockerImage)
+					docker.POST("/images/pull", h.RequireModifyContainers(), h.pullDockerImage)
+					docker.DELETE("/images/:imgid", h.RequireModifyContainers(), h.deleteDockerImage)
+				}
 
 				// Logs
 				agents.GET("/:id/logs/nginx", h.getNginxLogsReal)
@@ -160,6 +188,37 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				settings.GET("/domain", h.getInfraPilotDomain)
 				settings.PUT("/domain", h.updateInfraPilotDomain)
 				settings.DELETE("/domain", h.deleteInfraPilotDomain)
+
+				// Default pages
+				settings.GET("/default-pages", h.listDefaultPages)
+				settings.GET("/default-pages/:type", h.getDefaultPage)
+				settings.PUT("/default-pages/:type", h.updateDefaultPage)
+				settings.GET("/default-pages/:type/preview", h.previewDefaultPage)
+			}
+
+			// SSL/TLS Management
+			ssl := protected.Group("/ssl")
+			{
+				ssl.GET("/check/:domain", h.checkDomainSSL)
+				ssl.GET("/check-wildcard/:domain", h.checkWildcardSSL)
+				ssl.GET("/verify-dns/:domain", h.verifyDNS)
+				ssl.GET("/dns-instructions/:domain", h.getDNSInstructions)
+				ssl.GET("/status", h.getSSLStatus)
+				ssl.PUT("/settings", h.RequireRole(auth.RoleSuperAdmin), h.updateSSLSettings)
+				ssl.POST("/request", h.RequireRole(auth.RoleSuperAdmin), h.requestSSLCertificate)
+
+				// DNS-01 Challenge (for wildcard certificates)
+				ssl.POST("/dns-challenge/start", h.RequireRole(auth.RoleSuperAdmin), h.startDNSChallenge)
+				ssl.POST("/dns-challenge/complete", h.RequireRole(auth.RoleSuperAdmin), h.completeDNSChallenge)
+				ssl.GET("/dns-challenge/:domain", h.getDNSChallenge)
+				ssl.GET("/dns-challenge/verify/:domain", h.verifyDNSTXTRecord)
+
+				// Certificate management
+				ssl.GET("/certificates", h.listSSLCertificates)
+				ssl.GET("/certificates/scan", h.scanSSLCertificates)
+				ssl.POST("/certificates", h.RequireRole(auth.RoleSuperAdmin), h.registerSSLCertificate)
+				ssl.GET("/certificates/:id", h.getSSLCertificate)
+				ssl.DELETE("/certificates/:id", h.RequireRole(auth.RoleSuperAdmin), h.deleteSSLCertificate)
 			}
 		}
 
@@ -195,4 +254,85 @@ func (h *Handler) healthCheck(c *gin.Context) {
 		"status":  "ok",
 		"edition": "community",
 	})
+}
+
+// StartBackgroundTasks starts background tasks like dispatching default page config
+// This should be called after the HTTP server starts
+func (h *Handler) StartBackgroundTasks(ctx context.Context) {
+	go h.dispatchDefaultPageConfigOnStartup(ctx)
+}
+
+// dispatchDefaultPageConfigOnStartup checks if a domain is configured and dispatches
+// the default page config and system proxy config once an agent connects
+func (h *Handler) dispatchDefaultPageConfigOnStartup(ctx context.Context) {
+	// Wait a bit for the agent to connect
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	dispatched := false
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if dispatched {
+				return
+			}
+
+			// Check if a domain is configured for InfraPilot
+			var agentID uuid.UUID
+			var proxyID uuid.UUID
+			var orgID uuid.UUID
+			var domain string
+			var sslEnabled, forceSSL, http2 bool
+			var sslCertPath, sslKeyPath *string
+
+			err := h.db.QueryRow(ctx, `
+				SELECT ph.id, ph.agent_id, a.org_id, ph.domain, ph.ssl_enabled, ph.force_ssl, ph.http2_enabled,
+				       ph.ssl_cert_path, ph.ssl_key_path
+				FROM proxy_hosts ph
+				JOIN agents a ON a.id = ph.agent_id
+				WHERE ph.is_system_proxy = TRUE
+				LIMIT 1
+			`).Scan(&proxyID, &agentID, &orgID, &domain, &sslEnabled, &forceSSL, &http2, &sslCertPath, &sslKeyPath)
+
+			if err != nil {
+				// No domain configured, nothing to do
+				h.logger.Debug("No InfraPilot domain configured yet")
+				return
+			}
+
+			// Check if agent is connected
+			agentIDStr := agentID.String()
+			if !agentgrpc.IsAgentConnected(agentIDStr) {
+				h.logger.Debug("Waiting for agent to connect before dispatching startup config")
+				continue
+			}
+
+			// Agent is connected and domain is configured
+			h.logger.Info("Dispatching startup configs",
+				zap.String("domain", domain),
+				zap.String("agent_id", agentIDStr),
+			)
+
+			// Get cert paths from settings if available
+			certPath := ""
+			keyPath := ""
+			if sslCertPath != nil {
+				certPath = *sslCertPath
+			}
+			if sslKeyPath != nil {
+				keyPath = *sslKeyPath
+			}
+
+			// Dispatch the InfraPilot system proxy config (routes /api to backend)
+			h.dispatchInfraPilotProxyConfigWithCert(ctx, agentID, proxyID, domain, forceSSL, http2, sslEnabled, certPath, keyPath)
+
+			// Dispatch the default page config (welcome page for IP access)
+			h.dispatchDefaultPageConfig(agentID, orgID, true)
+
+			dispatched = true
+		}
+	}
 }

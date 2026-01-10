@@ -100,6 +100,7 @@ func (h *Handler) listNetworks(c *gin.Context) {
 	})
 	cmd := &agentgrpc.BackendMessage{
 		RequestId: uuid.New().String(),
+		Type:      "network",
 		Command:   cmdPayload,
 	}
 
@@ -111,7 +112,7 @@ func (h *Handler) listNetworks(c *gin.Context) {
 	}
 
 	// Parse response
-	if result, ok := resp.Response.(*agentgrpc.CommandResult); ok && result.Success {
+	if result, err := resp.GetCommandResult(); err == nil && result != nil && result.Success {
 		var networks []NetworkInfo
 		if err := json.Unmarshal(result.Data, &networks); err == nil {
 			c.JSON(http.StatusOK, networks)
@@ -163,6 +164,7 @@ func (h *Handler) getContainerNetworks(c *gin.Context) {
 	})
 	cmd := &agentgrpc.BackendMessage{
 		RequestId: uuid.New().String(),
+		Type:      "network",
 		Command:   cmdPayload,
 	}
 
@@ -174,7 +176,7 @@ func (h *Handler) getContainerNetworks(c *gin.Context) {
 	}
 
 	// Parse response
-	if result, ok := resp.Response.(*agentgrpc.CommandResult); ok && result.Success {
+	if result, err := resp.GetCommandResult(); err == nil && result != nil && result.Success {
 		var networks []ContainerNetworkInfo
 		if err := json.Unmarshal(result.Data, &networks); err == nil {
 			c.JSON(http.StatusOK, networks)
@@ -226,6 +228,7 @@ func (h *Handler) checkNginxNetwork(c *gin.Context) {
 	})
 	cmd := &agentgrpc.BackendMessage{
 		RequestId: uuid.New().String(),
+		Type:      "network",
 		Command:   cmdPayload,
 	}
 
@@ -242,7 +245,7 @@ func (h *Handler) checkNginxNetwork(c *gin.Context) {
 		NetworkID: networkID,
 	}
 
-	if result, ok := resp.Response.(*agentgrpc.CommandResult); ok {
+	if result, err := resp.GetCommandResult(); err == nil && result != nil {
 		response.Connected = result.Success
 	}
 
@@ -330,11 +333,18 @@ func (h *Handler) attachNginxNetwork(c *gin.Context) {
 
 	// Check if already attached in our records
 	var existingID uuid.UUID
+	var networkName string
 	err = h.db.QueryRow(c.Request.Context(),
-		`SELECT id FROM nginx_network_attachments WHERE agent_id = $1 AND network_id = $2 AND status = 'attached'`,
-		agentID, req.NetworkID).Scan(&existingID)
+		`SELECT id, network_name FROM nginx_network_attachments WHERE agent_id = $1 AND network_id = $2 AND status = 'attached'`,
+		agentID, req.NetworkID).Scan(&existingID, &networkName)
 	if err == nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "nginx is already attached to this network"})
+		// Already attached - return success instead of error
+		c.JSON(http.StatusOK, gin.H{
+			"success":      true,
+			"network_id":   req.NetworkID,
+			"network_name": networkName,
+			"message":      "nginx is already attached to this network",
+		})
 		return
 	}
 
@@ -357,6 +367,7 @@ func (h *Handler) attachNginxNetwork(c *gin.Context) {
 	})
 	cmd := &agentgrpc.BackendMessage{
 		RequestId: uuid.New().String(),
+		Type:      "network",
 		Command:   cmdPayload,
 	}
 
@@ -369,7 +380,7 @@ func (h *Handler) attachNginxNetwork(c *gin.Context) {
 
 	// Check response
 	var attachResult agentgrpc.NetworkAttachResult
-	if result, ok := resp.Response.(*agentgrpc.CommandResult); ok {
+	if result, err := resp.GetCommandResult(); err == nil && result != nil {
 		if !result.Success {
 			c.JSON(http.StatusBadRequest, gin.H{"error": result.Message})
 			return
@@ -377,16 +388,16 @@ func (h *Handler) attachNginxNetwork(c *gin.Context) {
 		json.Unmarshal(result.Data, &attachResult)
 	}
 
-	networkName := attachResult.NetworkName
-	if networkName == "" {
-		networkName = req.NetworkID
+	resultNetworkName := attachResult.NetworkName
+	if resultNetworkName == "" {
+		resultNetworkName = req.NetworkID
 	}
 	var attachmentID uuid.UUID
 	err = h.db.QueryRow(c.Request.Context(), `
 		INSERT INTO nginx_network_attachments (agent_id, network_id, network_name, attached_by, status)
 		VALUES ($1, $2, $3, $4, 'attached')
 		RETURNING id
-	`, agentID, req.NetworkID, networkName, userID).Scan(&attachmentID)
+	`, agentID, req.NetworkID, resultNetworkName, userID).Scan(&attachmentID)
 	if err != nil {
 		h.logger.Error("Failed to record network attachment", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to record attachment"})
@@ -396,14 +407,14 @@ func (h *Handler) attachNginxNetwork(c *gin.Context) {
 	// Audit log
 	h.auditLog(c, userID, orgID, "network.attach", "nginx_network", attachmentID, map[string]string{
 		"network_id":   req.NetworkID,
-		"network_name": networkName,
+		"network_name": resultNetworkName,
 	})
 
 	c.JSON(http.StatusOK, gin.H{
 		"success":      true,
 		"id":           attachmentID,
 		"network_id":   req.NetworkID,
-		"network_name": networkName,
+		"network_name": resultNetworkName,
 	})
 }
 
@@ -455,6 +466,7 @@ func (h *Handler) detachNginxNetwork(c *gin.Context) {
 	})
 	cmd := &agentgrpc.BackendMessage{
 		RequestId: uuid.New().String(),
+		Type:      "network",
 		Command:   cmdPayload,
 	}
 
@@ -466,7 +478,7 @@ func (h *Handler) detachNginxNetwork(c *gin.Context) {
 	}
 
 	// Check response
-	if result, ok := resp.Response.(*agentgrpc.CommandResult); ok && !result.Success {
+	if result, err := resp.GetCommandResult(); err == nil && result != nil && !result.Success {
 		c.JSON(http.StatusBadRequest, gin.H{"error": result.Message})
 		return
 	}

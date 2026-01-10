@@ -41,6 +41,9 @@ coverage/
 postgres_data/
 redis_data/
 
+# Persistent data directory (production)
+data/
+
 # Certificates (production)
 *.pem
 *.key

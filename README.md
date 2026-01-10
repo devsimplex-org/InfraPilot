@@ -1,6 +1,10 @@
 <p align="center">
-  <img src="docs/assets/logo.svg" alt="InfraPilot Logo" width="120" height="120">
+  <img src="https://raw.githubusercontent.com/devsimplex-org/InfraPilot/main/docs/assets/logo.svg"
+       alt="InfraPilot Logo"
+       width="120"
+       height="120">
 </p>
+
 
 <h1 align="center">InfraPilot Community Edition</h1>
 
@@ -16,8 +20,11 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/infrapilot-preview.png" alt="InfraPilot Dashboard" width="800">
+  <img src="https://raw.githubusercontent.com/devsimplex-org/InfraPilot/main/docs/assets/infrapilot-preview.png"
+       alt="InfraPilot Dashboard"
+       width="800">
 </p>
+
 
 ## Who is InfraPilot for?
 
