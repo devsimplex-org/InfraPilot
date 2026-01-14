@@ -165,6 +165,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				agents.GET("/:id/deployments", h.listDeployments)
 				agents.POST("/:id/deployments", h.RequireModifyContainers(), h.createDeployment)
 				agents.GET("/:id/deployments/:did", h.getDeployment)
+				agents.GET("/:id/deployments/:did/spine", h.getDeploymentSpine)
 				agents.POST("/:id/deployments/:did/rollback", h.RequireModifyContainers(), h.rollbackDeployment)
 
 				// Webhooks (Epic 4: Dev Integration)
@@ -191,7 +192,9 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 			// SBOM Management
 			protected.POST("/sboms", h.RequireModifyContainers(), h.generateSBOM)
 			protected.GET("/sboms", h.listSBOMs)
+			protected.GET("/sboms/:sid", h.getSBOMDetails)
 			protected.GET("/sboms/:sid/download", h.downloadSBOM)
+			protected.GET("/sboms/:sid/packages/search", h.searchSBOMPackages)
 
 			// Policy Management (Epic 2: Policy-as-Code)
 			policies := protected.Group("/policies")

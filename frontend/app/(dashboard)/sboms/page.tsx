@@ -44,15 +44,41 @@ interface SBOM {
   created_at: string;
 }
 
+interface SBOMPackage {
+  name: string;
+  version: string;
+  type: string;
+  language?: string;
+  purl?: string;
+  cpe?: string;
+  licenses?: string[];
+  locations?: string[];
+  vulnerabilities: number;
+}
+
+interface SBOMDetails extends SBOM {
+  packages: SBOMPackage[];
+  packages_by_type: Record<string, number>;
+  packages_by_language: Record<string, number>;
+}
+
 export default function SBOMsPage() {
   const [activeTab, setActiveTab] = useState<SBOMTab>("all");
   const [selectedSBOM, setSelectedSBOM] = useState<SBOM | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
+  const [packageSearchTerm, setPackageSearchTerm] = useState("");
 
   // Fetch all SBOMs
   const { data: sboms, isLoading } = useQuery({
     queryKey: ["sboms"],
     queryFn: () => api.fetchAPI<SBOM[]>("/sboms"),
+  });
+
+  // Fetch SBOM details when one is selected
+  const { data: sbomDetails, isLoading: isLoadingDetails } = useQuery({
+    queryKey: ["sbom-details", selectedSBOM?.id],
+    queryFn: () => api.fetchAPI<SBOMDetails>(`/sboms/${selectedSBOM?.id}`),
+    enabled: !!selectedSBOM?.id,
   });
 
   // Calculate statistics
@@ -176,6 +202,89 @@ export default function SBOMsPage() {
                 </div>
               </div>
             </DetailSection>
+
+            {/* Package Explorer */}
+            {sbomDetails && (
+              <DetailSection title={`Packages (${sbomDetails.packages.length})`}>
+                {/* Package search */}
+                <div className="mb-3">
+                  <input
+                    type="text"
+                    placeholder="Search packages..."
+                    value={packageSearchTerm}
+                    onChange={(e) => setPackageSearchTerm(e.target.value)}
+                    className="w-full px-3 py-2 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  />
+                </div>
+
+                {/* Package statistics */}
+                <div className="mb-3 p-2 bg-gray-50 dark:bg-gray-800 rounded-lg text-xs space-y-1">
+                  {sbomDetails.packages_by_language && Object.entries(sbomDetails.packages_by_language).map(([lang, count]) => (
+                    <div key={lang} className="flex justify-between">
+                      <span className="text-gray-600 dark:text-gray-400">{lang}</span>
+                      <span className="font-medium text-gray-900 dark:text-white">{count} packages</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Package list */}
+                <div className="max-h-96 overflow-y-auto space-y-2">
+                  {isLoadingDetails ? (
+                    <div className="flex justify-center py-4">
+                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600"></div>
+                    </div>
+                  ) : (
+                    sbomDetails.packages
+                      .filter((pkg) =>
+                        packageSearchTerm === "" ||
+                        pkg.name.toLowerCase().includes(packageSearchTerm.toLowerCase())
+                      )
+                      .slice(0, 100)
+                      .map((pkg, idx) => (
+                        <div
+                          key={idx}
+                          className="p-2 bg-gray-50 dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-750 transition-colors"
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                              {pkg.name}
+                            </span>
+                            {pkg.vulnerabilities > 0 && (
+                              <span className="px-2 py-0.5 text-xs bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-full flex-shrink-0">
+                                {pkg.vulnerabilities} vulns
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                            <span>{pkg.version}</span>
+                            <span>•</span>
+                            <span className="capitalize">{pkg.type}</span>
+                            {pkg.language && (
+                              <>
+                                <span>•</span>
+                                <span>{pkg.language}</span>
+                              </>
+                            )}
+                          </div>
+                          {pkg.licenses && pkg.licenses.length > 0 && (
+                            <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                              License: {pkg.licenses.join(", ")}
+                            </div>
+                          )}
+                        </div>
+                      ))
+                  )}
+                </div>
+                {sbomDetails && sbomDetails.packages.filter((pkg) =>
+                  packageSearchTerm === "" ||
+                  pkg.name.toLowerCase().includes(packageSearchTerm.toLowerCase())
+                ).length > 100 && (
+                  <div className="mt-2 text-xs text-center text-gray-500 dark:text-gray-400">
+                    Showing first 100 packages. Use search to filter.
+                  </div>
+                )}
+              </DetailSection>
+            )}
 
             <DetailSection title="Actions">
               <Button
