@@ -11,19 +11,24 @@ import (
 
 	"github.com/infrapilot/backend/internal/auth"
 	agentgrpc "github.com/infrapilot/backend/internal/grpc"
+	"github.com/infrapilot/backend/internal/scanner"
 )
 
 type Handler struct {
-	db     *pgxpool.Pool
-	auth   *auth.Service
-	logger *zap.Logger
+	db            *pgxpool.Pool
+	auth          *auth.Service
+	logger        *zap.Logger
+	scanner       *scanner.Scanner
+	sbomGenerator *scanner.SBOMGenerator
 }
 
 func NewHandler(db *pgxpool.Pool, authService *auth.Service, logger *zap.Logger) *Handler {
 	return &Handler{
-		db:     db,
-		auth:   authService,
-		logger: logger,
+		db:            db,
+		auth:          authService,
+		logger:        logger,
+		scanner:       scanner.NewScanner(logger),
+		sbomGenerator: scanner.NewSBOMGenerator(logger),
 	}
 }
 
@@ -143,7 +148,29 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				agents.POST("/:id/databases", h.RequireModifyContainers(), h.addDatabase)
 				agents.DELETE("/:id/databases/:did", h.RequireModifyContainers(), h.removeDatabase)
 				agents.GET("/:id/databases/:did/metrics", h.getDatabaseMetrics)
+
+				// Deployments (Epic 0: DevSecOps Foundations)
+				agents.GET("/:id/deployments", h.listDeployments)
+				agents.POST("/:id/deployments", h.RequireModifyContainers(), h.createDeployment)
+				agents.GET("/:id/deployments/:did", h.getDeployment)
+				agents.POST("/:id/deployments/:did/rollback", h.RequireModifyContainers(), h.rollbackDeployment)
 			}
+
+			// Services view (cross-agent)
+			protected.GET("/services", h.listServices)
+			protected.GET("/services/:name/deployments", h.listServiceDeployments)
+			protected.GET("/services/:name/current", h.getCurrentDeployment)
+
+			// Security Scanning (Epic 1: Supply Chain Security)
+			protected.POST("/scans", h.RequireModifyContainers(), h.triggerImageScan)
+			protected.GET("/scans", h.listScans)
+			protected.GET("/scans/:sid", h.getScanDetails)
+			protected.GET("/scans/:sid/vulnerabilities", h.getScanVulnerabilities)
+
+			// SBOM Management
+			protected.POST("/sboms", h.RequireModifyContainers(), h.generateSBOM)
+			protected.GET("/sboms", h.listSBOMs)
+			protected.GET("/sboms/:sid/download", h.downloadSBOM)
 
 			// Alerts
 			alerts := protected.Group("/alerts")
