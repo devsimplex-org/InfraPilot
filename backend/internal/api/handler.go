@@ -13,25 +13,28 @@ import (
 	agentgrpc "github.com/infrapilot/backend/internal/grpc"
 	"github.com/infrapilot/backend/internal/policy"
 	"github.com/infrapilot/backend/internal/scanner"
+	"github.com/infrapilot/backend/internal/webhook"
 )
 
 type Handler struct {
-	db            *pgxpool.Pool
-	auth          *auth.Service
-	logger        *zap.Logger
-	scanner       *scanner.Scanner
-	sbomGenerator *scanner.SBOMGenerator
-	policyEngine  *policy.PolicyEngine
+	db             *pgxpool.Pool
+	auth           *auth.Service
+	logger         *zap.Logger
+	scanner        *scanner.Scanner
+	sbomGenerator  *scanner.SBOMGenerator
+	policyEngine   *policy.PolicyEngine
+	webhookService *webhook.Service
 }
 
 func NewHandler(db *pgxpool.Pool, authService *auth.Service, logger *zap.Logger) *Handler {
 	return &Handler{
-		db:            db,
-		auth:          authService,
-		logger:        logger,
-		scanner:       scanner.NewScanner(logger),
-		sbomGenerator: scanner.NewSBOMGenerator(logger),
-		policyEngine:  policy.NewPolicyEngine(logger, "/app/policies"),
+		db:             db,
+		auth:           authService,
+		logger:         logger,
+		scanner:        scanner.NewScanner(logger),
+		sbomGenerator:  scanner.NewSBOMGenerator(logger),
+		policyEngine:   policy.NewPolicyEngine(logger, "/app/policies"),
+		webhookService: webhook.NewService(db, logger),
 	}
 }
 
@@ -60,6 +63,12 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 			authGroup.POST("/mfa/confirm", h.AuthMiddleware(), h.confirmMFASetup)
 			authGroup.POST("/mfa/disable", h.AuthMiddleware(), h.disableMFA)
 			authGroup.POST("/mfa/backup-codes", h.AuthMiddleware(), h.regenerateBackupCodes)
+		}
+
+		// Webhook receiver (public - uses signature verification)
+		webhooks := v1.Group("/webhooks")
+		{
+			webhooks.POST("/:id/receive", h.receiveWebhook)
 		}
 
 		// Protected routes
@@ -157,6 +166,15 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				agents.POST("/:id/deployments", h.RequireModifyContainers(), h.createDeployment)
 				agents.GET("/:id/deployments/:did", h.getDeployment)
 				agents.POST("/:id/deployments/:did/rollback", h.RequireModifyContainers(), h.rollbackDeployment)
+
+				// Webhooks (Epic 4: Dev Integration)
+				agents.GET("/:id/webhooks", h.listWebhooks)
+				agents.POST("/:id/webhooks", h.RequireModifyContainers(), h.createWebhook)
+				agents.GET("/:id/webhooks/:wid", h.getWebhook)
+				agents.PUT("/:id/webhooks/:wid", h.RequireModifyContainers(), h.updateWebhook)
+				agents.DELETE("/:id/webhooks/:wid", h.RequireModifyContainers(), h.deleteWebhook)
+				agents.GET("/:id/webhooks/:wid/events", h.listWebhookEvents)
+				agents.POST("/:id/webhooks/:wid/regenerate", h.RequireModifyContainers(), h.regenerateWebhookSecret)
 			}
 
 			// Services view (cross-agent)
@@ -175,7 +193,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 			protected.GET("/sboms", h.listSBOMs)
 			protected.GET("/sboms/:sid/download", h.downloadSBOM)
 
-			// Policy Management (Epic 1: Supply Chain Security)
+			// Policy Management (Epic 2: Policy-as-Code)
 			policies := protected.Group("/policies")
 			{
 				policies.GET("", h.listPolicies)
@@ -185,6 +203,9 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				policies.GET("/decisions/stats", h.getPolicyStats)
 				policies.POST("/evaluate/preview", h.previewPolicyEvaluation)
 			}
+
+			// Security Dashboard (Epic 5: DevSecOps Observability)
+			protected.GET("/security/posture", h.getSecurityPosture)
 
 			// Alerts
 			alerts := protected.Group("/alerts")

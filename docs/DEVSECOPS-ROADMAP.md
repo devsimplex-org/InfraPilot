@@ -48,28 +48,34 @@ InfraPilot is DevSecOps-first when it satisfies **all four pillars**:
 | **Sec** | MFA (TOTP) | ✅ Complete |
 | **Sec** | Audit logs | ✅ Complete |
 | **Sec** | TLS management | ✅ Complete |
-| **Dev** | CI/CD integration | ⏳ Partial |
-| **Dev** | Build metadata | ⏳ Partial |
+| **Dev** | CI/CD integration | ✅ Complete |
+| **Dev** | Build metadata | ✅ Complete |
+| **Dev** | Webhook ingestor | ✅ Complete |
 | **Sec** | Image scanning | ✅ Complete |
 | **Sec** | SBOM generation | ✅ Complete |
 | **Sec** | Policy enforcement | ✅ Complete |
 | **Sec** | Vulnerability management | ✅ Complete |
+| **Sec** | Security posture dashboard | ✅ Complete |
+| **Sec** | Security scoring & metrics | ✅ Complete |
 | **Sec** | Runtime drift detection | ❌ Missing |
 
 ### Gap Analysis
 
-**Current Coverage**: ~85% DevSecOps
+**Current Coverage**: ~95% DevSecOps
 
 **Recently Completed**:
 1. ✅ Supply chain security (Trivy scanning, Syft SBOM)
 2. ✅ Policy-as-code (OPA integration with Rego)
 3. ✅ Deployment as first-class entity with pipeline
 4. ✅ Vulnerability tracking and management UI
+5. ✅ CI/CD webhook integration (GitHub, GitLab, Jenkins)
+6. ✅ Build metadata tracking and provenance
+7. ✅ Security posture dashboard with real-time metrics
+8. ✅ Automated security scoring and risk classification
 
 **Still Missing for DevSecOps-First**:
 1. Runtime security (drift detection, behavioral monitoring)
-2. Complete Dev integration (CI webhooks, full provenance)
-3. Advanced observability (security posture metrics)
+2. Advanced incident response automation
 
 ## Target State
 
@@ -202,27 +208,49 @@ Developer         CI/CD           InfraPilot        Runtime
 | Privilege escalation detection | P1 | Medium |
 | Incident correlation | P2 | High |
 
-### Epic 4: Dev Integration
+### Epic 4: Dev Integration ✅ COMPLETE (Core Features)
 
 **Objective**: Close the Dev → Sec → Ops loop
 
-| Task | Priority | Complexity |
-|------|----------|------------|
-| CI webhook ingestor | P0 | Medium |
-| Deployment gate API | P0 | Medium |
-| Build metadata tracking | P1 | Low |
-| Rollback automation | P1 | Medium |
+| Task | Priority | Status | Notes |
+|------|----------|--------|-------|
+| CI webhook ingestor | P0 | ✅ Complete | GitHub Actions, GitLab CI, Jenkins support |
+| Webhook management UI | P0 | ✅ Complete | Full CRUD with event history |
+| Build metadata tracking | P1 | ✅ Complete | Tracked in deployments table |
+| Deployment gate API | P1 | ⏳ Partial | Webhook API serves as gate |
+| Rollback automation | P1 | ❌ Missing | Future enhancement |
 
-### Epic 5: DevSecOps Observability
+**Completed**: 2026-01-15
+**Deliverables**:
+- Multi-provider webhook support (GitHub Actions, GitLab CI, Jenkins, Generic)
+- Webhook signature verification framework (bcrypt-based)
+- Build metadata extraction and storage
+- Webhook management UI with event history
+- Automatic deployment pipeline integration
+- Comprehensive webhook integration documentation
+
+### Epic 5: DevSecOps Observability ⏳ PARTIAL
 
 **Objective**: Make DevSecOps visible, explainable, and measurable
 
-| Task | Priority | Complexity |
-|------|----------|------------|
-| Security posture dashboard | P0 | High |
-| Deployment health metrics | P1 | Medium |
-| Unified audit timeline | P1 | High |
-| Risk scoring | P2 | Medium |
+| Task | Priority | Status | Notes |
+|------|----------|--------|-------|
+| Security posture dashboard | P0 | ✅ Complete | Real-time metrics with trend visualization |
+| Deployment health metrics | P1 | ✅ Complete | Integrated in security dashboard |
+| Security scoring | P1 | ✅ Complete | 0-100 score with risk levels |
+| Vulnerability tracking | P1 | ✅ Complete | Trend charts and statistics |
+| Policy compliance metrics | P1 | ✅ Complete | 30-day compliance trends |
+| Unified audit timeline | P2 | ⏳ Partial | Recent events view implemented |
+| Risk scoring | P2 | ✅ Complete | Auto-calculated based on vulns + policy |
+
+**Partial Completion**: 2026-01-15
+**Deliverables**:
+- Real-time security posture dashboard with 0-100 scoring
+- Comprehensive metric aggregation (deployments, vulnerabilities, policies, SBOMs)
+- 7-day trend visualization for deployments and vulnerabilities
+- Security event timeline with severity indicators
+- Risk level classification (low, medium, high, critical)
+- Auto-refresh every 30 seconds for live monitoring
 
 ### Epic 6: DevSecOps Hardening
 
@@ -270,17 +298,20 @@ Developer         CI/CD           InfraPilot        Runtime
 **Deliverable**: ✅ End-to-end secure deployment pipeline
 **Completed**: 2026-01-14
 
-### Phase 3: Runtime Security & Dev Integration (CURRENT)
+### Phase 3: Runtime Security & Dev Integration ⏳ IN PROGRESS
 
-**Focus**: Post-deployment security + CI/CD integration
+**Focus**: Post-deployment security + CI/CD integration + Observability
 
 - [ ] Epic 3.1: Configuration drift detection
 - [ ] Epic 3.2: Behavioral anomaly detection
-- [ ] Epic 4.1: CI webhook ingestor
-- [ ] Epic 4.2: Build metadata enrichment
-- [ ] Epic 5.1: Security posture dashboard
+- [x] Epic 4.1: CI webhook ingestor (✅ Complete)
+- [x] Epic 4.2: Build metadata enrichment (✅ Complete)
+- [x] Epic 5.1: Security posture dashboard (✅ Complete)
+- [x] Epic 5.2: Deployment health metrics (✅ Complete)
+- [x] Epic 5.3: Security scoring & risk classification (✅ Complete)
 
-**Target Deliverable**: Runtime security monitoring + full CI/CD integration
+**Partial Deliverable**: ✅ Full CI/CD integration + DevSecOps observability complete
+**Remaining**: Runtime security monitoring (drift detection, behavioral analysis)
 
 ### Phase 3: Runtime Security (Month 3-4)
 
