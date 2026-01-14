@@ -211,6 +211,32 @@ export default function DeploymentsPage() {
             <div className="mt-4 space-y-6">
               {panelTab === "overview" && (
                 <>
+                  {/* Quick Actions */}
+                  {selectedDeployment.sbom_id && (
+                    <DetailSection title="Quick Actions">
+                      <div className="grid grid-cols-1 gap-2">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => api.downloadSBOM(selectedDeployment.sbom_id!)}
+                        >
+                          <Download className="w-4 h-4 mr-2" />
+                          Download SBOM
+                        </Button>
+                        {selectedDeployment.scan_result_id && (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => setPanelTab("scan")}
+                          >
+                            <Shield className="w-4 h-4 mr-2" />
+                            View Scan Results
+                          </Button>
+                        )}
+                      </div>
+                    </DetailSection>
+                  )}
+
                   <DetailSection title="Deployment Info">
                     <DetailRow label="Service" value={selectedDeployment.service_name} />
                     <DetailRow label="Environment" value={selectedDeployment.environment} />
@@ -340,46 +366,117 @@ export default function DeploymentsPage() {
                     )}
                   </DetailSection>
 
-                  <DetailSection title="Vulnerability Counts">
-                    <DetailRow
-                      label="Critical"
-                      value={
-                        <span className="text-red-600 dark:text-red-400 font-semibold">
-                          {scanResult.critical_count}
-                        </span>
-                      }
-                    />
-                    <DetailRow
-                      label="High"
-                      value={
-                        <span className="text-orange-600 dark:text-orange-400 font-semibold">
-                          {scanResult.high_count}
-                        </span>
-                      }
-                    />
-                    <DetailRow
-                      label="Medium"
-                      value={
-                        <span className="text-yellow-600 dark:text-yellow-400 font-semibold">
-                          {scanResult.medium_count}
-                        </span>
-                      }
-                    />
-                    <DetailRow label="Low" value={scanResult.low_count} />
-                    <DetailRow label="Unknown" value={scanResult.unknown_count} />
-                    <DetailRow
-                      label="Total"
-                      value={<span className="font-semibold">{scanResult.total_count}</span>}
-                    />
-                    <DetailRow
-                      label="Fixable"
-                      value={
-                        <span className="text-green-600 dark:text-green-400 font-semibold">
-                          {scanResult.fixable_count}
-                        </span>
-                      }
-                    />
+                  <DetailSection title="Vulnerability Distribution">
+                    <div className="space-y-3">
+                      {/* Visual bars */}
+                      <div className="space-y-2">
+                        {scanResult.critical_count > 0 && (
+                          <div>
+                            <div className="flex items-center justify-between text-sm mb-1">
+                              <span className="text-gray-700 dark:text-gray-300">Critical</span>
+                              <span className="font-semibold text-red-600 dark:text-red-400">
+                                {scanResult.critical_count}
+                              </span>
+                            </div>
+                            <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-red-500"
+                                style={{
+                                  width: `${Math.max(5, (scanResult.critical_count / scanResult.total_count) * 100)}%`,
+                                }}
+                              />
+                            </div>
+                          </div>
+                        )}
+                        {scanResult.high_count > 0 && (
+                          <div>
+                            <div className="flex items-center justify-between text-sm mb-1">
+                              <span className="text-gray-700 dark:text-gray-300">High</span>
+                              <span className="font-semibold text-orange-600 dark:text-orange-400">
+                                {scanResult.high_count}
+                              </span>
+                            </div>
+                            <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-orange-500"
+                                style={{
+                                  width: `${Math.max(5, (scanResult.high_count / scanResult.total_count) * 100)}%`,
+                                }}
+                              />
+                            </div>
+                          </div>
+                        )}
+                        {scanResult.medium_count > 0 && (
+                          <div>
+                            <div className="flex items-center justify-between text-sm mb-1">
+                              <span className="text-gray-700 dark:text-gray-300">Medium</span>
+                              <span className="font-semibold text-yellow-600 dark:text-yellow-400">
+                                {scanResult.medium_count}
+                              </span>
+                            </div>
+                            <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-yellow-500"
+                                style={{
+                                  width: `${Math.max(5, (scanResult.medium_count / scanResult.total_count) * 100)}%`,
+                                }}
+                              />
+                            </div>
+                          </div>
+                        )}
+                        {scanResult.low_count > 0 && (
+                          <div>
+                            <div className="flex items-center justify-between text-sm mb-1">
+                              <span className="text-gray-700 dark:text-gray-300">Low</span>
+                              <span className="font-semibold text-blue-600 dark:text-blue-400">
+                                {scanResult.low_count}
+                              </span>
+                            </div>
+                            <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-blue-500"
+                                style={{
+                                  width: `${Math.max(5, (scanResult.low_count / scanResult.total_count) * 100)}%`,
+                                }}
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Summary stats */}
+                      <div className="pt-3 border-t border-gray-200 dark:border-gray-700 grid grid-cols-2 gap-4">
+                        <div>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">Total</p>
+                          <p className="text-lg font-semibold text-gray-900 dark:text-white">
+                            {scanResult.total_count}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">Fixable</p>
+                          <p className="text-lg font-semibold text-green-600 dark:text-green-400">
+                            {scanResult.fixable_count}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
                   </DetailSection>
+
+                  {scanResult.total_count === 0 && (
+                    <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
+                      <div className="flex items-center gap-3">
+                        <CheckCircle className="w-6 h-6 text-green-600 dark:text-green-400" />
+                        <div>
+                          <p className="text-sm font-medium text-green-900 dark:text-green-100">
+                            No Vulnerabilities Found
+                          </p>
+                          <p className="text-xs text-green-700 dark:text-green-300 mt-0.5">
+                            This image has passed security scanning with zero vulnerabilities.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
 

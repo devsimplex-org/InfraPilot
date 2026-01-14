@@ -48,23 +48,28 @@ InfraPilot is DevSecOps-first when it satisfies **all four pillars**:
 | **Sec** | MFA (TOTP) | ✅ Complete |
 | **Sec** | Audit logs | ✅ Complete |
 | **Sec** | TLS management | ✅ Complete |
-| **Dev** | CI/CD integration | ❌ Missing |
-| **Dev** | Build metadata | ❌ Missing |
-| **Sec** | Image scanning | ❌ Missing |
-| **Sec** | SBOM generation | ❌ Missing |
-| **Sec** | Policy enforcement | ❌ Missing |
+| **Dev** | CI/CD integration | ⏳ Partial |
+| **Dev** | Build metadata | ⏳ Partial |
+| **Sec** | Image scanning | ✅ Complete |
+| **Sec** | SBOM generation | ✅ Complete |
+| **Sec** | Policy enforcement | ✅ Complete |
+| **Sec** | Vulnerability management | ✅ Complete |
 | **Sec** | Runtime drift detection | ❌ Missing |
 
 ### Gap Analysis
 
-**Current Coverage**: ~60% DevSecOps
+**Current Coverage**: ~85% DevSecOps
 
-**Missing for DevSecOps-First**:
-1. Supply chain security (image scanning, SBOM)
-2. Policy-as-code (OPA integration)
-3. Deployment as first-class entity
-4. Runtime security (drift detection)
-5. Dev integration (CI webhooks)
+**Recently Completed**:
+1. ✅ Supply chain security (Trivy scanning, Syft SBOM)
+2. ✅ Policy-as-code (OPA integration with Rego)
+3. ✅ Deployment as first-class entity with pipeline
+4. ✅ Vulnerability tracking and management UI
+
+**Still Missing for DevSecOps-First**:
+1. Runtime security (drift detection, behavioral monitoring)
+2. Complete Dev integration (CI webhooks, full provenance)
+3. Advanced observability (security posture metrics)
 
 ## Target State
 
@@ -144,27 +149,47 @@ Developer         CI/CD           InfraPilot        Runtime
 | Deployment-container relationship | P0 | Medium |
 | Deployment history tracking | P0 | Medium |
 
-### Epic 1: Supply Chain Security
+### Epic 1: Supply Chain Security ✅ COMPLETE
 
 **Objective**: No image runs unless scanned, attested, and policy-approved
 
-| Task | Priority | Complexity |
-|------|----------|------------|
-| Image scanning pipeline (Trivy) | P0 | High |
-| SBOM generation (CycloneDX) | P0 | Medium |
-| Vulnerability database | P1 | Medium |
-| Base image tracking | P1 | Low |
+| Task | Priority | Status | Notes |
+|------|----------|--------|-------|
+| Image scanning pipeline (Trivy) | P0 | ✅ Complete | Trivy v0.68.2 integrated |
+| SBOM generation (CycloneDX) | P0 | ✅ Complete | Syft v1.40.0 integrated |
+| Vulnerability database | P1 | ✅ Complete | PostgreSQL storage |
+| Vulnerability management UI | P1 | ✅ Complete | Search, filter, CVE details |
+| SBOM management UI | P1 | ✅ Complete | View, download, statistics |
+| Base image tracking | P1 | ⏳ Partial | Tracked via SBOM metadata |
 
-### Epic 2: Policy-as-Code
+**Completed**: 2026-01-14
+**Deliverables**:
+- Trivy scanning integrated into deployment pipeline
+- Syft SBOM generation (CycloneDX format)
+- 2,726 packages tracked across 5 SBOMs
+- Full vulnerability management system
+- SBOM explorer with download capability
+
+### Epic 2: Policy-as-Code ✅ COMPLETE
 
 **Objective**: Security decisions are automatic, versioned, and auditable
 
-| Task | Priority | Complexity |
-|------|----------|------------|
-| OPA policy engine integration | P0 | High |
-| Environment-scoped policies | P0 | Medium |
-| Policy versioning | P1 | Medium |
-| Policy audit trail | P1 | Low |
+| Task | Priority | Status | Notes |
+|------|----------|--------|-------|
+| OPA policy engine integration | P0 | ✅ Complete | OPA v1.12.2 with Rego |
+| Environment-scoped policies | P0 | ✅ Complete | Prod/Staging/Dev rules |
+| Policy management UI | P1 | ✅ Complete | View policies & decisions |
+| Policy decision tracking | P1 | ✅ Complete | All decisions stored |
+| Policy versioning | P1 | 🔄 Future | File-based backups only |
+| Policy audit trail | P1 | ⏳ Partial | Basic tracking in place |
+
+**Completed**: 2026-01-14
+**Deliverables**:
+- OPA integration with default Rego policies
+- Environment-specific security rules (prod: zero-tolerance, staging: moderate, dev: permissive)
+- Policy decision statistics (10 deployments evaluated, 100% allowed)
+- Policy management UI with recent decisions view
+- Automatic policy evaluation in deployment pipeline
 
 ### Epic 3: Runtime Security
 
@@ -221,25 +246,41 @@ Developer         CI/CD           InfraPilot        Runtime
 
 ## Implementation Timeline
 
-### Phase 1: Foundations (Month 1-2)
+### Phase 1: Foundations ✅ COMPLETE
 
 **Focus**: Core infrastructure for DevSecOps
 
-- [ ] Epic 0: Deployment entity
-- [ ] Epic 1.1: Image scanning (Trivy)
-- [ ] Epic 2.1: OPA integration (basic)
+- [x] Epic 0: Deployment entity
+- [x] Epic 1.1: Image scanning (Trivy v0.68.2)
+- [x] Epic 2.1: OPA integration (v1.12.2)
 
-**Deliverable**: Deployments can be scanned and blocked
+**Deliverable**: ✅ Deployments can be scanned and blocked
+**Completed**: 2026-01-14
 
-### Phase 2: Policy & Supply Chain (Month 2-3)
+### Phase 2: Policy & Supply Chain ✅ COMPLETE
 
 **Focus**: Complete security pipeline
 
-- [ ] Epic 1.2: SBOM generation
-- [ ] Epic 2.2: Environment-scoped policies
-- [ ] Epic 4.1: CI webhook ingestor
+- [x] Epic 1.2: SBOM generation (Syft v1.40.0)
+- [x] Epic 1.3: Vulnerability management UI
+- [x] Epic 2.2: Environment-scoped policies
+- [x] Epic 2.3: Policy management UI
+- [ ] Epic 4.1: CI webhook ingestor (Next phase)
 
-**Deliverable**: End-to-end secure deployment pipeline
+**Deliverable**: ✅ End-to-end secure deployment pipeline
+**Completed**: 2026-01-14
+
+### Phase 3: Runtime Security & Dev Integration (CURRENT)
+
+**Focus**: Post-deployment security + CI/CD integration
+
+- [ ] Epic 3.1: Configuration drift detection
+- [ ] Epic 3.2: Behavioral anomaly detection
+- [ ] Epic 4.1: CI webhook ingestor
+- [ ] Epic 4.2: Build metadata enrichment
+- [ ] Epic 5.1: Security posture dashboard
+
+**Target Deliverable**: Runtime security monitoring + full CI/CD integration
 
 ### Phase 3: Runtime Security (Month 3-4)
 
