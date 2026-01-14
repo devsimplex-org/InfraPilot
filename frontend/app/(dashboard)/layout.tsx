@@ -31,9 +31,11 @@ import { api } from "@/lib/api";
 
 const navigation = [
   { name: "Overview", href: "/", icon: LayoutDashboard },
+  { name: "Security", href: "/security", icon: Shield },
   { name: "Containers", href: "/containers", icon: Container },
-  { name: "Deployments", href: "/deployments", icon: Shield },
-  { name: "Policies", href: "/policies", icon: ShieldCheck },
+  { name: "Deployments", href: "/deployments", icon: ShieldCheck },
+  { name: "Webhooks", href: "/webhooks", icon: Activity },
+  { name: "Policies", href: "/policies", icon: FileText },
   { name: "Vulnerabilities", href: "/vulnerabilities", icon: AlertTriangle },
   { name: "SBOMs", href: "/sboms", icon: Package },
   { name: "Networks", href: "/docker/networks", icon: Network },

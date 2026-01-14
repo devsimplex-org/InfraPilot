@@ -1,0 +1,86 @@
+package webhook
+
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
+
+// WebhookConfig represents a configured webhook endpoint
+type WebhookConfig struct {
+	ID          uuid.UUID  `json:"id"`
+	OrgID       uuid.UUID  `json:"org_id"`
+	AgentID     uuid.UUID  `json:"agent_id"`
+	Name        string     `json:"name"`
+	Provider    string     `json:"provider"` // github, gitlab, jenkins, generic
+	Secret      string     `json:"-"`        // Never expose in JSON
+	SecretHash  string     `json:"-"`        // bcrypt hash of secret
+	Enabled     bool       `json:"enabled"`
+	ServiceName string     `json:"service_name"`
+	Environment string     `json:"environment"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+	LastUsedAt  *time.Time `json:"last_used_at,omitempty"`
+}
+
+// WebhookEvent represents a received webhook event
+type WebhookEvent struct {
+	ID          uuid.UUID  `json:"id"`
+	WebhookID   uuid.UUID  `json:"webhook_id"`
+	Provider    string     `json:"provider"`
+	EventType   string     `json:"event_type"`
+	Payload     []byte     `json:"payload"`
+	Headers     string     `json:"headers"` // JSON-encoded headers
+	Verified    bool       `json:"verified"`
+	Processed   bool       `json:"processed"`
+	DeploymentID *uuid.UUID `json:"deployment_id,omitempty"`
+	Error       *string    `json:"error,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	ProcessedAt *time.Time `json:"processed_at,omitempty"`
+}
+
+// BuildMetadata contains extracted CI/CD build information
+type BuildMetadata struct {
+	GitRepo      string  `json:"git_repo"`
+	GitBranch    string  `json:"git_branch"`
+	GitCommit    string  `json:"git_commit"`
+	CommitMsg    *string `json:"commit_message,omitempty"`
+	Author       *string `json:"author,omitempty"`
+	CIProvider   string  `json:"ci_provider"`
+	CIPipelineID string  `json:"ci_pipeline_id"`
+	CIBuildURL   string  `json:"ci_build_url"`
+	BuildNumber  *string `json:"build_number,omitempty"`
+	ImageRepo    string  `json:"image_repository"`
+	ImageTag     string  `json:"image_tag"`
+	ImageDigest  *string `json:"image_digest,omitempty"`
+}
+
+// CreateWebhookRequest is the request to create a new webhook
+type CreateWebhookRequest struct {
+	Name        string `json:"name" binding:"required"`
+	Provider    string `json:"provider" binding:"required,oneof=github gitlab jenkins generic"`
+	ServiceName string `json:"service_name" binding:"required"`
+	Environment string `json:"environment" binding:"required,oneof=dev staging prod"`
+}
+
+// UpdateWebhookRequest is the request to update a webhook
+type UpdateWebhookRequest struct {
+	Name        *string `json:"name"`
+	Enabled     *bool   `json:"enabled"`
+	ServiceName *string `json:"service_name"`
+	Environment *string `json:"environment"`
+}
+
+// WebhookResponse includes the secret only on creation
+type WebhookResponse struct {
+	ID          uuid.UUID  `json:"id"`
+	Name        string     `json:"name"`
+	Provider    string     `json:"provider"`
+	ServiceName string     `json:"service_name"`
+	Environment string     `json:"environment"`
+	Enabled     bool       `json:"enabled"`
+	Secret      *string    `json:"secret,omitempty"` // Only on creation
+	WebhookURL  string     `json:"webhook_url"`
+	CreatedAt   time.Time  `json:"created_at"`
+	LastUsedAt  *time.Time `json:"last_used_at,omitempty"`
+}
