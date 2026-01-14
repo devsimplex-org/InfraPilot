@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
+
+	"github.com/infrapilot/backend/internal/policy"
 )
 
 // ==================== Types ====================
@@ -339,7 +342,7 @@ func (h *Handler) runDeploymentPipeline(ctx context.Context, orgID, deploymentID
 				reference_urls
 			)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-		`, scanID, vuln.CVEID, vuln.Severity,
+		`, scanID, vuln.CVEID, strings.ToLower(vuln.Severity),
 			vuln.PackageName, vuln.PackageVersion, vuln.PackageType,
 			vuln.FixedVersion, vuln.FixAvailable,
 			vuln.Title, vuln.Description, vuln.CVSSScore, vuln.CVSSVector,
@@ -401,13 +404,75 @@ func (h *Handler) runDeploymentPipeline(ctx context.Context, orgID, deploymentID
 		return
 	}
 
-	// Step 5: Policy evaluation (Phase 3 will use OPA)
-	// For now, auto-approve deployments
-	policyDecision := "allow"
-	policyReason := "Auto-approved (OPA policy engine not yet configured)"
+	// Step 5: Policy evaluation with OPA
+	logger.Info("Evaluating deployment policy")
 
-	// TODO: In Phase 3, evaluate with OPA
-	// policyDecision, policyReason = h.evaluatePolicy(ctx, deploymentID, scanResult)
+	// Fetch deployment details for policy evaluation
+	var deployment struct {
+		ServiceName  string
+		Environment  string
+		ImageRepo    string
+		ImageTag     string
+		ImageDigest  string
+		GitBranch    string
+		GitCommit    string
+	}
+	err = h.db.QueryRow(ctx, `
+		SELECT service_name, environment, image_repository,
+		       COALESCE(image_tag, ''), COALESCE(image_digest, ''),
+		       COALESCE(git_branch, ''), COALESCE(git_commit, '')
+		FROM deployments WHERE id = $1
+	`, deploymentID).Scan(
+		&deployment.ServiceName, &deployment.Environment, &deployment.ImageRepo,
+		&deployment.ImageTag, &deployment.ImageDigest,
+		&deployment.GitBranch, &deployment.GitCommit,
+	)
+	if err != nil {
+		logger.Error("Failed to fetch deployment for policy evaluation", zap.Error(err))
+		h.updateDeploymentStatus(ctx, deploymentID.String(), "failed", "Failed to evaluate policy")
+		return
+	}
+
+	// Prepare policy input
+	policyInput := policy.PolicyInput{
+		Deployment: policy.DeploymentInfo{
+			ServiceName: deployment.ServiceName,
+			Environment: deployment.Environment,
+			ImageRepo:   deployment.ImageRepo,
+			ImageTag:    deployment.ImageTag,
+			ImageDigest: deployment.ImageDigest,
+			GitBranch:   deployment.GitBranch,
+			GitCommit:   deployment.GitCommit,
+		},
+		ScanResult: policy.ScanResultInfo{
+			TotalCount:    scanResult.TotalCount,
+			CriticalCount: scanResult.CriticalCount,
+			HighCount:     scanResult.HighCount,
+			MediumCount:   scanResult.MediumCount,
+			LowCount:      scanResult.LowCount,
+			FixableCount:  scanResult.FixableCount,
+		},
+		Vulnerabilities: []policy.VulnerabilityInfo{}, // Not needed for basic policy
+	}
+
+	// Evaluate policy
+	policyResult, err := h.policyEngine.EvaluatePolicy(ctx, policyInput)
+	if err != nil {
+		logger.Error("Policy evaluation failed", zap.Error(err))
+		// Fallback to deny on error
+		policyResult = &policy.PolicyResult{
+			Decision: "deny",
+			Reason:   "Policy evaluation error: " + err.Error(),
+		}
+	}
+
+	policyDecision := policyResult.Decision
+	policyReason := policyResult.Reason
+
+	logger.Info("Policy evaluation completed",
+		zap.String("decision", policyDecision),
+		zap.String("reason", policyReason),
+	)
 
 	_, err = h.db.Exec(ctx, `
 		UPDATE deployments

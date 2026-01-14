@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -88,7 +89,7 @@ func (h *Handler) triggerImageScan(c *gin.Context) {
 				reference_urls
 			)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-		`, scanID, vuln.CVEID, vuln.Severity,
+		`, scanID, vuln.CVEID, strings.ToLower(vuln.Severity),
 			vuln.PackageName, vuln.PackageVersion, vuln.PackageType,
 			vuln.FixedVersion, vuln.FixAvailable,
 			vuln.Title, vuln.Description, vuln.CVSSScore, vuln.CVSSVector,

@@ -891,6 +891,105 @@ export interface UpdatePolicyRequest {
   priority?: number;
 }
 
+// Deployments & Security Scanning
+export interface Deployment {
+  id: string;
+  org_id: string;
+  agent_id: string;
+  service_name: string;
+  environment: string;
+  image_registry?: string;
+  image_repository: string;
+  image_tag?: string;
+  image_digest?: string;
+  git_repo?: string;
+  git_branch?: string;
+  git_commit?: string;
+  ci_provider?: string;
+  ci_pipeline_id?: string;
+  ci_build_url?: string;
+  scan_result_id?: string;
+  sbom_id?: string;
+  policy_decision?: "allow" | "warn" | "deny";
+  policy_reason?: string;
+  status: "pending" | "scanning" | "policy_check" | "deploying" | "running" | "failed" | "rolled_back" | "stopped";
+  status_message?: string;
+  container_id?: string;
+  container_name?: string;
+  proxy_host_id?: string;
+  replaces_deployment_id?: string;
+  rollback_of_deployment_id?: string;
+  deployed_by?: string;
+  deployed_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ScanResult {
+  id: string;
+  org_id: string;
+  image_digest?: string;
+  image_repository: string;
+  image_tag?: string;
+  critical_count: number;
+  high_count: number;
+  medium_count: number;
+  low_count: number;
+  unknown_count: number;
+  total_count: number;
+  fixable_count: number;
+  scanner_name: string;
+  scanner_version?: string;
+  scan_duration_ms?: number;
+  scanned_at: string;
+  created_at: string;
+}
+
+export interface Vulnerability {
+  id: string;
+  cve_id: string;
+  severity: "critical" | "high" | "medium" | "low" | "unknown";
+  package_name: string;
+  package_version?: string;
+  package_type?: string;
+  fixed_version?: string;
+  fix_available: boolean;
+  title?: string;
+  description?: string;
+  cvss_score?: number;
+  cvss_vector?: string;
+  created_at: string;
+}
+
+export interface SBOM {
+  id: string;
+  org_id: string;
+  image_digest?: string;
+  image_repository: string;
+  format: string;
+  spec_version: string;
+  total_packages: number;
+  os_packages: number;
+  library_packages: number;
+  generator_name: string;
+  generator_version?: string;
+  created_at: string;
+}
+
+export interface CreateDeploymentRequest {
+  service_name: string;
+  environment: string;
+  image_repository: string;
+  image_tag?: string;
+  image_digest?: string;
+  git_repo?: string;
+  git_branch?: string;
+  git_commit?: string;
+  ci_provider?: string;
+  ci_pipeline_id?: string;
+  ci_build_url?: string;
+}
+
 // API methods
 export const api = {
   // Setup (first-run)
@@ -1786,4 +1885,83 @@ export const api = {
     }),
 
   getPolicyStats: () => fetchAPI<PolicyStats>("/policies/stats"),
+
+  // Deployments
+  getDeployments: (agentId: string, params?: { service?: string; environment?: string; status?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.service) searchParams.set("service", params.service);
+    if (params?.environment) searchParams.set("environment", params.environment);
+    if (params?.status) searchParams.set("status", params.status);
+    const query = searchParams.toString();
+    return fetchAPI<Deployment[]>(`/agents/${agentId}/deployments${query ? `?${query}` : ""}`);
+  },
+
+  getDeployment: (agentId: string, deploymentId: string) =>
+    fetchAPI<Deployment>(`/agents/${agentId}/deployments/${deploymentId}`),
+
+  createDeployment: (agentId: string, request: CreateDeploymentRequest) =>
+    fetchAPI<{ id: string; status: string; message: string }>(`/agents/${agentId}/deployments`, {
+      method: "POST",
+      body: JSON.stringify(request),
+    }),
+
+  rollbackDeployment: (agentId: string, deploymentId: string) =>
+    fetchAPI<{ id: string; status: string; message: string }>(`/agents/${agentId}/deployments/${deploymentId}/rollback`, {
+      method: "POST",
+    }),
+
+  // Services view (cross-agent)
+  listServices: () => fetchAPI<Array<{ service_name: string; environment: string; agent_count: number }>>("/services"),
+
+  listServiceDeployments: (serviceName: string) =>
+    fetchAPI<Deployment[]>(`/services/${serviceName}/deployments`),
+
+  getCurrentDeployment: (serviceName: string, params?: { environment?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.environment) searchParams.set("environment", params.environment);
+    const query = searchParams.toString();
+    return fetchAPI<Deployment>(`/services/${serviceName}/current${query ? `?${query}` : ""}`);
+  },
+
+  // Scan Results
+  listScans: (params?: { org_id?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.org_id) searchParams.set("org_id", params.org_id);
+    const query = searchParams.toString();
+    return fetchAPI<ScanResult[]>(`/scans${query ? `?${query}` : ""}`);
+  },
+
+  getScanDetails: (scanId: string) => fetchAPI<ScanResult>(`/scans/${scanId}`),
+
+  getScanVulnerabilities: (scanId: string, params?: { severity?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.severity) searchParams.set("severity", params.severity);
+    const query = searchParams.toString();
+    return fetchAPI<Vulnerability[]>(`/scans/${scanId}/vulnerabilities${query ? `?${query}` : ""}`);
+  },
+
+  triggerImageScan: (request: { image: string; image_digest?: string; image_tag?: string }) =>
+    fetchAPI<{ id: string; image: string; status: string }>("/scans", {
+      method: "POST",
+      body: JSON.stringify(request),
+    }),
+
+  // SBOMs
+  listSBOMs: (params?: { org_id?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.org_id) searchParams.set("org_id", params.org_id);
+    const query = searchParams.toString();
+    return fetchAPI<SBOM[]>(`/sboms${query ? `?${query}` : ""}`);
+  },
+
+  generateSBOM: (request: { image: string }) =>
+    fetchAPI<{ id: string; image: string; format: string; total_packages: number }>("/sboms", {
+      method: "POST",
+      body: JSON.stringify(request),
+    }),
+
+  downloadSBOM: (sbomId: string) => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+    window.open(`${API_BASE}/sboms/${sbomId}/download${token ? `?token=${token}` : ""}`, "_blank");
+  },
 };
