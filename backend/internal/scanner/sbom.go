@@ -90,9 +90,19 @@ func (g *SBOMGenerator) GenerateSBOM(ctx context.Context, imageRef string) (*SBO
 		}
 	}
 
-	// Extract generator version
+	// Extract generator version from tools (format varies by CycloneDX version)
 	if len(cyclonedx.Metadata.Tools) > 0 {
-		sbom.GeneratorVersion = cyclonedx.Metadata.Tools[0].Version
+		// Try parsing as array first (older format)
+		var toolsArray []CycloneDXTool
+		if err := json.Unmarshal(cyclonedx.Metadata.Tools, &toolsArray); err == nil && len(toolsArray) > 0 {
+			sbom.GeneratorVersion = toolsArray[0].Version
+		} else {
+			// Try parsing as object with components (newer format)
+			var toolsWrapper CycloneDXToolsWrapper
+			if err := json.Unmarshal(cyclonedx.Metadata.Tools, &toolsWrapper); err == nil && len(toolsWrapper.Components) > 0 {
+				sbom.GeneratorVersion = toolsWrapper.Components[0].Version
+			}
+		}
 	}
 
 	// Count packages
@@ -128,7 +138,7 @@ type CycloneDXBOM struct {
 
 type CycloneDXMetadata struct {
 	Timestamp string                 `json:"timestamp"`
-	Tools     []CycloneDXTool        `json:"tools"`
+	Tools     json.RawMessage        `json:"tools"` // Can be array or object in different versions
 	Component *CycloneDXComponent    `json:"component,omitempty"`
 }
 
@@ -136,6 +146,10 @@ type CycloneDXTool struct {
 	Vendor  string `json:"vendor"`
 	Name    string `json:"name"`
 	Version string `json:"version"`
+}
+
+type CycloneDXToolsWrapper struct {
+	Components []CycloneDXTool `json:"components"`
 }
 
 type CycloneDXComponent struct {

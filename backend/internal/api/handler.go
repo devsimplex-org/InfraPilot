@@ -11,6 +11,7 @@ import (
 
 	"github.com/infrapilot/backend/internal/auth"
 	agentgrpc "github.com/infrapilot/backend/internal/grpc"
+	"github.com/infrapilot/backend/internal/policy"
 	"github.com/infrapilot/backend/internal/scanner"
 )
 
@@ -20,6 +21,7 @@ type Handler struct {
 	logger        *zap.Logger
 	scanner       *scanner.Scanner
 	sbomGenerator *scanner.SBOMGenerator
+	policyEngine  *policy.PolicyEngine
 }
 
 func NewHandler(db *pgxpool.Pool, authService *auth.Service, logger *zap.Logger) *Handler {
@@ -29,6 +31,7 @@ func NewHandler(db *pgxpool.Pool, authService *auth.Service, logger *zap.Logger)
 		logger:        logger,
 		scanner:       scanner.NewScanner(logger),
 		sbomGenerator: scanner.NewSBOMGenerator(logger),
+		policyEngine:  policy.NewPolicyEngine(logger, "/app/policies"),
 	}
 }
 
@@ -171,6 +174,17 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 			protected.POST("/sboms", h.RequireModifyContainers(), h.generateSBOM)
 			protected.GET("/sboms", h.listSBOMs)
 			protected.GET("/sboms/:sid/download", h.downloadSBOM)
+
+			// Policy Management (Epic 1: Supply Chain Security)
+			policies := protected.Group("/policies")
+			{
+				policies.GET("", h.listPolicies)
+				policies.GET("/:name", h.getPolicy)
+				policies.PUT("/:name", h.RequireManageAlerts(), h.updatePolicy)
+				policies.GET("/decisions/recent", h.listPolicyDecisions)
+				policies.GET("/decisions/stats", h.getPolicyStats)
+				policies.POST("/evaluate/preview", h.previewPolicyEvaluation)
+			}
 
 			// Alerts
 			alerts := protected.Group("/alerts")

@@ -56,6 +56,11 @@ RUN wget -q -O /tmp/install-syft.sh https://raw.githubusercontent.com/anchore/sy
     rm /tmp/install-syft.sh && \
     syft version
 
+# Install OPA (Open Policy Agent) for policy evaluation
+RUN wget -q -O /usr/local/bin/opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64_static && \
+    chmod +x /usr/local/bin/opa && \
+    opa version
+
 # Create app user
 RUN adduser -D -H -s /sbin/nologin appuser
 
