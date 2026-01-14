@@ -74,6 +74,7 @@ type CreateDeploymentRequest struct {
 	GitRepo         *string `json:"git_repo"`
 	GitBranch       *string `json:"git_branch"`
 	GitCommit       *string `json:"git_commit"`
+	GitPRNumber     *int    `json:"git_pr_number"`
 	CIProvider      *string `json:"ci_provider"`
 	CIPipelineID    *string `json:"ci_pipeline_id"`
 	CIBuildURL      *string `json:"ci_build_url"`
@@ -224,15 +225,15 @@ func (h *Handler) createDeployment(c *gin.Context) {
 		INSERT INTO deployments (
 			org_id, agent_id, service_name, environment,
 			image_repository, image_tag, image_digest,
-			git_repo, git_branch, git_commit,
+			git_repo, git_branch, git_commit, git_pr_number,
 			ci_provider, ci_pipeline_id, ci_build_url,
 			deployed_by, status
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'pending')
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'pending')
 		RETURNING id
 	`, orgID, agentID, req.ServiceName, req.Environment,
 		req.ImageRepository, req.ImageTag, req.ImageDigest,
-		req.GitRepo, req.GitBranch, req.GitCommit,
+		req.GitRepo, req.GitBranch, req.GitCommit, req.GitPRNumber,
 		req.CIProvider, req.CIPipelineID, req.CIBuildURL,
 		userID,
 	).Scan(&deploymentID)
@@ -491,6 +492,17 @@ func (h *Handler) runDeploymentPipeline(ctx context.Context, orgID, deploymentID
 		zap.String("policy_decision", policyDecision),
 		zap.Int("total_vulns", scanResult.TotalCount),
 	)
+
+	// Epic 8: Generate developer feedback for policy violations
+	if h.feedbackIntegration != nil {
+		if err := h.feedbackIntegration.GenerateFeedbackForDeployment(ctx, deploymentID); err != nil {
+			logger.Warn("Failed to generate developer feedback",
+				zap.Error(err),
+				zap.String("deployment_id", deploymentID.String()),
+			)
+			// Don't fail deployment on feedback generation errors
+		}
+	}
 
 	// TODO: In Phase 4, actually deploy the container
 	// For now, deployment stops at 'deploying' status

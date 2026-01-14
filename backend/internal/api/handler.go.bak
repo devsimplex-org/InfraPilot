@@ -10,7 +10,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/infrapilot/backend/internal/auth"
-	"github.com/infrapilot/backend/internal/feedback"
 	agentgrpc "github.com/infrapilot/backend/internal/grpc"
 	"github.com/infrapilot/backend/internal/policy"
 	"github.com/infrapilot/backend/internal/scanner"
@@ -18,35 +17,24 @@ import (
 )
 
 type Handler struct {
-	db                  *pgxpool.Pool
-	auth                *auth.Service
-	logger              *zap.Logger
-	scanner             *scanner.Scanner
-	sbomGenerator       *scanner.SBOMGenerator
-	policyEngine        *policy.PolicyEngine
-	webhookService      *webhook.Service
-	feedbackIntegration *feedback.DeploymentIntegration
+	db             *pgxpool.Pool
+	auth           *auth.Service
+	logger         *zap.Logger
+	scanner        *scanner.Scanner
+	sbomGenerator  *scanner.SBOMGenerator
+	policyEngine   *policy.PolicyEngine
+	webhookService *webhook.Service
 }
 
 func NewHandler(db *pgxpool.Pool, authService *auth.Service, logger *zap.Logger) *Handler {
-	// Initialize feedback system
-	feedbackManager := feedback.NewManager(db, logger)
-	feedbackRenderer := feedback.NewTemplateRenderer(db, logger)
-	feedbackIntegration := feedback.NewDeploymentIntegration(db, feedbackManager, feedbackRenderer, logger)
-
-	// TODO: Register GitHub deliverer when token is configured
-	// This would typically be done after reading VCS configuration from DB
-	// For now, the deliverer will be registered when configuration is saved
-
 	return &Handler{
-		db:                  db,
-		auth:                authService,
-		logger:              logger,
-		scanner:             scanner.NewScanner(logger),
-		sbomGenerator:       scanner.NewSBOMGenerator(logger),
-		policyEngine:        policy.NewPolicyEngine(logger, "/app/policies"),
-		webhookService:      webhook.NewService(db, logger),
-		feedbackIntegration: feedbackIntegration,
+		db:             db,
+		auth:           authService,
+		logger:         logger,
+		scanner:        scanner.NewScanner(logger),
+		sbomGenerator:  scanner.NewSBOMGenerator(logger),
+		policyEngine:   policy.NewPolicyEngine(logger, "/app/policies"),
+		webhookService: webhook.NewService(db, logger),
 	}
 }
 
@@ -188,10 +176,6 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				agents.DELETE("/:id/webhooks/:wid", h.RequireModifyContainers(), h.deleteWebhook)
 				agents.GET("/:id/webhooks/:wid/events", h.listWebhookEvents)
 				agents.POST("/:id/webhooks/:wid/regenerate", h.RequireModifyContainers(), h.regenerateWebhookSecret)
-
-			// CVE-Centric View (Epic 1: Supply Chain Security)
-			agents.GET(":id/cves", h.getCVESummaries)
-			agents.GET(":id/cves/:cve_id", h.getCVEDetail)
 			}
 
 			// Services view (cross-agent)
@@ -225,22 +209,6 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 
 			// Security Dashboard (Epic 5: DevSecOps Observability)
 			protected.GET("/security/posture", h.getSecurityPosture)
-
-			// Developer Feedback (Epic 8: Shift-Left Security)
-			feedback := protected.Group("/feedback")
-			{
-				feedback.GET("", h.listFeedback)
-				feedback.GET("/:fid", h.getFeedback)
-				feedback.POST("/:fid/deliver", h.RequireModifyContainers(), h.deliverFeedback)
-			}
-
-			// VCS Configuration (Epic 8: Shift-Left Security)
-			vcs := protected.Group("/vcs")
-			{
-				vcs.GET("/:provider", h.getVCSConfig)
-				vcs.PUT("/:provider", h.RequireManageAlerts(), h.saveVCSConfig)
-				vcs.DELETE("/:provider", h.RequireManageAlerts(), h.deleteVCSConfig)
-			}
 
 			// Alerts
 			alerts := protected.Group("/alerts")
