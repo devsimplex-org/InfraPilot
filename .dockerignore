@@ -1,0 +1,56 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Documentation
+*.md
+!README.md
+docs/
+
+# Environment files (security)
+.env
+.env.*
+!.env.example
+
+# Build artifacts
+**/bin/
+**/tmp/
+**/dist/
+**/build/
+
+# Node modules (frontend will install fresh)
+frontend/node_modules/
+frontend/.next/
+frontend/.turbo/
+
+# Go build cache
+**/*.exe
+**/*.dll
+**/*.so
+**/*.dylib
+
+# Test files
+**/*_test.go
+**/coverage.out
+**/coverage.html
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/*.spec.tsx
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Deployment artifacts we don't need in build
+deployments/docker-compose.*.yml
+
+# Temp files
+*.log
+*.tmp
