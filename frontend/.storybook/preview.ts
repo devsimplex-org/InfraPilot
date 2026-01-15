@@ -1,4 +1,5 @@
 import type { Preview } from '@storybook/nextjs-vite'
+import '../app/globals.css'
 
 const preview: Preview = {
   parameters: {
@@ -14,7 +15,25 @@ const preview: Preview = {
       // 'error' - fail CI on a11y violations
       // 'off' - skip a11y checks entirely
       test: 'todo'
-    }
+    },
+
+    backgrounds: {
+      default: 'light',
+      values: [
+        {
+          name: 'light',
+          value: '#ffffff',
+        },
+        {
+          name: 'dark',
+          value: '#0a0a0a',
+        },
+        {
+          name: 'gray',
+          value: '#f9fafb',
+        },
+      ],
+    },
   },
 };
 
