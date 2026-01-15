@@ -18,18 +18,15 @@ import {
 } from "lucide-react";
 import { api, DockerNetwork, DockerNetworkDetail, NginxNetworkAttachment } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import {
-  PageLayout,
-  ListCard,
-  EmptyState,
-  Button,
-  Input,
-} from "@/components/ui/page-layout";
-import {
-  DetailPanel,
-  DetailSection,
-  DetailRow,
-} from "@/components/ui/detail-panel";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Breadcrumb } from "@/components/ui/Breadcrumb";
+import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
+import { Table } from "@/components/ui/Table";
+import { Badge } from "@/components/ui/Badge";
+import { SlideOver } from "@/components/ui/SlideOver";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { Spinner } from "@/components/ui/Spinner";
+import { Button, Input } from "@/components/ui/page-layout";
 
 type PanelTab = "details" | "containers";
 
@@ -167,213 +164,126 @@ export default function NetworksPage() {
     return colors[driver] || colors.bridge;
   };
 
+  // Calculate metrics
+  const totalNetworks = networks?.length || 0;
+  const connectedContainers = networks?.reduce(
+    (sum, net) => sum + Object.keys(net.containers || {}).length,
+    0
+  ) || 0;
+  const bridgeNetworks = networks?.filter((n) => n.driver === "bridge").length || 0;
+  const overlayNetworks = networks?.filter((n) => n.driver === "overlay").length || 0;
+
+  // Table columns
+  const columns = [
+    {
+      key: "name",
+      header: "Network Name",
+      sortable: true,
+      render: (value: string, row: DockerNetwork) => (
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-gray-100 dark:bg-gray-800">
+            <Network className="h-5 w-5 text-gray-500" />
+          </div>
+          <div>
+            <p className="font-medium text-gray-900 dark:text-white">{value}</p>
+            <p className="text-xs text-gray-500 font-mono">{row.id.slice(0, 12)}</p>
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "driver",
+      header: "Driver",
+      sortable: true,
+      render: (value: string) => (
+        <Badge className={cn("px-2 py-0.5 text-xs rounded-full border-0", getDriverColor(value))}>
+          {value}
+        </Badge>
+      ),
+    },
+    {
+      key: "scope",
+      header: "Scope",
+      sortable: true,
+    },
+    {
+      key: "containers",
+      header: "Containers",
+      align: "center" as const,
+      render: (value: Record<string, string>) => {
+        const count = Object.keys(value || {}).length;
+        return (
+          <span className="text-sm text-gray-900 dark:text-white">
+            {count}
+          </span>
+        );
+      },
+    },
+    {
+      key: "nginx",
+      header: "Nginx",
+      align: "center" as const,
+      render: (_: any, row: DockerNetwork) => {
+        const attached = isNginxAttached(row.id);
+        return attached ? (
+          <Badge className="px-2 py-1 text-xs bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 rounded-full border-0">
+            <Check className="h-3 w-3 mr-1" />
+            Connected
+          </Badge>
+        ) : null;
+      },
+    },
+  ];
+
   const panelTabs = [
     { id: "details" as const, label: "Details" },
     { id: "containers" as const, label: "Containers" },
   ];
 
   return (
-    <PageLayout
-      title="Docker Networks"
-      description="Manage Docker networks and nginx proxy connections"
-      actions={
-        <div className="flex items-center gap-3">
-          {activeAgents.length > 1 && (
-            <select
-              value={selectedAgent || ""}
-              onChange={(e) => {
-                setSelectedAgent(e.target.value);
-                setSelectedNetwork(null);
-              }}
-              className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900"
+    <div className="p-6">
+      <PageHeader
+        title="Docker Networks"
+        description="Manage Docker networks and nginx proxy connections"
+        breadcrumbs={
+          <Breadcrumb
+            items={[
+              { label: "Platform", href: "/dashboard" },
+              { label: "Networks", current: true },
+            ]}
+          />
+        }
+        action={
+          <div className="flex items-center gap-3">
+            {activeAgents.length > 1 && (
+              <select
+                value={selectedAgent || ""}
+                onChange={(e) => {
+                  setSelectedAgent(e.target.value);
+                  setSelectedNetwork(null);
+                }}
+                className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900"
+              >
+                {activeAgents.map((agent) => (
+                  <option key={agent.id} value={agent.id}>
+                    {agent.name || agent.hostname}
+                  </option>
+                ))}
+              </select>
+            )}
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => setShowCreateModal(true)}
+              disabled={!selectedAgent}
             >
-              {activeAgents.map((agent) => (
-                <option key={agent.id} value={agent.id}>
-                  {agent.name || agent.hostname}
-                </option>
-              ))}
-            </select>
-          )}
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => setShowCreateModal(true)}
-            disabled={!selectedAgent}
-          >
-            <Plus className="h-4 w-4 mr-1" />
-            Create Network
-          </Button>
-        </div>
-      }
-      panelOpen={!!selectedNetwork}
-      panel={
-        selectedNetwork && (
-          <DetailPanel
-            open={!!selectedNetwork}
-            onClose={() => setSelectedNetwork(null)}
-            title={selectedNetwork.name}
-            subtitle={`${selectedNetwork.driver} network`}
-            defaultWidth={520}
-          >
-            {/* Tabs */}
-            <div className="flex gap-1 mb-4">
-              {panelTabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setPanelTab(tab.id)}
-                  className={cn(
-                    "px-3 py-1.5 text-sm rounded-lg transition-colors",
-                    panelTab === tab.id
-                      ? "bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400"
-                      : "text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
-                  )}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
+              <Plus className="h-4 w-4 mr-1" />
+              Create Network
+            </Button>
+          </div>
+        }
+      />
 
-            {panelTab === "details" && (
-              <>
-                {/* Nginx Connection Section - PROMINENT */}
-                <DetailSection title="Nginx Proxy Connection">
-                  <div
-                    className={cn(
-                      "p-4 rounded-lg border-2",
-                      isNginxAttached(selectedNetwork.id)
-                        ? "bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800"
-                        : "bg-yellow-50 border-yellow-200 dark:bg-yellow-900/20 dark:border-yellow-800"
-                    )}
-                  >
-                    {isNginxAttached(selectedNetwork.id) ? (
-                      <>
-                        <div className="flex items-center gap-2 text-green-700 dark:text-green-400 mb-2">
-                          <CheckCircle className="h-5 w-5" />
-                          <span className="font-medium">Nginx is connected to this network</span>
-                        </div>
-                        <p className="text-sm text-green-600 dark:text-green-500 mb-3">
-                          Containers on this network can be proxied by hostname (DNS resolution works)
-                        </p>
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => detachMutation.mutate(selectedNetwork.id)}
-                          disabled={detachMutation.isPending}
-                        >
-                          <Unlink className="h-4 w-4 mr-1" />
-                          {detachMutation.isPending ? "Disconnecting..." : "Disconnect Nginx"}
-                        </Button>
-                      </>
-                    ) : (
-                      <>
-                        <div className="flex items-center gap-2 text-yellow-700 dark:text-yellow-400 mb-2">
-                          <AlertTriangle className="h-5 w-5" />
-                          <span className="font-medium">Nginx is not connected</span>
-                        </div>
-                        <p className="text-sm text-yellow-600 dark:text-yellow-500 mb-3">
-                          Connect nginx to proxy containers by hostname (enables DNS resolution)
-                        </p>
-                        <Button
-                          variant="primary"
-                          size="sm"
-                          onClick={() => attachMutation.mutate(selectedNetwork.id)}
-                          disabled={attachMutation.isPending}
-                        >
-                          <Link className="h-4 w-4 mr-1" />
-                          {attachMutation.isPending ? "Connecting..." : "Connect Nginx to Network"}
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </DetailSection>
-
-                <DetailSection title="Network Info">
-                  <DetailRow label="Name" value={selectedNetwork.name} />
-                  <DetailRow
-                    label="ID"
-                    mono
-                    value={
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-xs">{selectedNetwork.id}</span>
-                        <button
-                          onClick={() => handleCopy(selectedNetwork.id)}
-                          className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-                        >
-                          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                        </button>
-                      </div>
-                    }
-                  />
-                  <DetailRow
-                    label="Driver"
-                    value={
-                      <span className={cn("px-2 py-0.5 text-xs rounded-full", getDriverColor(selectedNetwork.driver))}>
-                        {selectedNetwork.driver}
-                      </span>
-                    }
-                  />
-                  <DetailRow label="Scope" value={selectedNetwork.scope} />
-                  <DetailRow label="Internal" value={selectedNetwork.internal ? "Yes" : "No"} />
-                </DetailSection>
-
-                {networkDetail?.ipam && networkDetail.ipam.configs?.length > 0 && (
-                  <DetailSection title="IP Address Management">
-                    {networkDetail.ipam.configs.map((config, idx) => (
-                      <div key={idx} className="space-y-1">
-                        <DetailRow label="Subnet" mono value={config.subnet} />
-                        <DetailRow label="Gateway" mono value={config.gateway} />
-                        {config.ip_range && <DetailRow label="IP Range" mono value={config.ip_range} />}
-                      </div>
-                    ))}
-                  </DetailSection>
-                )}
-
-                <DetailSection title="Actions">
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    onClick={() => setShowDeleteModal(true)}
-                    disabled={Object.keys(selectedNetwork.containers || {}).length > 0}
-                  >
-                    <Trash2 className="h-4 w-4 mr-1" />
-                    Delete Network
-                  </Button>
-                  {Object.keys(selectedNetwork.containers || {}).length > 0 && (
-                    <p className="text-xs text-gray-500 mt-2">
-                      Cannot delete network with connected containers
-                    </p>
-                  )}
-                </DetailSection>
-              </>
-            )}
-
-            {panelTab === "containers" && (
-              <DetailSection title="Connected Containers">
-                {Object.entries(selectedNetwork.containers || {}).length > 0 ? (
-                  <div className="space-y-2">
-                    {Object.entries(selectedNetwork.containers).map(([id, name]) => (
-                      <div
-                        key={id}
-                        className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg"
-                      >
-                        <div className="flex items-center gap-2">
-                          <Server className="h-4 w-4 text-gray-400" />
-                          <span className="text-sm font-medium">{name}</span>
-                        </div>
-                        <span className="text-xs text-gray-500 font-mono">{id}</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-gray-500">No containers connected to this network</p>
-                )}
-              </DetailSection>
-            )}
-          </DetailPanel>
-        )
-      }
-    >
-      {/* Main content */}
       {!selectedAgent ? (
         <EmptyState
           icon={Server}
@@ -382,85 +292,293 @@ export default function NetworksPage() {
         />
       ) : isLoading ? (
         <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500" />
+          <Spinner size="lg" />
         </div>
-      ) : networks && networks.length > 0 ? (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {networks.map((network) => {
-            const isSelected = selectedNetwork?.id === network.id;
-            const nginxConnected = isNginxAttached(network.id);
-            const containerCount = Object.keys(network.containers || {}).length;
+      ) : (
+        <>
+          {/* Metrics */}
+          <MetricsGrid columns={4} className="mb-6">
+            <StatCard
+              label="Total Networks"
+              value={totalNetworks}
+              icon={Network}
+              iconColor="text-blue-600 dark:text-blue-400"
+            />
+            <StatCard
+              label="Connected Containers"
+              value={connectedContainers}
+              icon={Server}
+              iconColor="text-green-600 dark:text-green-400"
+            />
+            <StatCard
+              label="Bridge Networks"
+              value={bridgeNetworks}
+              icon={Globe}
+              iconColor="text-purple-600 dark:text-purple-400"
+            />
+            <StatCard
+              label="Overlay Networks"
+              value={overlayNetworks}
+              icon={Globe}
+              iconColor="text-orange-600 dark:text-orange-400"
+            />
+          </MetricsGrid>
 
-            return (
-              <ListCard
-                key={network.id}
-                selected={isSelected}
-                onClick={() => setSelectedNetwork(network)}
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
+          {/* Table */}
+          {networks && networks.length > 0 ? (
+            <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
+              <Table
+                columns={columns}
+                data={networks}
+                keyExtractor={(row) => row.id}
+                onRowClick={(row) => setSelectedNetwork(row)}
+                hoverable
+                rowClassName={(row) =>
+                  selectedNetwork?.id === row.id
+                    ? "bg-primary-50 dark:bg-primary-900/20"
+                    : ""
+                }
+              />
+            </div>
+          ) : (
+            <EmptyState
+              icon={Network}
+              title="No networks found"
+              description="Create a Docker network to get started"
+              action={
+                <Button variant="primary" onClick={() => setShowCreateModal(true)}>
+                  <Plus className="h-4 w-4 mr-1" />
+                  Create Network
+                </Button>
+              }
+            />
+          )}
+        </>
+      )}
+
+      {/* SlideOver for Network Details */}
+      <SlideOver
+        isOpen={!!selectedNetwork}
+        onClose={() => setSelectedNetwork(null)}
+        size="md"
+      >
+        {selectedNetwork && (
+          <>
+            <SlideOver.Header onClose={() => setSelectedNetwork(null)}>
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                  {selectedNetwork.name}
+                </h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  {selectedNetwork.driver} network
+                </p>
+              </div>
+            </SlideOver.Header>
+
+            <SlideOver.Body>
+              {/* Tabs */}
+              <div className="flex gap-1 mb-4">
+                {panelTabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setPanelTab(tab.id)}
+                    className={cn(
+                      "px-3 py-1.5 text-sm rounded-lg transition-colors",
+                      panelTab === tab.id
+                        ? "bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400"
+                        : "text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
+                    )}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {panelTab === "details" && (
+                <div className="space-y-6">
+                  {/* Nginx Connection Section */}
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
+                      Nginx Proxy Connection
+                    </h3>
                     <div
                       className={cn(
-                        "p-2 rounded-lg",
-                        isSelected
-                          ? "bg-primary-100 dark:bg-primary-900/30"
-                          : "bg-gray-100 dark:bg-gray-800"
+                        "p-4 rounded-lg border-2",
+                        isNginxAttached(selectedNetwork.id)
+                          ? "bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800"
+                          : "bg-yellow-50 border-yellow-200 dark:bg-yellow-900/20 dark:border-yellow-800"
                       )}
                     >
-                      <Network
-                        className={cn(
-                          "h-5 w-5",
-                          isSelected
-                            ? "text-primary-600 dark:text-primary-400"
-                            : "text-gray-500"
-                        )}
-                      />
+                      {isNginxAttached(selectedNetwork.id) ? (
+                        <>
+                          <div className="flex items-center gap-2 text-green-700 dark:text-green-400 mb-2">
+                            <CheckCircle className="h-5 w-5" />
+                            <span className="font-medium">Nginx is connected to this network</span>
+                          </div>
+                          <p className="text-sm text-green-600 dark:text-green-500 mb-3">
+                            Containers on this network can be proxied by hostname (DNS resolution works)
+                          </p>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => detachMutation.mutate(selectedNetwork.id)}
+                            disabled={detachMutation.isPending}
+                          >
+                            <Unlink className="h-4 w-4 mr-1" />
+                            {detachMutation.isPending ? "Disconnecting..." : "Disconnect Nginx"}
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-2 text-yellow-700 dark:text-yellow-400 mb-2">
+                            <AlertTriangle className="h-5 w-5" />
+                            <span className="font-medium">Nginx is not connected</span>
+                          </div>
+                          <p className="text-sm text-yellow-600 dark:text-yellow-500 mb-3">
+                            Connect nginx to proxy containers by hostname (enables DNS resolution)
+                          </p>
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={() => attachMutation.mutate(selectedNetwork.id)}
+                            disabled={attachMutation.isPending}
+                          >
+                            <Link className="h-4 w-4 mr-1" />
+                            {attachMutation.isPending ? "Connecting..." : "Connect Nginx to Network"}
+                          </Button>
+                        </>
+                      )}
                     </div>
-                    <div>
-                      <h3 className="font-medium text-gray-900 dark:text-white">
-                        {network.name}
-                      </h3>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span
-                          className={cn(
-                            "px-2 py-0.5 text-xs rounded-full",
-                            getDriverColor(network.driver)
-                          )}
-                        >
-                          {network.driver}
-                        </span>
-                        <span className="text-xs text-gray-500">
-                          {containerCount} container{containerCount !== 1 ? "s" : ""}
+                  </div>
+
+                  {/* Network Info */}
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
+                      Network Info
+                    </h3>
+                    <div className="space-y-3">
+                      <div className="flex justify-between">
+                        <span className="text-sm text-gray-500 dark:text-gray-400">Name</span>
+                        <span className="text-sm text-gray-900 dark:text-white">{selectedNetwork.name}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-gray-500 dark:text-gray-400">ID</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-mono text-gray-900 dark:text-white">
+                            {selectedNetwork.id.slice(0, 12)}
+                          </span>
+                          <button
+                            onClick={() => handleCopy(selectedNetwork.id)}
+                            className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                          >
+                            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-gray-500 dark:text-gray-400">Driver</span>
+                        <Badge className={cn("px-2 py-0.5 text-xs rounded-full border-0", getDriverColor(selectedNetwork.driver))}>
+                          {selectedNetwork.driver}
+                        </Badge>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-sm text-gray-500 dark:text-gray-400">Scope</span>
+                        <span className="text-sm text-gray-900 dark:text-white">{selectedNetwork.scope}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-sm text-gray-500 dark:text-gray-400">Internal</span>
+                        <span className="text-sm text-gray-900 dark:text-white">
+                          {selectedNetwork.internal ? "Yes" : "No"}
                         </span>
                       </div>
                     </div>
                   </div>
 
-                  {/* Nginx connection indicator */}
-                  {nginxConnected && (
-                    <span className="flex items-center gap-1 px-2 py-1 text-xs bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 rounded-full">
-                      <Check className="h-3 w-3" />
-                      Nginx
-                    </span>
+                  {/* IPAM */}
+                  {networkDetail?.ipam && networkDetail.ipam.configs?.length > 0 && (
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
+                        IP Address Management
+                      </h3>
+                      {networkDetail.ipam.configs.map((config, idx) => (
+                        <div key={idx} className="space-y-3">
+                          <div className="flex justify-between">
+                            <span className="text-sm text-gray-500 dark:text-gray-400">Subnet</span>
+                            <span className="text-sm font-mono text-gray-900 dark:text-white">
+                              {config.subnet}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-sm text-gray-500 dark:text-gray-400">Gateway</span>
+                            <span className="text-sm font-mono text-gray-900 dark:text-white">
+                              {config.gateway}
+                            </span>
+                          </div>
+                          {config.ip_range && (
+                            <div className="flex justify-between">
+                              <span className="text-sm text-gray-500 dark:text-gray-400">IP Range</span>
+                              <span className="text-sm font-mono text-gray-900 dark:text-white">
+                                {config.ip_range}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Actions */}
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
+                      Actions
+                    </h3>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={() => setShowDeleteModal(true)}
+                      disabled={Object.keys(selectedNetwork.containers || {}).length > 0}
+                    >
+                      <Trash2 className="h-4 w-4 mr-1" />
+                      Delete Network
+                    </Button>
+                    {Object.keys(selectedNetwork.containers || {}).length > 0 && (
+                      <p className="text-xs text-gray-500 mt-2">
+                        Cannot delete network with connected containers
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {panelTab === "containers" && (
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
+                    Connected Containers
+                  </h3>
+                  {Object.entries(selectedNetwork.containers || {}).length > 0 ? (
+                    <div className="space-y-2">
+                      {Object.entries(selectedNetwork.containers).map(([id, name]) => (
+                        <div
+                          key={id}
+                          className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg"
+                        >
+                          <div className="flex items-center gap-2">
+                            <Server className="h-4 w-4 text-gray-400" />
+                            <span className="text-sm font-medium text-gray-900 dark:text-white">{name}</span>
+                          </div>
+                          <span className="text-xs text-gray-500 font-mono">{id.slice(0, 12)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500">No containers connected to this network</p>
                   )}
                 </div>
-              </ListCard>
-            );
-          })}
-        </div>
-      ) : (
-        <EmptyState
-          icon={Network}
-          title="No networks found"
-          description="Create a Docker network to get started"
-          action={
-            <Button variant="primary" onClick={() => setShowCreateModal(true)}>
-              <Plus className="h-4 w-4 mr-1" />
-              Create Network
-            </Button>
-          }
-        />
-      )}
+              )}
+            </SlideOver.Body>
+          </>
+        )}
+      </SlideOver>
 
       {/* Create Network Modal */}
       {showCreateModal && (
@@ -591,6 +709,6 @@ export default function NetworksPage() {
           </div>
         </div>
       )}
-    </PageLayout>
+    </div>
   );
 }

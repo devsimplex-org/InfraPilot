@@ -12,21 +12,19 @@ import {
   Server,
   X,
   FolderOpen,
+  Database,
 } from "lucide-react";
 import { api, DockerVolume } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import {
-  PageLayout,
-  ListCard,
-  EmptyState,
-  Button,
-  Input,
-} from "@/components/ui/page-layout";
-import {
-  DetailPanel,
-  DetailSection,
-  DetailRow,
-} from "@/components/ui/detail-panel";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Breadcrumb } from "@/components/ui/Breadcrumb";
+import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
+import { Table } from "@/components/ui/Table";
+import { Badge } from "@/components/ui/Badge";
+import { SlideOver } from "@/components/ui/SlideOver";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { Spinner } from "@/components/ui/Spinner";
+import { Button, Input } from "@/components/ui/page-layout";
 
 export default function VolumesPage() {
   const queryClient = useQueryClient();
@@ -106,123 +104,108 @@ export default function VolumesPage() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  return (
-    <PageLayout
-      title="Docker Volumes"
-      description="Manage Docker volumes for persistent data storage"
-      actions={
+  // Calculate metrics
+  const totalVolumes = volumes?.length || 0;
+  const inUse = volumes?.filter((v) => v.used_by.length > 0).length || 0;
+  const orphaned = volumes?.filter((v) => v.used_by.length === 0).length || 0;
+  const totalSize = "N/A"; // Size calculation would require additional data
+
+  // Table columns
+  const columns = [
+    {
+      key: "name",
+      header: "Volume Name",
+      sortable: true,
+      render: (value: string, row: DockerVolume) => (
         <div className="flex items-center gap-3">
-          {activeAgents.length > 1 && (
-            <select
-              value={selectedAgent || ""}
-              onChange={(e) => {
-                setSelectedAgent(e.target.value);
-                setSelectedVolume(null);
-              }}
-              className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900"
-            >
-              {activeAgents.map((agent) => (
-                <option key={agent.id} value={agent.id}>
-                  {agent.name || agent.hostname}
-                </option>
-              ))}
-            </select>
-          )}
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => setShowCreateModal(true)}
-            disabled={!selectedAgent}
-          >
-            <Plus className="h-4 w-4 mr-1" />
-            Create Volume
-          </Button>
+          <div className="p-2 rounded-lg bg-gray-100 dark:bg-gray-800">
+            <HardDrive className="h-5 w-5 text-gray-500" />
+          </div>
+          <div>
+            <p className="font-medium text-gray-900 dark:text-white">{value}</p>
+            <p className="text-xs text-gray-500">{row.driver} driver</p>
+          </div>
         </div>
-      }
-      panelOpen={!!selectedVolume}
-      panel={
-        selectedVolume && (
-          <DetailPanel
-            open={!!selectedVolume}
-            onClose={() => setSelectedVolume(null)}
-            title={selectedVolume.name}
-            subtitle={`${selectedVolume.driver} driver`}
-            defaultWidth={480}
-          >
-            <DetailSection title="Volume Info">
-              <DetailRow label="Name" value={selectedVolume.name} />
-              <DetailRow label="Driver" value={selectedVolume.driver} />
-              <DetailRow label="Scope" value={selectedVolume.scope} />
-              <DetailRow
-                label="Mountpoint"
-                mono
-                value={
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs truncate max-w-[200px]">
-                      {selectedVolume.mountpoint}
-                    </span>
-                    <button
-                      onClick={() => handleCopy(selectedVolume.mountpoint)}
-                      className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 flex-shrink-0"
-                    >
-                      {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                    </button>
-                  </div>
-                }
-              />
-              {selectedVolume.created_at && (
-                <DetailRow
-                  label="Created"
-                  value={new Date(selectedVolume.created_at).toLocaleString()}
-                />
-              )}
-            </DetailSection>
+      ),
+    },
+    {
+      key: "mountpoint",
+      header: "Mount Point",
+      sortable: true,
+      render: (value: string) => (
+        <Badge className="px-2 py-1 text-xs bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 rounded font-mono border-0">
+          {value.length > 40 ? `...${value.slice(-37)}` : value}
+        </Badge>
+      ),
+    },
+    {
+      key: "scope",
+      header: "Scope",
+      sortable: true,
+    },
+    {
+      key: "used_by",
+      header: "In Use",
+      align: "center" as const,
+      render: (value: string[]) => {
+        const inUse = value.length > 0;
+        return inUse ? (
+          <Badge className="px-2 py-1 text-xs bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 rounded border-0">
+            {value.length} container{value.length !== 1 ? "s" : ""}
+          </Badge>
+        ) : (
+          <Badge className="px-2 py-1 text-xs bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 rounded border-0">
+            Unused
+          </Badge>
+        );
+      },
+    },
+  ];
 
-            <DetailSection title="Used By">
-              {selectedVolume.used_by.length > 0 ? (
-                <div className="space-y-2">
-                  {selectedVolume.used_by.map((container) => (
-                    <div
-                      key={container}
-                      className="flex items-center gap-2 p-2 bg-gray-50 dark:bg-gray-800 rounded-lg"
-                    >
-                      <Server className="h-4 w-4 text-gray-400" />
-                      <span className="text-sm">{container}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-gray-500">Not used by any containers</p>
-              )}
-            </DetailSection>
-
-            {selectedVolume.labels && Object.keys(selectedVolume.labels).length > 0 && (
-              <DetailSection title="Labels">
-                {Object.entries(selectedVolume.labels).map(([key, value]) => (
-                  <DetailRow key={key} label={key} mono value={value} />
-                ))}
-              </DetailSection>
-            )}
-
-            <DetailSection title="Actions">
-              <Button
-                variant="danger"
-                size="sm"
-                onClick={() => setShowDeleteModal(true)}
+  return (
+    <div className="p-6">
+      <PageHeader
+        title="Docker Volumes"
+        description="Manage Docker volumes for persistent data storage"
+        breadcrumbs={
+          <Breadcrumb
+            items={[
+              { label: "Platform", href: "/dashboard" },
+              { label: "Volumes", current: true },
+            ]}
+          />
+        }
+        action={
+          <div className="flex items-center gap-3">
+            {activeAgents.length > 1 && (
+              <select
+                value={selectedAgent || ""}
+                onChange={(e) => {
+                  setSelectedAgent(e.target.value);
+                  setSelectedVolume(null);
+                }}
+                className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900"
               >
-                <Trash2 className="h-4 w-4 mr-1" />
-                Delete Volume
-              </Button>
-              {selectedVolume.used_by.length > 0 && (
-                <p className="text-xs text-yellow-600 dark:text-yellow-400 mt-2">
-                  Warning: Volume is in use. Deletion may require force.
-                </p>
-              )}
-            </DetailSection>
-          </DetailPanel>
-        )
-      }
-    >
+                {activeAgents.map((agent) => (
+                  <option key={agent.id} value={agent.id}>
+                    {agent.name || agent.hostname}
+                  </option>
+                ))}
+              </select>
+            )}
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => setShowCreateModal(true)}
+              disabled={!selectedAgent}
+            >
+              <Plus className="h-4 w-4 mr-1" />
+              Create Volume
+            </Button>
+          </div>
+        }
+      />
+
       {!selectedAgent ? (
         <EmptyState
           icon={Server}
@@ -231,74 +214,197 @@ export default function VolumesPage() {
         />
       ) : isLoading ? (
         <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500" />
-        </div>
-      ) : volumes && volumes.length > 0 ? (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {volumes.map((volume) => {
-            const isSelected = selectedVolume?.name === volume.name;
-            const inUse = volume.used_by.length > 0;
-
-            return (
-              <ListCard
-                key={volume.name}
-                selected={isSelected}
-                onClick={() => setSelectedVolume(volume)}
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <div
-                      className={cn(
-                        "p-2 rounded-lg",
-                        isSelected
-                          ? "bg-primary-100 dark:bg-primary-900/30"
-                          : "bg-gray-100 dark:bg-gray-800"
-                      )}
-                    >
-                      <HardDrive
-                        className={cn(
-                          "h-5 w-5",
-                          isSelected
-                            ? "text-primary-600 dark:text-primary-400"
-                            : "text-gray-500"
-                        )}
-                      />
-                    </div>
-                    <div>
-                      <h3 className="font-medium text-gray-900 dark:text-white">
-                        {volume.name}
-                      </h3>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-xs text-gray-500">{volume.driver}</span>
-                        {inUse && (
-                          <span className="text-xs text-green-600 dark:text-green-400">
-                            In use
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <span className="text-xs text-gray-500">
-                    {volume.used_by.length} container{volume.used_by.length !== 1 ? "s" : ""}
-                  </span>
-                </div>
-              </ListCard>
-            );
-          })}
+          <Spinner size="lg" />
         </div>
       ) : (
-        <EmptyState
-          icon={HardDrive}
-          title="No volumes found"
-          description="Create a Docker volume to persist data"
-          action={
-            <Button variant="primary" onClick={() => setShowCreateModal(true)}>
-              <Plus className="h-4 w-4 mr-1" />
-              Create Volume
-            </Button>
-          }
-        />
+        <>
+          {/* Metrics */}
+          <MetricsGrid columns={4} className="mb-6">
+            <StatCard
+              label="Total Volumes"
+              value={totalVolumes}
+              icon={HardDrive}
+              iconColor="text-blue-600 dark:text-blue-400"
+            />
+            <StatCard
+              label="In Use"
+              value={inUse}
+              icon={Database}
+              iconColor="text-green-600 dark:text-green-400"
+            />
+            <StatCard
+              label="Total Size"
+              value={totalSize}
+              icon={FolderOpen}
+              iconColor="text-purple-600 dark:text-purple-400"
+            />
+            <StatCard
+              label="Orphaned"
+              value={orphaned}
+              icon={AlertTriangle}
+              iconColor="text-orange-600 dark:text-orange-400"
+            />
+          </MetricsGrid>
+
+          {/* Table */}
+          {volumes && volumes.length > 0 ? (
+            <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
+              <Table
+                columns={columns}
+                data={volumes}
+                keyExtractor={(row) => row.name}
+                onRowClick={(row) => setSelectedVolume(row)}
+                hoverable
+                rowClassName={(row) =>
+                  selectedVolume?.name === row.name
+                    ? "bg-primary-50 dark:bg-primary-900/20"
+                    : ""
+                }
+              />
+            </div>
+          ) : (
+            <EmptyState
+              icon={HardDrive}
+              title="No volumes found"
+              description="Create a Docker volume to persist data"
+              action={
+                <Button variant="primary" onClick={() => setShowCreateModal(true)}>
+                  <Plus className="h-4 w-4 mr-1" />
+                  Create Volume
+                </Button>
+              }
+            />
+          )}
+        </>
       )}
+
+      {/* SlideOver for Volume Details */}
+      <SlideOver
+        isOpen={!!selectedVolume}
+        onClose={() => setSelectedVolume(null)}
+        size="md"
+      >
+        {selectedVolume && (
+          <>
+            <SlideOver.Header onClose={() => setSelectedVolume(null)}>
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                  {selectedVolume.name}
+                </h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  {selectedVolume.driver} driver
+                </p>
+              </div>
+            </SlideOver.Header>
+
+            <SlideOver.Body>
+              <div className="space-y-6">
+                {/* Volume Info */}
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
+                    Volume Info
+                  </h3>
+                  <div className="space-y-3">
+                    <div className="flex justify-between">
+                      <span className="text-sm text-gray-500 dark:text-gray-400">Name</span>
+                      <span className="text-sm text-gray-900 dark:text-white">{selectedVolume.name}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-sm text-gray-500 dark:text-gray-400">Driver</span>
+                      <span className="text-sm text-gray-900 dark:text-white">{selectedVolume.driver}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-sm text-gray-500 dark:text-gray-400">Scope</span>
+                      <span className="text-sm text-gray-900 dark:text-white">{selectedVolume.scope}</span>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <span className="text-sm text-gray-500 dark:text-gray-400">Mountpoint</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-mono text-gray-900 dark:text-white break-all">
+                          {selectedVolume.mountpoint}
+                        </span>
+                        <button
+                          onClick={() => handleCopy(selectedVolume.mountpoint)}
+                          className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 flex-shrink-0"
+                        >
+                          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                        </button>
+                      </div>
+                    </div>
+                    {selectedVolume.created_at && (
+                      <div className="flex justify-between">
+                        <span className="text-sm text-gray-500 dark:text-gray-400">Created</span>
+                        <span className="text-sm text-gray-900 dark:text-white">
+                          {new Date(selectedVolume.created_at).toLocaleString()}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Used By */}
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
+                    Used By
+                  </h3>
+                  {selectedVolume.used_by.length > 0 ? (
+                    <div className="space-y-2">
+                      {selectedVolume.used_by.map((container) => (
+                        <div
+                          key={container}
+                          className="flex items-center gap-2 p-2 bg-gray-50 dark:bg-gray-800 rounded-lg"
+                        >
+                          <Server className="h-4 w-4 text-gray-400" />
+                          <span className="text-sm text-gray-900 dark:text-white">{container}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500">Not used by any containers</p>
+                  )}
+                </div>
+
+                {/* Labels */}
+                {selectedVolume.labels && Object.keys(selectedVolume.labels).length > 0 && (
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
+                      Labels
+                    </h3>
+                    <div className="space-y-2">
+                      {Object.entries(selectedVolume.labels).map(([key, value]) => (
+                        <div key={key} className="flex justify-between">
+                          <span className="text-sm font-mono text-gray-500 dark:text-gray-400">{key}</span>
+                          <span className="text-sm font-mono text-gray-900 dark:text-white">{value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
+                    Actions
+                  </h3>
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={() => setShowDeleteModal(true)}
+                  >
+                    <Trash2 className="h-4 w-4 mr-1" />
+                    Delete Volume
+                  </Button>
+                  {selectedVolume.used_by.length > 0 && (
+                    <p className="text-xs text-yellow-600 dark:text-yellow-400 mt-2">
+                      Warning: Volume is in use. Deletion may require force.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </SlideOver.Body>
+          </>
+        )}
+      </SlideOver>
 
       {/* Create Volume Modal */}
       {showCreateModal && (
@@ -406,6 +512,6 @@ export default function VolumesPage() {
           </div>
         </div>
       )}
-    </PageLayout>
+    </div>
   );
 }

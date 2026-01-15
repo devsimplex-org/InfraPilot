@@ -2,142 +2,29 @@
 
 import { useQuery } from "@tanstack/react-query";
 import {
-  Server,
-  Container,
-  Globe,
+  Package,
   AlertTriangle,
-  Activity,
-  Cpu,
-  MemoryStick,
-  Clock,
-  TrendingUp,
-  CheckCircle,
+  Shield,
+  CheckCircle2,
   XCircle,
-  RefreshCw,
+  Activity,
+  TrendingUp,
+  Clock,
+  Users,
+  FileText,
 } from "lucide-react";
-import Link from "next/link";
 import { api } from "@/lib/api";
-import { cn, formatRelativeTime } from "@/lib/utils";
-
-function StatCard({
-  title,
-  value,
-  subValue,
-  icon: Icon,
-  color,
-  href,
-}: {
-  title: string;
-  value: number | string;
-  subValue?: string;
-  icon: React.ElementType;
-  color: string;
-  href?: string;
-}) {
-  const content = (
-    <div className={cn(
-      "bg-white dark:bg-gray-900 rounded-lg p-6 border border-gray-200 dark:border-gray-800 transition-all",
-      href && "hover:border-gray-300 dark:hover:border-gray-700 hover:shadow-sm cursor-pointer"
-    )}>
-      <div className="flex items-center gap-4">
-        <div className={`p-3 rounded-lg ${color}`}>
-          <Icon className="h-6 w-6 text-white" />
-        </div>
-        <div>
-          <p className="text-sm text-gray-500 dark:text-gray-400">{title}</p>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">{value}</p>
-          {subValue && (
-            <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{subValue}</p>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-
-  if (href) {
-    return <Link href={href}>{content}</Link>;
-  }
-  return content;
-}
-
-function ContainerRow({
-  name,
-  image,
-  status,
-  cpu,
-  memory,
-}: {
-  name: string;
-  image: string;
-  status: string;
-  cpu: number;
-  memory: number;
-}) {
-  return (
-    <div className="flex items-center justify-between py-3 border-b border-gray-100 dark:border-gray-800 last:border-0">
-      <div className="flex items-center gap-3 min-w-0">
-        <div className={cn(
-          "w-2 h-2 rounded-full flex-shrink-0",
-          status === "running" ? "bg-green-500" : "bg-red-500"
-        )} />
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{name}</p>
-          <p className="text-xs text-gray-500 truncate">{image}</p>
-        </div>
-      </div>
-      <div className="flex items-center gap-4 text-xs text-gray-500">
-        <span className="flex items-center gap-1">
-          <Cpu className="h-3 w-3" />
-          {cpu.toFixed(1)}%
-        </span>
-        <span className="flex items-center gap-1">
-          <MemoryStick className="h-3 w-3" />
-          {memory}MB
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function ProxyRow({
-  domain,
-  upstream,
-  sslEnabled,
-  status,
-}: {
-  domain: string;
-  upstream: string;
-  sslEnabled: boolean;
-  status: string;
-}) {
-  return (
-    <div className="flex items-center justify-between py-3 border-b border-gray-100 dark:border-gray-800 last:border-0">
-      <div className="min-w-0">
-        <div className="flex items-center gap-2">
-          <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{domain}</p>
-          {sslEnabled ? (
-            <CheckCircle className="h-3.5 w-3.5 text-green-500 flex-shrink-0" />
-          ) : (
-            <XCircle className="h-3.5 w-3.5 text-yellow-500 flex-shrink-0" />
-          )}
-        </div>
-        <p className="text-xs text-gray-500 truncate">{upstream}</p>
-      </div>
-      <span className={cn(
-        "px-2 py-0.5 text-xs rounded-full font-medium",
-        status === "active"
-          ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-          : "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
-      )}>
-        {status}
-      </span>
-    </div>
-  );
-}
+import { PageHeader } from "@/components/ui/PageHeader";
+import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
+import { Card } from "@/components/ui/Card";
+import { Timeline } from "@/components/ui/Timeline";
+import { StatusIndicator } from "@/components/ui/StatusIndicator";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { Spinner } from "@/components/ui/Spinner";
 
 export default function DashboardPage() {
   // Fetch agents
-  const { data: agents } = useQuery({
+  const { data: agents, isLoading: agentsLoading } = useQuery({
     queryKey: ["agents"],
     queryFn: () => api.getAgents(),
   });
@@ -147,7 +34,7 @@ export default function DashboardPage() {
   const totalAgents = agents?.length || 0;
 
   // Fetch containers for active agent
-  const { data: containers, isLoading: containersLoading } = useQuery({
+  const { data: containers } = useQuery({
     queryKey: ["containers", activeAgent?.id],
     queryFn: () => activeAgent ? api.getContainers(activeAgent.id) : Promise.resolve([]),
     enabled: !!activeAgent,
@@ -155,7 +42,7 @@ export default function DashboardPage() {
   });
 
   // Fetch proxies for active agent
-  const { data: proxies, isLoading: proxiesLoading } = useQuery({
+  const { data: proxies } = useQuery({
     queryKey: ["proxies", activeAgent?.id],
     queryFn: () => activeAgent ? api.getProxyHosts(activeAgent.id) : Promise.resolve([]),
     enabled: !!activeAgent,
@@ -167,218 +54,320 @@ export default function DashboardPage() {
     queryFn: () => api.getAlertHistory(10),
   });
 
+  // Calculate metrics
   const runningContainers = containers?.filter((c) => c.status === "running").length || 0;
   const totalContainers = containers?.length || 0;
   const activeProxies = proxies?.filter((p: { status: string }) => p.status === "active").length || 0;
   const totalProxies = proxies?.length || 0;
   const activeAlerts = alertHistory?.filter((a) => !a.resolved_at).length || 0;
+  const criticalAlerts = alertHistory?.filter((a) => !a.resolved_at && a.severity === "critical").length || 0;
 
-  // Calculate total resources
-  const totalCpu = containers?.reduce((sum, c) => sum + (c.cpu_percent || 0), 0) || 0;
-  const totalMemory = containers?.reduce((sum, c) => sum + (c.memory_mb || 0), 0) || 0;
+  // Calculate security posture (simple heuristic)
+  const getOverallStatus = () => {
+    if (criticalAlerts > 0) return 'critical';
+    if (activeAlerts > 3) return 'warning';
+    if (activeAlerts > 0) return 'degraded';
+    return 'healthy';
+  };
+
+  const overallStatus = getOverallStatus();
+
+  // Loading state
+  if (agentsLoading) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title="Dashboard"
+          description="Overview of your infrastructure security and operations"
+        />
+        <Spinner.Page label="Loading dashboard..." />
+      </div>
+    );
+  }
+
+  // No agents state
+  if (!activeAgent) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title="Dashboard"
+          description="Overview of your infrastructure security and operations"
+        />
+        <EmptyState
+          icon={Activity}
+          title="No active agents"
+          description="Connect your first agent to start monitoring your infrastructure"
+          action={
+            <button className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700">
+              Connect Agent
+            </button>
+          }
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Overview</h1>
-        <div className="flex items-center gap-2 text-sm text-gray-500">
-          <Activity className="h-4 w-4" />
-          <span>Auto-refresh every 10s</span>
-        </div>
-      </div>
+      {/* Page Header */}
+      <PageHeader
+        title="Dashboard"
+        description="Are we safe? Overview of your infrastructure security and operations"
+        action={
+          <div className="flex items-center gap-3">
+            <StatusIndicator status={overallStatus} pulse size="sm" />
+            <span className="text-xs text-gray-500 dark:text-gray-400">
+              Auto-refresh • 10s
+            </span>
+          </div>
+        }
+      />
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Key Metrics Grid */}
+      <MetricsGrid columns={4}>
         <StatCard
-          title="Containers"
-          value={`${runningContainers}/${totalContainers}`}
-          subValue={runningContainers === totalContainers ? "All running" : `${totalContainers - runningContainers} stopped`}
-          icon={Container}
-          color="bg-blue-600"
-          href="/containers"
+          label="Deployments"
+          value={totalContainers}
+          description={runningContainers === totalContainers ? "All running" : `${runningContainers} running`}
+          icon={Package}
+          iconColor="text-blue-600 dark:text-blue-400"
+          trend={runningContainers === totalContainers ? "up" : undefined}
+          trendValue={runningContainers === totalContainers ? "All healthy" : undefined}
+          onClick={() => window.location.href = "/containers"}
         />
+
         <StatCard
-          title="Proxy Hosts"
-          value={`${activeProxies}/${totalProxies}`}
-          subValue={totalProxies > 0 ? `${proxies?.filter((p: { ssl_enabled: boolean }) => p.ssl_enabled).length || 0} with SSL` : "No proxies configured"}
-          icon={Globe}
-          color="bg-purple-600"
-          href="/proxies"
-        />
-        <StatCard
-          title="Agents"
-          value={`${activeAgents}/${totalAgents}`}
-          subValue={activeAgents === totalAgents ? "All online" : `${totalAgents - activeAgents} offline`}
-          icon={Server}
-          color="bg-green-600"
-        />
-        <StatCard
-          title="Active Alerts"
-          value={activeAlerts}
-          subValue={activeAlerts === 0 ? "No issues" : "Attention needed"}
+          label="Critical Alerts"
+          value={criticalAlerts}
+          description={criticalAlerts === 0 ? "No critical issues" : "Attention needed"}
           icon={AlertTriangle}
-          color={activeAlerts > 0 ? "bg-red-600" : "bg-yellow-600"}
-          href="/alerts"
+          iconColor={criticalAlerts > 0 ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"}
+          valueColor={criticalAlerts > 0 ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"}
+          onClick={() => window.location.href = "/alerts"}
         />
-      </div>
 
-      {/* Resource Usage */}
-      {containers && containers.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="bg-white dark:bg-gray-900 rounded-lg p-4 border border-gray-200 dark:border-gray-800">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm text-gray-500">Total CPU Usage</span>
-              <span className="text-lg font-semibold text-gray-900 dark:text-white">{totalCpu.toFixed(1)}%</span>
-            </div>
-            <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-blue-500 rounded-full transition-all"
-                style={{ width: `${Math.min(totalCpu, 100)}%` }}
-              />
-            </div>
-          </div>
-          <div className="bg-white dark:bg-gray-900 rounded-lg p-4 border border-gray-200 dark:border-gray-800">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm text-gray-500">Total Memory Usage</span>
-              <span className="text-lg font-semibold text-gray-900 dark:text-white">{totalMemory.toFixed(0)} MB</span>
-            </div>
-            <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-purple-500 rounded-full transition-all"
-                style={{ width: `${Math.min(totalMemory / 40, 100)}%` }}
-              />
-            </div>
-          </div>
-        </div>
-      )}
+        <StatCard
+          label="Security Posture"
+          value={activeAlerts === 0 ? "Excellent" : activeAlerts < 3 ? "Good" : "Fair"}
+          description={`${activeAlerts} active issue${activeAlerts !== 1 ? 's' : ''}`}
+          icon={Shield}
+          iconColor="text-purple-600 dark:text-purple-400"
+          trend={activeAlerts === 0 ? "up" : "down"}
+          trendValue={activeAlerts === 0 ? "No issues" : `${activeAlerts} to resolve`}
+        />
+
+        <StatCard
+          label="Infrastructure"
+          value={`${activeAgents}/${totalAgents}`}
+          description={activeAgents === totalAgents ? "All agents online" : `${totalAgents - activeAgents} offline`}
+          icon={Activity}
+          iconColor="text-green-600 dark:text-green-400"
+          trend={activeAgents === totalAgents ? "up" : undefined}
+        />
+      </MetricsGrid>
 
       {/* Two Column Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Containers */}
-        <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800">
-          <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-800">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-              Containers
-            </h2>
-            <Link href="/containers" className="text-sm text-primary-600 hover:text-primary-500">
-              View all
-            </Link>
-          </div>
-          <div className="p-4">
-            {containersLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <RefreshCw className="h-5 w-5 text-gray-400 animate-spin" />
+        {/* System Status */}
+        <Card>
+          <Card.Header>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+              System Status
+            </h3>
+          </Card.Header>
+          <Card.Body>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-700 dark:text-gray-300">Overall Health</span>
+                <StatusIndicator status={overallStatus} pulse size="sm" />
               </div>
-            ) : containers && containers.length > 0 ? (
-              <div>
-                {containers.slice(0, 5).map((container) => (
-                  <ContainerRow
-                    key={container.container_id}
-                    name={container.name}
-                    image={container.image}
-                    status={container.status}
-                    cpu={container.cpu_percent || 0}
-                    memory={container.memory_mb || 0}
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-700 dark:text-gray-300">Containers</span>
+                <StatusIndicator
+                  status={runningContainers === totalContainers ? "healthy" : "warning"}
+                  label={`${runningContainers}/${totalContainers} running`}
+                  size="sm"
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-700 dark:text-gray-300">Proxy Hosts</span>
+                <StatusIndicator
+                  status={activeProxies > 0 ? "healthy" : "degraded"}
+                  label={`${activeProxies}/${totalProxies} active`}
+                  size="sm"
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-700 dark:text-gray-300">Agents</span>
+                <StatusIndicator
+                  status={activeAgents === totalAgents ? "healthy" : "critical"}
+                  label={`${activeAgents}/${totalAgents} online`}
+                  size="sm"
+                  pulse={activeAgents < totalAgents}
+                />
+              </div>
+            </div>
+          </Card.Body>
+        </Card>
+
+        {/* Recent Activity */}
+        <Card>
+          <Card.Header>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+              Recent Activity
+            </h3>
+          </Card.Header>
+          <Card.Body>
+            {alertHistory && alertHistory.length > 0 ? (
+              <Timeline>
+                {alertHistory.slice(0, 5).map((alert, index) => (
+                  <Timeline.Item
+                    key={alert.id}
+                    icon={alert.resolved_at ? CheckCircle2 : AlertTriangle}
+                    iconColor={alert.resolved_at
+                      ? "text-green-600 dark:text-green-400"
+                      : alert.severity === "critical"
+                        ? "text-red-600 dark:text-red-400"
+                        : "text-yellow-600 dark:text-yellow-400"
+                    }
+                    title={alert.message}
+                    timestamp={new Date(alert.triggered_at).toLocaleTimeString()}
+                    isLast={index === Math.min(alertHistory.length, 5) - 1}
                   />
                 ))}
+              </Timeline>
+            ) : (
+              <EmptyState
+                icon={CheckCircle2}
+                title="No recent alerts"
+                description="Your infrastructure is running smoothly"
+                size="sm"
+                iconClassName="text-green-500 dark:text-green-400"
+              />
+            )}
+          </Card.Body>
+        </Card>
+      </div>
+
+      {/* Containers & Proxies Cards */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Containers */}
+        <Card>
+          <Card.Header
+            action={
+              <a href="/containers" className="text-sm text-primary-600 hover:text-primary-700 dark:text-primary-400">
+                View all
+              </a>
+            }
+          >
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+              Containers
+            </h3>
+          </Card.Header>
+          <Card.Body>
+            {containers && containers.length > 0 ? (
+              <div className="space-y-3">
+                {containers.slice(0, 5).map((container) => (
+                  <div
+                    key={container.container_id}
+                    className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <StatusIndicator
+                        status={container.status === "running" ? "healthy" : "critical"}
+                        showLabel={false}
+                        pulse={container.status === "running"}
+                        size="sm"
+                      />
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                          {container.name}
+                        </p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                          {container.image}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
+                      <span>CPU: {(container.cpu_percent || 0).toFixed(1)}%</span>
+                      <span>Mem: {container.memory_mb || 0}MB</span>
+                    </div>
+                  </div>
+                ))}
                 {containers.length > 5 && (
-                  <p className="text-xs text-gray-500 mt-3 text-center">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 text-center mt-3">
                     +{containers.length - 5} more containers
                   </p>
                 )}
               </div>
             ) : (
-              <p className="text-gray-500 text-sm text-center py-8">No containers found</p>
+              <EmptyState
+                icon={Package}
+                title="No containers"
+                description="No containers are currently running"
+                size="sm"
+              />
             )}
-          </div>
-        </div>
+          </Card.Body>
+        </Card>
 
         {/* Proxy Hosts */}
-        <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800">
-          <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-800">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+        <Card>
+          <Card.Header
+            action={
+              <a href="/proxies" className="text-sm text-primary-600 hover:text-primary-700 dark:text-primary-400">
+                View all
+              </a>
+            }
+          >
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
               Proxy Hosts
-            </h2>
-            <Link href="/proxies" className="text-sm text-primary-600 hover:text-primary-500">
-              View all
-            </Link>
-          </div>
-          <div className="p-4">
-            {proxiesLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <RefreshCw className="h-5 w-5 text-gray-400 animate-spin" />
-              </div>
-            ) : proxies && proxies.length > 0 ? (
-              <div>
-                {proxies.slice(0, 5).map((proxy: { id: string; domain: string; upstream_target: string; ssl_enabled: boolean; status: string }) => (
-                  <ProxyRow
+            </h3>
+          </Card.Header>
+          <Card.Body>
+            {proxies && proxies.length > 0 ? (
+              <div className="space-y-3">
+                {proxies.slice(0, 5).map((proxy: any) => (
+                  <div
                     key={proxy.id}
-                    domain={proxy.domain}
-                    upstream={proxy.upstream_target}
-                    sslEnabled={proxy.ssl_enabled}
-                    status={proxy.status}
-                  />
+                    className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                          {proxy.domain}
+                        </p>
+                        {proxy.ssl_enabled && (
+                          <CheckCircle2 className="h-3.5 w-3.5 text-green-500 flex-shrink-0" />
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                        {proxy.upstream_target}
+                      </p>
+                    </div>
+                    <StatusIndicator
+                      status={proxy.status === "active" ? "healthy" : "warning"}
+                      size="sm"
+                    />
+                  </div>
                 ))}
                 {proxies.length > 5 && (
-                  <p className="text-xs text-gray-500 mt-3 text-center">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 text-center mt-3">
                     +{proxies.length - 5} more proxies
                   </p>
                 )}
               </div>
             ) : (
-              <p className="text-gray-500 text-sm text-center py-8">No proxy hosts configured</p>
+              <EmptyState
+                icon={Activity}
+                title="No proxy hosts"
+                description="No proxy hosts are configured"
+                size="sm"
+              />
             )}
-          </div>
-        </div>
+          </Card.Body>
+        </Card>
       </div>
-
-      {/* Recent Alerts */}
-      {alertHistory && alertHistory.length > 0 && (
-        <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800">
-          <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-800">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-              Recent Alerts
-            </h2>
-            <Link href="/alerts" className="text-sm text-primary-600 hover:text-primary-500">
-              View all
-            </Link>
-          </div>
-          <div className="p-4">
-            {alertHistory.slice(0, 5).map((alert) => (
-              <div key={alert.id} className="flex items-center justify-between py-3 border-b border-gray-100 dark:border-gray-800 last:border-0">
-                <div className="flex items-center gap-3">
-                  <div className={cn(
-                    "p-1.5 rounded",
-                    alert.resolved_at
-                      ? "bg-green-100 dark:bg-green-900/30"
-                      : "bg-red-100 dark:bg-red-900/30"
-                  )}>
-                    {alert.resolved_at ? (
-                      <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
-                    ) : (
-                      <AlertTriangle className="h-4 w-4 text-red-600 dark:text-red-400" />
-                    )}
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-900 dark:text-white">{alert.message}</p>
-                    <p className="text-xs text-gray-500">{formatRelativeTime(alert.triggered_at)}</p>
-                  </div>
-                </div>
-                <span className={cn(
-                  "px-2 py-0.5 text-xs rounded font-medium",
-                  alert.severity === "critical"
-                    ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
-                    : alert.severity === "warning"
-                    ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
-                    : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
-                )}>
-                  {alert.severity}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

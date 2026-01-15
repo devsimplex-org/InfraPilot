@@ -7,26 +7,24 @@ import {
   Shield,
   AlertTriangle,
   AlertCircle,
-  Search,
   Package,
   Server,
   Ban,
-  Eye,
-  TrendingUp,
+  Search,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import {
-  PageLayout,
-  ListCard,
-  EmptyState,
-  Button,
-  Tabs,
-} from "@/components/ui/page-layout";
-import {
-  DetailPanel,
-  DetailSection,
-  DetailRow,
-} from "@/components/ui/detail-panel";
+
+// New component library imports
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Breadcrumb } from "@/components/ui/Breadcrumb";
+import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
+import { Table } from "@/components/ui/Table";
+import { SlideOver } from "@/components/ui/SlideOver";
+import { FilterPanel } from "@/components/ui/FilterPanel";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { Skeleton } from "@/components/ui/Skeleton";
+import { Spinner } from "@/components/ui/Spinner";
+import { SeverityBadge } from "@/components/ui/Badge";
 
 // ==================== Types ====================
 
@@ -86,6 +84,7 @@ export default function VulnerabilitiesPage() {
   const [selectedCVE, setSelectedCVE] = useState<CVESummary | null>(null);
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("all");
   const [searchTerm, setSearchTerm] = useState("");
+  const [packageFilter, setPackageFilter] = useState<string[]>([]);
 
   // Fetch default agent
   const { data: agents } = useQuery({
@@ -107,7 +106,7 @@ export default function VulnerabilitiesPage() {
   });
 
   // Fetch selected CVE details
-  const { data: cveDetail } = useQuery({
+  const { data: cveDetail, isLoading: isLoadingDetail } = useQuery({
     queryKey: ["cve-detail", defaultAgent?.id, selectedCVE?.cve_id],
     queryFn: () =>
       api.fetchAPI<CVEDetail>(
@@ -118,15 +117,21 @@ export default function VulnerabilitiesPage() {
 
   const allCVEs = cveData?.cves || [];
 
-  // Apply search filter
-  const filteredCVEs = allCVEs.filter(
-    (cve) =>
+  // Apply search and package filters
+  const filteredCVEs = allCVEs.filter((cve) => {
+    const matchesSearch =
       cve.cve_id.toLowerCase().includes(searchTerm.toLowerCase()) ||
       cve.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
       cve.affected_packages.some((pkg) =>
         pkg.toLowerCase().includes(searchTerm.toLowerCase())
-      )
-  );
+      );
+
+    const matchesPackage =
+      packageFilter.length === 0 ||
+      cve.affected_packages.some((pkg) => packageFilter.includes(pkg));
+
+    return matchesSearch && matchesPackage;
+  });
 
   // Calculate stats
   const stats = {
@@ -139,364 +144,464 @@ export default function VulnerabilitiesPage() {
     blocked: allCVEs.reduce((sum, cve) => sum + cve.blocked_count, 0),
   };
 
-  const getSeverityColor = (severity: string) => {
-    switch (severity.toLowerCase()) {
-      case "critical":
-        return "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400";
-      case "high":
-        return "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400";
-      case "medium":
-        return "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400";
-      case "low":
-        return "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400";
-      default:
-        return "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400";
-    }
-  };
+  // Get unique packages for filter
+  const uniquePackages = Array.from(
+    new Set(allCVEs.flatMap((cve) => cve.affected_packages))
+  ).sort();
 
-  const getSeverityIcon = (severity: string) => {
-    switch (severity.toLowerCase()) {
-      case "critical":
-      case "high":
-        return AlertCircle;
-      case "medium":
-        return AlertTriangle;
-      default:
-        return Shield;
-    }
-  };
+  // Filter configuration
+  const filters = [
+    {
+      id: "severity",
+      label: "Severity",
+      type: "radio" as const,
+      value: severityFilter,
+      onChange: (value: string | string[]) =>
+        setSeverityFilter(value as SeverityFilter),
+      options: [
+        { label: "All", value: "all", count: stats.total },
+        { label: "Critical", value: "critical", count: stats.critical },
+        { label: "High", value: "high", count: stats.high },
+        { label: "Medium", value: "medium", count: stats.medium },
+        { label: "Low", value: "low", count: stats.low },
+      ],
+    },
+    {
+      id: "package",
+      label: "Affected Package",
+      type: "checkbox" as const,
+      value: packageFilter,
+      onChange: (value: string | string[]) =>
+        setPackageFilter(value as string[]),
+      options: uniquePackages.slice(0, 10).map((pkg) => ({
+        label: pkg,
+        value: pkg,
+      })),
+    },
+    {
+      id: "search",
+      label: "Search",
+      type: "search" as const,
+      value: searchTerm,
+      onChange: (value: string | string[]) => setSearchTerm(value as string),
+    },
+  ];
+
+  // Table columns
+  const columns = [
+    {
+      key: "cve_id",
+      header: "CVE ID",
+      sortable: true,
+      width: "200px",
+      render: (value: string, row: CVESummary) => (
+        <div className="flex items-center gap-2">
+          <span className="font-mono font-medium text-gray-900 dark:text-white">
+            {value}
+          </span>
+        </div>
+      ),
+    },
+    {
+      key: "severity",
+      header: "Severity",
+      sortable: true,
+      width: "120px",
+      render: (value: string, row: CVESummary) => (
+        <div className="flex items-center gap-2">
+          <SeverityBadge
+            severity={value as "critical" | "high" | "medium" | "low"}
+            size="sm"
+          />
+          {row.cvss_v3_score && (
+            <span className="text-xs text-gray-500 dark:text-gray-400">
+              {row.cvss_v3_score}
+            </span>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: "description",
+      header: "Description",
+      render: (value: string) => (
+        <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
+          {value}
+        </p>
+      ),
+    },
+    {
+      key: "affected_packages",
+      header: "Packages",
+      width: "100px",
+      align: "center" as const,
+      render: (value: string[]) => (
+        <div className="flex items-center justify-center gap-1 text-sm text-gray-600 dark:text-gray-400">
+          <Package className="w-4 h-4" />
+          <span>{value.length}</span>
+        </div>
+      ),
+    },
+    {
+      key: "running_count",
+      header: "Running",
+      width: "100px",
+      align: "center" as const,
+      sortable: true,
+      render: (value: number) => (
+        <div
+          className={cn(
+            "flex items-center justify-center gap-1 text-sm",
+            value > 0
+              ? "text-orange-600 dark:text-orange-400 font-medium"
+              : "text-gray-500 dark:text-gray-400"
+          )}
+        >
+          <Server className="w-4 h-4" />
+          <span>{value}</span>
+        </div>
+      ),
+    },
+    {
+      key: "blocked_count",
+      header: "Blocked",
+      width: "100px",
+      align: "center" as const,
+      sortable: true,
+      render: (value: number) => (
+        <div
+          className={cn(
+            "flex items-center justify-center gap-1 text-sm",
+            value > 0
+              ? "text-green-600 dark:text-green-400 font-medium"
+              : "text-gray-500 dark:text-gray-400"
+          )}
+        >
+          <Ban className="w-4 h-4" />
+          <span>{value}</span>
+        </div>
+      ),
+    },
+  ];
 
   return (
-    <PageLayout
-      title="CVE-Centric View"
-      description="Track vulnerabilities and their impact across deployments"
-      panel={
-        selectedCVE && cveDetail && (
-          <DetailPanel
-            open={!!selectedCVE}
-            onClose={() => setSelectedCVE(null)}
-            title={cveDetail.cve_id}
-            subtitle={`${cveDetail.severity.toUpperCase()} severity`}
-          >
-            {/* CVE Details */}
-            <DetailSection title="Vulnerability Information">
-              <DetailRow
-                label="Severity"
-                value={
-                  <span className={cn("px-2 py-1 text-xs font-medium rounded-full capitalize", getSeverityColor(cveDetail.severity))}>
-                    {cveDetail.severity}
-                  </span>
-                }
-              />
-              {cveDetail.cvss_v3_score && (
-                <DetailRow
-                  label="CVSS v3 Score"
-                  value={<span className="font-semibold">{cveDetail.cvss_v3_score}</span>}
-                />
-              )}
-              <DetailRow
-                label="First Detected"
-                value={new Date(cveDetail.first_detected).toLocaleDateString()}
-              />
-              <DetailRow
-                label="Total Occurrences"
-                value={cveDetail.total_occurrences}
-              />
-            </DetailSection>
-
-            <DetailSection title="Description">
-              <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
-                {cveDetail.description}
-              </p>
-            </DetailSection>
-
-            {/* Affected Packages */}
-            {cveDetail.affected_packages.length > 0 && (
-              <DetailSection title={`Affected Packages (${cveDetail.affected_packages.length})`}>
-                <div className="space-y-2">
-                  {cveDetail.affected_packages.map((pkg, idx) => (
-                    <div
-                      key={idx}
-                      className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <span className="font-mono font-medium text-sm text-gray-900 dark:text-white">
-                            {pkg.package_name}
-                          </span>
-                          <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">
-                            {pkg.package_version}
-                          </span>
-                        </div>
-                        {pkg.fixed_version && (
-                          <div className="text-xs">
-                            <span className="text-gray-500 dark:text-gray-400">Fixed: </span>
-                            <span className="font-medium text-green-600 dark:text-green-400">
-                              {pkg.fixed_version}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </DetailSection>
-            )}
-
-            {/* Running Deployments */}
-            <DetailSection title={`Running Deployments (${cveDetail.running_deployments.length})`}>
-              {cveDetail.running_deployments.length === 0 ? (
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  No running deployments affected
-                </p>
-              ) : (
-                <div className="space-y-2">
-                  {cveDetail.running_deployments.map((dep) => (
-                    <div
-                      key={dep.deployment_id}
-                      className="p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg border border-orange-200 dark:border-orange-800"
-                    >
-                      <div className="flex items-start justify-between mb-1">
-                        <div className="font-medium text-sm text-gray-900 dark:text-white">
-                          {dep.service_name}
-                        </div>
-                        <span className="px-2 py-0.5 text-xs font-medium bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-400 rounded">
-                          {dep.status}
-                        </span>
-                      </div>
-                      <div className="text-xs text-gray-600 dark:text-gray-400">
-                        <div>{dep.environment}</div>
-                        <div className="font-mono">
-                          {dep.image_repository}:{dep.image_tag}
-                        </div>
-                        <div className="mt-1">
-                          {dep.package_name} {dep.package_version}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </DetailSection>
-
-            {/* Blocked Deployments */}
-            <DetailSection title={`Blocked Deployments (${cveDetail.blocked_deployments.length})`}>
-              {cveDetail.blocked_deployments.length === 0 ? (
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  No deployments blocked by policy
-                </p>
-              ) : (
-                <div className="space-y-2">
-                  {cveDetail.blocked_deployments.map((dep) => (
-                    <div
-                      key={dep.deployment_id}
-                      className="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800"
-                    >
-                      <div className="flex items-start justify-between mb-1">
-                        <div className="font-medium text-sm text-gray-900 dark:text-white">
-                          {dep.service_name}
-                        </div>
-                        <span className="px-2 py-0.5 text-xs font-medium bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400 rounded">
-                          BLOCKED
-                        </span>
-                      </div>
-                      <div className="text-xs text-gray-600 dark:text-gray-400">
-                        <div>{dep.environment}</div>
-                        <div className="font-mono">
-                          {dep.image_repository}:{dep.image_tag}
-                        </div>
-                        {dep.policy_reason && (
-                          <div className="mt-2 p-2 bg-white dark:bg-gray-900 border border-green-300 dark:border-green-700 rounded text-green-700 dark:text-green-400">
-                            <strong>Policy: </strong>
-                            {dep.policy_reason}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </DetailSection>
-          </DetailPanel>
-        )
-      }
-      panelOpen={!!selectedCVE}
-    >
-      {/* Statistics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-500 dark:text-gray-400">Total CVEs</p>
-              <p className="text-2xl font-semibold text-gray-900 dark:text-white mt-1">
-                {stats.total}
-              </p>
-            </div>
-            <Shield className="w-8 h-8 text-primary-500" />
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-500 dark:text-gray-400">Critical + High</p>
-              <p className="text-2xl font-semibold text-red-600 dark:text-red-400 mt-1">
-                {stats.critical + stats.high}
-              </p>
-            </div>
-            <AlertCircle className="w-8 h-8 text-red-500" />
-          </div>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-            {stats.critical} critical, {stats.high} high
-          </p>
-        </div>
-
-        <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-500 dark:text-gray-400">Running</p>
-              <p className="text-2xl font-semibold text-orange-600 dark:text-orange-400 mt-1">
-                {stats.running}
-              </p>
-            </div>
-            <Server className="w-8 h-8 text-orange-500" />
-          </div>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-            Affected deployments
-          </p>
-        </div>
-
-        <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-500 dark:text-gray-400">Blocked</p>
-              <p className="text-2xl font-semibold text-green-600 dark:text-green-400 mt-1">
-                {stats.blocked}
-              </p>
-            </div>
-            <Ban className="w-8 h-8 text-green-500" />
-          </div>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-            By policy
-          </p>
-        </div>
-      </div>
-
-      {/* Search Bar */}
-      <div className="mb-6 relative">
-        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-        <input
-          type="text"
-          placeholder="Search by CVE ID, description, or package name..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="w-full pl-10 pr-4 py-2 border border-gray-200 dark:border-gray-800 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
-        />
-      </div>
-
-      {/* Tabs */}
-      <Tabs
-        tabs={[
-          { id: "all", label: "All", count: allCVEs.length },
-          { id: "critical", label: "Critical", count: stats.critical },
-          { id: "high", label: "High", count: stats.high },
-          { id: "medium", label: "Medium", count: stats.medium },
-          { id: "low", label: "Low", count: stats.low },
-        ]}
-        activeTab={severityFilter}
-        onChange={(id) => setSeverityFilter(id as SeverityFilter)}
+    <div className="h-full flex flex-col">
+      {/* Section 1: Header with Breadcrumbs */}
+      <PageHeader
+        title="CVE Vulnerabilities"
+        description="Track and manage security vulnerabilities across your deployments"
+        breadcrumbs={
+          <Breadcrumb
+            items={[
+              { label: "Security", href: "/security" },
+              { label: "Vulnerabilities", current: true },
+            ]}
+          />
+        }
       />
 
-      {/* CVE List */}
-      <div className="mt-6">
-        {isLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
-          </div>
-        ) : filteredCVEs.length === 0 ? (
-          <EmptyState
-            icon={Shield}
-            title={stats.total === 0 ? "No Vulnerabilities Found" : "No Matching CVEs"}
-            description={
-              stats.total === 0
-                ? "All scanned images are secure. Start scanning deployments to track vulnerabilities."
-                : searchTerm
-                ? "Try adjusting your search term."
-                : "No CVEs match the selected severity level."
-            }
+      {/* Section 2: Metrics */}
+      <MetricsGrid columns={4} className="mb-6">
+        <StatCard
+          label="Total CVEs"
+          value={stats.total}
+          icon={Shield}
+          iconColor="text-primary-600"
+        />
+        <StatCard
+          label="Critical + High"
+          value={stats.critical + stats.high}
+          description={`${stats.critical} critical, ${stats.high} high`}
+          icon={AlertCircle}
+          iconColor="text-red-600"
+          valueColor="text-red-600 dark:text-red-400"
+        />
+        <StatCard
+          label="Running Deployments"
+          value={stats.running}
+          description="Affected deployments"
+          icon={Server}
+          iconColor="text-orange-600"
+          valueColor="text-orange-600 dark:text-orange-400"
+        />
+        <StatCard
+          label="Blocked by Policy"
+          value={stats.blocked}
+          description="Prevented deployments"
+          icon={Ban}
+          iconColor="text-green-600"
+          valueColor="text-green-600 dark:text-green-400"
+        />
+      </MetricsGrid>
+
+      {/* Section 3: Filters & Content */}
+      <div className="flex-1 flex gap-6 min-h-0">
+        {/* Filters Panel */}
+        <div className="w-64 flex-shrink-0">
+          <FilterPanel
+            filters={filters}
+            onReset={() => {
+              setSeverityFilter("all");
+              setPackageFilter([]);
+              setSearchTerm("");
+            }}
           />
-        ) : (
-          <div className="space-y-4">
-            {filteredCVEs.map((cve) => {
-              const SeverityIcon = getSeverityIcon(cve.severity);
-              return (
-                <ListCard
-                  key={cve.cve_id}
-                  selected={selectedCVE?.cve_id === cve.cve_id}
-                  onClick={() => setSelectedCVE(cve)}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3 flex-1 min-w-0">
-                      <SeverityIcon
-                        className={cn(
-                          "w-5 h-5 flex-shrink-0",
-                          cve.severity === "critical" && "text-red-500",
-                          cve.severity === "high" && "text-orange-500",
-                          cve.severity === "medium" && "text-yellow-500",
-                          cve.severity === "low" && "text-blue-500"
-                        )}
-                      />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <h3 className="text-sm font-mono font-medium text-gray-900 dark:text-white">
-                            {cve.cve_id}
-                          </h3>
-                          <span
-                            className={cn(
-                              "px-2 py-0.5 text-xs font-medium rounded-full capitalize",
-                              getSeverityColor(cve.severity)
-                            )}
-                          >
-                            {cve.severity}
+        </div>
+
+        {/* Main Content */}
+        <div className="flex-1 flex flex-col min-w-0 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg">
+          {/* Search Bar */}
+          <div className="p-4 border-b border-gray-200 dark:border-gray-800">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+              <input
+                type="text"
+                placeholder="Search by CVE ID, description, or package..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+            </div>
+          </div>
+
+          {/* Table */}
+          <div className="flex-1 overflow-auto">
+            {isLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Spinner size="lg" label="Loading vulnerabilities..." />
+              </div>
+            ) : filteredCVEs.length === 0 ? (
+              <EmptyState
+                icon={Shield}
+                title={
+                  stats.total === 0
+                    ? "No Vulnerabilities Found"
+                    : "No Matching CVEs"
+                }
+                description={
+                  stats.total === 0
+                    ? "All scanned images are secure. Start scanning deployments to track vulnerabilities."
+                    : searchTerm || packageFilter.length > 0
+                    ? "Try adjusting your search or filters."
+                    : "No CVEs match the selected severity level."
+                }
+              />
+            ) : (
+              <Table
+                columns={columns}
+                data={filteredCVEs}
+                keyExtractor={(row) => row.cve_id}
+                onRowClick={(row) => setSelectedCVE(row)}
+                hoverable
+              />
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Section 4: Details SlideOver */}
+      <SlideOver
+        isOpen={!!selectedCVE}
+        onClose={() => setSelectedCVE(null)}
+        size="lg"
+      >
+        {selectedCVE && (
+          <>
+            <SlideOver.Header onClose={() => setSelectedCVE(null)}>
+              <div>
+                <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+                  {selectedCVE.cve_id}
+                </h2>
+                <div className="mt-1">
+                  <SeverityBadge
+                    severity={
+                      selectedCVE.severity as
+                        | "critical"
+                        | "high"
+                        | "medium"
+                        | "low"
+                    }
+                  />
+                </div>
+              </div>
+            </SlideOver.Header>
+
+            <SlideOver.Body>
+              {isLoadingDetail ? (
+                <div className="flex items-center justify-center py-12">
+                  <Spinner size="lg" label="Loading details..." />
+                </div>
+              ) : cveDetail ? (
+                <div className="space-y-6">
+                  {/* Vulnerability Information */}
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
+                      Vulnerability Information
+                    </h3>
+                    <div className="space-y-2">
+                      {cveDetail.cvss_v3_score && (
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-500 dark:text-gray-400">
+                            CVSS v3 Score
                           </span>
-                          {cve.cvss_v3_score && (
-                            <span className="text-xs text-gray-500 dark:text-gray-400">
-                              CVSS: {cve.cvss_v3_score}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-1">
-                          {cve.description}
-                        </p>
-                        <div className="flex items-center gap-3 mt-1 text-xs text-gray-500 dark:text-gray-400">
-                          <span className="flex items-center gap-1">
-                            <Package className="w-3 h-3" />
-                            {cve.affected_packages.length} package
-                            {cve.affected_packages.length !== 1 ? "s" : ""}
+                          <span className="font-semibold text-gray-900 dark:text-white">
+                            {cveDetail.cvss_v3_score}
                           </span>
-                          {cve.running_count > 0 && (
-                            <span className="flex items-center gap-1 text-orange-600 dark:text-orange-400">
-                              <Server className="w-3 h-3" />
-                              {cve.running_count} running
-                            </span>
-                          )}
-                          {cve.blocked_count > 0 && (
-                            <span className="flex items-center gap-1 text-green-600 dark:text-green-400">
-                              <Ban className="w-3 h-3" />
-                              {cve.blocked_count} blocked
-                            </span>
-                          )}
                         </div>
+                      )}
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500 dark:text-gray-400">
+                          First Detected
+                        </span>
+                        <span className="text-gray-900 dark:text-white">
+                          {new Date(cveDetail.first_detected).toLocaleDateString()}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500 dark:text-gray-400">
+                          Total Occurrences
+                        </span>
+                        <span className="text-gray-900 dark:text-white">
+                          {cveDetail.total_occurrences}
+                        </span>
                       </div>
                     </div>
-                    <Eye className="w-4 h-4 text-gray-400" />
                   </div>
-                </ListCard>
-              );
-            })}
-          </div>
+
+                  {/* Description */}
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
+                      Description
+                    </h3>
+                    <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
+                      {cveDetail.description}
+                    </p>
+                  </div>
+
+                  {/* Affected Packages */}
+                  {cveDetail.affected_packages.length > 0 && (
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
+                        Affected Packages ({cveDetail.affected_packages.length})
+                      </h3>
+                      <div className="space-y-2">
+                        {cveDetail.affected_packages.map((pkg, idx) => (
+                          <div
+                            key={idx}
+                            className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <span className="font-mono font-medium text-sm text-gray-900 dark:text-white">
+                                  {pkg.package_name}
+                                </span>
+                                <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">
+                                  {pkg.package_version}
+                                </span>
+                              </div>
+                              {pkg.fixed_version && (
+                                <div className="text-xs">
+                                  <span className="text-gray-500 dark:text-gray-400">
+                                    Fixed:{" "}
+                                  </span>
+                                  <span className="font-medium text-green-600 dark:text-green-400">
+                                    {pkg.fixed_version}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Running Deployments */}
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
+                      Running Deployments ({cveDetail.running_deployments.length})
+                    </h3>
+                    {cveDetail.running_deployments.length === 0 ? (
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        No running deployments affected
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        {cveDetail.running_deployments.map((dep) => (
+                          <div
+                            key={dep.deployment_id}
+                            className="p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg border border-orange-200 dark:border-orange-800"
+                          >
+                            <div className="flex items-start justify-between mb-1">
+                              <div className="font-medium text-sm text-gray-900 dark:text-white">
+                                {dep.service_name}
+                              </div>
+                              <span className="px-2 py-0.5 text-xs font-medium bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-400 rounded">
+                                {dep.status}
+                              </span>
+                            </div>
+                            <div className="text-xs text-gray-600 dark:text-gray-400">
+                              <div>{dep.environment}</div>
+                              <div className="font-mono">
+                                {dep.image_repository}:{dep.image_tag}
+                              </div>
+                              <div className="mt-1">
+                                {dep.package_name} {dep.package_version}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Blocked Deployments */}
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
+                      Blocked Deployments ({cveDetail.blocked_deployments.length})
+                    </h3>
+                    {cveDetail.blocked_deployments.length === 0 ? (
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        No deployments blocked by policy
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        {cveDetail.blocked_deployments.map((dep) => (
+                          <div
+                            key={dep.deployment_id}
+                            className="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800"
+                          >
+                            <div className="flex items-start justify-between mb-1">
+                              <div className="font-medium text-sm text-gray-900 dark:text-white">
+                                {dep.service_name}
+                              </div>
+                              <span className="px-2 py-0.5 text-xs font-medium bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400 rounded">
+                                BLOCKED
+                              </span>
+                            </div>
+                            <div className="text-xs text-gray-600 dark:text-gray-400">
+                              <div>{dep.environment}</div>
+                              <div className="font-mono">
+                                {dep.image_repository}:{dep.image_tag}
+                              </div>
+                              {dep.policy_reason && (
+                                <div className="mt-2 p-2 bg-white dark:bg-gray-900 border border-green-300 dark:border-green-700 rounded text-green-700 dark:text-green-400">
+                                  <strong>Policy: </strong>
+                                  {dep.policy_reason}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+            </SlideOver.Body>
+          </>
         )}
-      </div>
-    </PageLayout>
+      </SlideOver>
+    </div>
   );
 }

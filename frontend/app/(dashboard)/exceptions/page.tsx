@@ -15,37 +15,37 @@ import {
   User,
   FileText,
   Plus,
-  History,
 } from "lucide-react";
 import {
   api,
   RiskException,
   CreateExceptionRequest,
-  DenyExceptionRequest,
-  RevokeExceptionRequest,
 } from "@/lib/api";
-import { cn } from "@/lib/utils";
-import {
-  PageLayout,
-  ListCard,
-  EmptyState,
-  Button,
-  Tabs,
-} from "@/components/ui/page-layout";
-import {
-  DetailPanel,
-  DetailSection,
-  DetailRow,
-} from "@/components/ui/detail-panel";
 
-type PageTab = "active" | "pending" | "expired" | "all";
+// New Component Library Imports
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Breadcrumb } from "@/components/ui/Breadcrumb";
+import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
+import { Table, TableCell } from "@/components/ui/Table";
+import { Badge, StatusBadge } from "@/components/ui/Badge";
+import { SlideOver } from "@/components/ui/SlideOver";
+import { Timeline } from "@/components/ui/Timeline";
+import { FilterPanel, FilterGroup } from "@/components/ui/FilterPanel";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { Spinner } from "@/components/ui/Spinner";
 
 export default function ExceptionsPage() {
   const queryClient = useQueryClient();
-  const [pageTab, setPageTab] = useState<PageTab>("active");
+
+  // Section 1: State Management
   const [selectedEx, setSelectedEx] = useState<RiskException | null>(null);
-  const [scopeTypeFilter, setScopeTypeFilter] = useState<string | undefined>();
+  const [showSlideOver, setShowSlideOver] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
+
+  // Filter state
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  const [scopeTypeFilter, setScopeTypeFilter] = useState<string[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Create exception form state
   const [createScopeType, setCreateScopeType] = useState<string>("cve");
@@ -55,31 +55,14 @@ export default function ExceptionsPage() {
   const [createMitigationPlan, setCreateMitigationPlan] = useState("");
   const [createDurationDays, setCreateDurationDays] = useState(30);
 
-  const getStatusForTab = (tab: PageTab): string | undefined => {
-    switch (tab) {
-      case "active":
-        return "approved";
-      case "pending":
-        return "pending";
-      case "expired":
-        return "expired";
-      case "all":
-        return undefined;
-    }
-  };
-
-  // Fetch exceptions
+  // Section 2: Data Fetching
   const { data: exceptionsData, isLoading } = useQuery({
-    queryKey: ["exceptions", pageTab, scopeTypeFilter],
-    queryFn: () =>
-      api.listExceptions({
-        status: getStatusForTab(pageTab),
-        scope_type: scopeTypeFilter,
-      }),
+    queryKey: ["exceptions"],
+    queryFn: () => api.listExceptions({}),
     refetchInterval: 10000,
   });
 
-  // Create exception mutation
+  // Section 3: Mutations
   const createExceptionMutation = useMutation({
     mutationFn: (request: CreateExceptionRequest) => api.createException(request),
     onSuccess: () => {
@@ -89,35 +72,36 @@ export default function ExceptionsPage() {
     },
   });
 
-  // Approve exception mutation
   const approveExceptionMutation = useMutation({
     mutationFn: (exceptionId: string) => api.approveException(exceptionId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["exceptions"] });
+      setShowSlideOver(false);
       setSelectedEx(null);
     },
   });
 
-  // Deny exception mutation
   const denyExceptionMutation = useMutation({
     mutationFn: ({ exceptionId, reason }: { exceptionId: string; reason: string }) =>
       api.denyException(exceptionId, { reason }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["exceptions"] });
+      setShowSlideOver(false);
       setSelectedEx(null);
     },
   });
 
-  // Revoke exception mutation
   const revokeExceptionMutation = useMutation({
     mutationFn: ({ exceptionId, reason }: { exceptionId: string; reason: string }) =>
       api.revokeException(exceptionId, { reason }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["exceptions"] });
+      setShowSlideOver(false);
       setSelectedEx(null);
     },
   });
 
+  // Section 4: Helper Functions
   const resetCreateForm = () => {
     setCreateScopeType("cve");
     setCreateScopeRef("");
@@ -163,38 +147,6 @@ export default function ExceptionsPage() {
     }
   };
 
-  const exceptions = exceptionsData?.exceptions || [];
-
-  const getStatusIcon = (status: RiskException["status"]) => {
-    switch (status) {
-      case "approved":
-        return <ShieldCheck className="h-4 w-4 text-green-600" />;
-      case "pending":
-        return <Clock className="h-4 w-4 text-yellow-600" />;
-      case "denied":
-        return <ShieldX className="h-4 w-4 text-red-600" />;
-      case "expired":
-        return <AlertTriangle className="h-4 w-4 text-orange-600" />;
-      case "revoked":
-        return <XCircle className="h-4 w-4 text-red-600" />;
-    }
-  };
-
-  const getStatusBadgeClass = (status: RiskException["status"]) => {
-    switch (status) {
-      case "approved":
-        return "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400";
-      case "pending":
-        return "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400";
-      case "denied":
-        return "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400";
-      case "expired":
-        return "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400";
-      case "revoked":
-        return "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400";
-    }
-  };
-
   const getScopeTypeLabel = (scopeType: RiskException["scope_type"]) => {
     switch (scopeType) {
       case "cve":
@@ -210,6 +162,37 @@ export default function ExceptionsPage() {
     }
   };
 
+  const getStatusIcon = (status: RiskException["status"]) => {
+    switch (status) {
+      case "approved":
+        return ShieldCheck;
+      case "pending":
+        return Clock;
+      case "denied":
+        return ShieldX;
+      case "expired":
+        return AlertTriangle;
+      case "revoked":
+        return XCircle;
+    }
+  };
+
+  const mapExceptionStatusToBadgeStatus = (status: RiskException["status"]) => {
+    // Map exception statuses to badge status types
+    switch (status) {
+      case "approved":
+        return "healthy";
+      case "pending":
+        return "warning";
+      case "denied":
+      case "revoked":
+      case "expired":
+        return "critical";
+      default:
+        return "degraded";
+    }
+  };
+
   const isExpiringSoon = (expiresAt: string) => {
     const expiry = new Date(expiresAt);
     const now = new Date();
@@ -217,392 +200,614 @@ export default function ExceptionsPage() {
     return daysLeft <= 7 && daysLeft >= 0;
   };
 
-  return (
-    <PageLayout
-      title="Risk Exceptions"
-      subtitle="Manage time-boxed security exceptions with approval workflow"
-      icon={<ShieldAlert className="h-8 w-8" />}
-      action={
-        <Button onClick={() => setShowCreateModal(true)}>
-          <Plus className="h-4 w-4 mr-2" />
-          Request Exception
-        </Button>
-      }
-    >
-      <Tabs
-        tabs={[
-          { id: "active", label: "Active", icon: ShieldCheck },
-          { id: "pending", label: "Pending Approval", icon: Clock },
-          { id: "expired", label: "Expired", icon: AlertTriangle },
-          { id: "all", label: "All Exceptions", icon: Shield },
-        ]}
-        activeTab={pageTab}
-        onChange={(tab) => setPageTab(tab as PageTab)}
-      />
+  // Filter data
+  const exceptions = exceptionsData?.exceptions || [];
 
-      <div className="flex flex-col lg:flex-row gap-6 h-full">
-        {/* Exception List */}
-        <div className="lg:w-1/2">
-          <div className="mb-4">
-            <select
-              value={scopeTypeFilter || ""}
-              onChange={(e) => setScopeTypeFilter(e.target.value || undefined)}
-              className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm"
+  const filteredExceptions = exceptions.filter((ex) => {
+    // Status filter
+    if (statusFilter.length > 0 && !statusFilter.includes(ex.status)) {
+      return false;
+    }
+
+    // Scope type filter
+    if (scopeTypeFilter.length > 0 && !scopeTypeFilter.includes(ex.scope_type)) {
+      return false;
+    }
+
+    // Search filter
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      return (
+        ex.scope_reference.toLowerCase().includes(query) ||
+        ex.justification.toLowerCase().includes(query)
+      );
+    }
+
+    return true;
+  });
+
+  // Calculate metrics
+  const metrics = {
+    pending: exceptions.filter((ex) => ex.status === "pending").length,
+    approved: exceptions.filter((ex) => ex.status === "approved").length,
+    denied: exceptions.filter((ex) => ex.status === "denied").length,
+    expired: exceptions.filter((ex) => ex.status === "expired").length,
+  };
+
+  // Define filter groups
+  const filterGroups: FilterGroup[] = [
+    {
+      id: "status",
+      label: "Status",
+      type: "checkbox",
+      value: statusFilter,
+      onChange: (value) => setStatusFilter(value as string[]),
+      options: [
+        { label: "Pending", value: "pending", count: metrics.pending },
+        { label: "Approved", value: "approved", count: metrics.approved },
+        { label: "Denied", value: "denied", count: metrics.denied },
+        { label: "Expired", value: "expired", count: metrics.expired },
+      ],
+    },
+    {
+      id: "scopeType",
+      label: "Scope Type",
+      type: "checkbox",
+      value: scopeTypeFilter,
+      onChange: (value) => setScopeTypeFilter(value as string[]),
+      options: [
+        { label: "CVE", value: "cve" },
+        { label: "Policy Rule", value: "policy_rule" },
+        { label: "Deployment", value: "deployment" },
+        { label: "Package", value: "package" },
+        { label: "Image", value: "image" },
+      ],
+    },
+    {
+      id: "search",
+      label: "Search",
+      type: "search",
+      value: searchQuery,
+      onChange: (value) => setSearchQuery(value as string),
+    },
+  ];
+
+  const handleResetFilters = () => {
+    setStatusFilter([]);
+    setScopeTypeFilter([]);
+    setSearchQuery("");
+  };
+
+  // Table columns
+  const columns = [
+    {
+      key: "scope_type",
+      header: "Type",
+      sortable: true,
+      width: "120px",
+      render: (value: string) => (
+        <span className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">
+          {getScopeTypeLabel(value as RiskException["scope_type"])}
+        </span>
+      ),
+    },
+    {
+      key: "scope_reference",
+      header: "Reference",
+      sortable: true,
+      render: (value: string) => (
+        <span className="font-medium text-sm">{value}</span>
+      ),
+    },
+    {
+      key: "justification",
+      header: "Justification",
+      render: (value: string) => (
+        <span className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
+          {value}
+        </span>
+      ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      sortable: true,
+      width: "140px",
+      align: "center" as const,
+      render: (value: string, row: RiskException) => (
+        <div className="flex items-center justify-center gap-2">
+          <StatusBadge
+            status={mapExceptionStatusToBadgeStatus(value as RiskException["status"])}
+            icon={getStatusIcon(value as RiskException["status"])}
+            size="sm"
+          >
+            {value}
+          </StatusBadge>
+        </div>
+      ),
+    },
+    {
+      key: "created_at",
+      header: "Created",
+      sortable: true,
+      width: "120px",
+      align: "right" as const,
+      render: (value: string) => (
+        <span className="text-sm text-gray-500">
+          {new Date(value).toLocaleDateString()}
+        </span>
+      ),
+    },
+  ];
+
+  const handleRowClick = (row: RiskException) => {
+    setSelectedEx(row);
+    setShowSlideOver(true);
+  };
+
+  // Build timeline events
+  const buildTimeline = (ex: RiskException) => {
+    const events = [];
+
+    // Created event
+    events.push({
+      icon: FileText,
+      iconColor: "text-blue-600 dark:text-blue-400",
+      title: "Exception Requested",
+      description: `Requested by ${ex.created_by || "Unknown"}`,
+      timestamp: new Date(ex.created_at).toLocaleString(),
+    });
+
+    // Approved event
+    if (ex.approved_at && ex.approved_by) {
+      events.push({
+        icon: CheckCircle,
+        iconColor: "text-green-600 dark:text-green-400",
+        title: "Exception Approved",
+        description: `Approved by ${ex.approved_by}`,
+        timestamp: new Date(ex.approved_at).toLocaleString(),
+      });
+    }
+
+    // Denial event
+    if (ex.status === "denied" && ex.denial_reason) {
+      events.push({
+        icon: XCircle,
+        iconColor: "text-red-600 dark:text-red-400",
+        title: "Exception Denied",
+        description: ex.denial_reason,
+        timestamp: new Date(ex.created_at).toLocaleString(), // Using created_at as fallback
+      });
+    }
+
+    // Revoked event
+    if (ex.status === "revoked" && ex.revoked_reason) {
+      events.push({
+        icon: ShieldX,
+        iconColor: "text-orange-600 dark:text-orange-400",
+        title: "Exception Revoked",
+        description: ex.revoked_reason,
+        timestamp: new Date().toLocaleString(), // Current time as fallback
+      });
+    }
+
+    // Expiration event
+    if (ex.status === "approved") {
+      events.push({
+        icon: Calendar,
+        iconColor: isExpiringSoon(ex.expires_at)
+          ? "text-orange-600 dark:text-orange-400"
+          : "text-gray-600 dark:text-gray-400",
+        title: "Expires",
+        description: isExpiringSoon(ex.expires_at) ? "Expiring soon!" : "Future expiration",
+        timestamp: new Date(ex.expires_at).toLocaleString(),
+      });
+    }
+
+    return events;
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Section 1: Header with Breadcrumbs */}
+        <PageHeader
+          title="Risk Exceptions"
+          description="Manage time-boxed security exceptions with approval workflow"
+          breadcrumbs={
+            <Breadcrumb
+              items={[
+                { label: "Govern", href: "/govern" },
+                { label: "Risk Exceptions", current: true },
+              ]}
+            />
+          }
+          action={
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="inline-flex items-center px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg text-sm font-medium transition-colors"
             >
-              <option value="">All Types</option>
-              <option value="cve">CVE</option>
-              <option value="policy_rule">Policy Rule</option>
-              <option value="deployment">Deployment</option>
-              <option value="package">Package</option>
-              <option value="image">Image</option>
-            </select>
+              <Plus className="h-4 w-4 mr-2" />
+              Request Exception
+            </button>
+          }
+        />
+
+        {/* Section 2: Metrics Grid */}
+        <MetricsGrid columns={4} className="mb-6">
+          <StatCard
+            label="Pending Approval"
+            value={metrics.pending}
+            icon={Clock}
+            iconColor="text-yellow-600"
+            valueColor="text-yellow-600 dark:text-yellow-400"
+            description="Awaiting review"
+          />
+          <StatCard
+            label="Approved"
+            value={metrics.approved}
+            icon={ShieldCheck}
+            iconColor="text-green-600"
+            valueColor="text-green-600 dark:text-green-400"
+            description="Active exceptions"
+          />
+          <StatCard
+            label="Denied"
+            value={metrics.denied}
+            icon={ShieldX}
+            iconColor="text-red-600"
+            valueColor="text-red-600 dark:text-red-400"
+            description="Rejected requests"
+          />
+          <StatCard
+            label="Expired"
+            value={metrics.expired}
+            icon={AlertTriangle}
+            iconColor="text-orange-600"
+            valueColor="text-orange-600 dark:text-orange-400"
+            description="Past expiration"
+          />
+        </MetricsGrid>
+
+        {/* Section 3: Filters and Table */}
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          {/* Filter Panel */}
+          <div className="lg:col-span-1">
+            <FilterPanel
+              filters={filterGroups}
+              onReset={handleResetFilters}
+              collapsible={true}
+              defaultCollapsed={false}
+            />
           </div>
 
-          {isLoading ? (
-            <div className="flex items-center justify-center h-64">
-              <Clock className="h-8 w-8 animate-spin text-gray-400" />
+          {/* Exceptions Table */}
+          <div className="lg:col-span-3">
+            <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg overflow-hidden">
+              {isLoading ? (
+                <div className="flex items-center justify-center h-64">
+                  <Spinner size="lg" label="Loading exceptions..." />
+                </div>
+              ) : filteredExceptions.length === 0 ? (
+                <EmptyState
+                  icon={ShieldAlert}
+                  title="No exceptions found"
+                  description="All deployments comply with security policies. No exceptions have been requested."
+                  size="md"
+                />
+              ) : (
+                <Table
+                  columns={columns}
+                  data={filteredExceptions}
+                  keyExtractor={(row) => row.id}
+                  onRowClick={handleRowClick}
+                  hoverable={true}
+                  stickyHeader={true}
+                />
+              )}
             </div>
-          ) : exceptions.length === 0 ? (
-            <EmptyState
-              icon={ShieldAlert}
-              title={`No ${pageTab} exceptions`}
-              description="Risk exceptions will appear here when created"
-            />
-          ) : (
-            <div className="space-y-2">
-              {exceptions.map((ex) => (
-                <ListCard
-                  key={ex.id}
-                  selected={selectedEx?.id === ex.id}
-                  onClick={() => setSelectedEx(ex)}
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">
-                          {getScopeTypeLabel(ex.scope_type)}
+          </div>
+        </div>
+
+        {/* Section 4: SlideOver for Exception Details */}
+        <SlideOver
+          isOpen={showSlideOver}
+          onClose={() => {
+            setShowSlideOver(false);
+            setSelectedEx(null);
+          }}
+          size="lg"
+        >
+          {selectedEx && (
+            <>
+              <SlideOver.Header onClose={() => setShowSlideOver(false)}>
+                <div>
+                  <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+                    {getScopeTypeLabel(selectedEx.scope_type)}: {selectedEx.scope_reference}
+                  </h2>
+                  <div className="mt-2 flex items-center gap-2">
+                    <StatusBadge
+                      status={mapExceptionStatusToBadgeStatus(selectedEx.status)}
+                      icon={getStatusIcon(selectedEx.status)}
+                    >
+                      {selectedEx.status}
+                    </StatusBadge>
+                    {selectedEx.status === "approved" && isExpiringSoon(selectedEx.expires_at) && (
+                      <Badge className="bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">
+                        <AlertTriangle className="h-3 w-3" />
+                        Expiring Soon
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+              </SlideOver.Header>
+
+              <SlideOver.Body>
+                <div className="space-y-6">
+                  {/* Exception Details */}
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">
+                      Details
+                    </h3>
+                    <div className="space-y-3">
+                      <div>
+                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                          Expires At
                         </span>
-                        <span className="font-medium text-sm truncate">
-                          {ex.scope_reference}
-                        </span>
+                        <div className="flex items-center gap-2 mt-1">
+                          <Calendar className="h-4 w-4 text-gray-400" />
+                          <span className="text-sm text-gray-900 dark:text-white">
+                            {new Date(selectedEx.expires_at).toLocaleDateString()}
+                          </span>
+                        </div>
                       </div>
-                      <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-2">
-                        {ex.justification}
-                      </p>
-                      {ex.status === "approved" && isExpiringSoon(ex.expires_at) && (
-                        <div className="flex items-center gap-1 mt-2 text-xs text-orange-600">
-                          <AlertTriangle className="h-3 w-3" />
-                          <span>Expires soon</span>
+
+                      {selectedEx.approved_by && (
+                        <div>
+                          <span className="text-xs text-gray-500 dark:text-gray-400">
+                            Approved By
+                          </span>
+                          <div className="flex items-center gap-2 mt-1">
+                            <User className="h-4 w-4 text-gray-400" />
+                            <span className="text-sm text-gray-900 dark:text-white">
+                              {selectedEx.approved_by}
+                            </span>
+                          </div>
                         </div>
                       )}
                     </div>
-                    <div className="flex flex-col items-end gap-1 ml-4">
-                      <div className="flex items-center gap-1">
-                        {getStatusIcon(ex.status)}
-                        <span
-                          className={cn(
-                            "px-2 py-0.5 text-xs font-medium rounded-full",
-                            getStatusBadgeClass(ex.status)
-                          )}
-                        >
-                          {ex.status}
-                        </span>
-                      </div>
-                      <span className="text-xs text-gray-500">
-                        {new Date(ex.created_at).toLocaleDateString()}
-                      </span>
-                    </div>
                   </div>
-                </ListCard>
-              ))}
-            </div>
-          )}
-        </div>
 
-        {/* Exception Detail */}
-        <div className="lg:w-1/2">
-          {selectedEx ? (
-            <DetailPanel
-              title={`${getScopeTypeLabel(selectedEx.scope_type)}: ${selectedEx.scope_reference}`}
-              onClose={() => setSelectedEx(null)}
-            >
-              <DetailSection title="Status">
-                <DetailRow label="Current Status">
-                  <div className="flex items-center gap-2">
-                    {getStatusIcon(selectedEx.status)}
-                    <span
-                      className={cn(
-                        "px-2 py-0.5 text-xs font-medium rounded-full",
-                        getStatusBadgeClass(selectedEx.status)
-                      )}
-                    >
-                      {selectedEx.status}
-                    </span>
-                  </div>
-                </DetailRow>
-                <DetailRow label="Expires At">
-                  <div className="flex items-center gap-2">
-                    <Calendar className="h-4 w-4" />
-                    <span>{new Date(selectedEx.expires_at).toLocaleDateString()}</span>
-                    {selectedEx.status === "approved" && isExpiringSoon(selectedEx.expires_at) && (
-                      <span className="ml-2 px-2 py-0.5 text-xs font-medium rounded-full bg-orange-100 text-orange-700">
-                        Expiring Soon
-                      </span>
-                    )}
-                  </div>
-                </DetailRow>
-                {selectedEx.approved_by && (
-                  <DetailRow label="Approved By">
-                    <div className="flex items-center gap-2">
-                      <User className="h-4 w-4" />
-                      <span className="text-sm">{selectedEx.approved_by}</span>
-                    </div>
-                  </DetailRow>
-                )}
-                {selectedEx.approved_at && (
-                  <DetailRow label="Approved At">
-                    {new Date(selectedEx.approved_at).toLocaleString()}
-                  </DetailRow>
-                )}
-                {selectedEx.denial_reason && (
-                  <DetailRow label="Denial Reason">
-                    <span className="text-red-600 text-sm">{selectedEx.denial_reason}</span>
-                  </DetailRow>
-                )}
-                {selectedEx.revoked_reason && (
-                  <DetailRow label="Revocation Reason">
-                    <span className="text-red-600 text-sm">{selectedEx.revoked_reason}</span>
-                  </DetailRow>
-                )}
-              </DetailSection>
-
-              <DetailSection title="Request Details">
-                <div className="space-y-4">
+                  {/* Justification */}
                   <div>
-                    <h4 className="font-medium text-sm mb-2 flex items-center gap-2">
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-2 flex items-center gap-2">
                       <FileText className="h-4 w-4" />
                       Justification
-                    </h4>
-                    <div className="prose prose-sm dark:prose-invert max-w-none bg-gray-50 dark:bg-gray-900 p-3 rounded-md">
-                      <p className="text-sm whitespace-pre-wrap">{selectedEx.justification}</p>
+                    </h3>
+                    <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg">
+                      <p className="text-sm text-gray-900 dark:text-white whitespace-pre-wrap">
+                        {selectedEx.justification}
+                      </p>
                     </div>
                   </div>
 
+                  {/* Business Impact */}
                   {selectedEx.business_impact && (
                     <div>
-                      <h4 className="font-medium text-sm mb-2">Business Impact</h4>
-                      <div className="prose prose-sm dark:prose-invert max-w-none bg-blue-50 dark:bg-blue-900/20 p-3 rounded-md">
-                        <p className="text-sm whitespace-pre-wrap">
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-2">
+                        Business Impact
+                      </h3>
+                      <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
+                        <p className="text-sm text-gray-900 dark:text-white whitespace-pre-wrap">
                           {selectedEx.business_impact}
                         </p>
                       </div>
                     </div>
                   )}
 
+                  {/* Mitigation Plan */}
                   {selectedEx.mitigation_plan && (
                     <div>
-                      <h4 className="font-medium text-sm mb-2">Mitigation Plan</h4>
-                      <div className="prose prose-sm dark:prose-invert max-w-none bg-green-50 dark:bg-green-900/20 p-3 rounded-md">
-                        <p className="text-sm whitespace-pre-wrap">
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-2">
+                        Mitigation Plan
+                      </h3>
+                      <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg">
+                        <p className="text-sm text-gray-900 dark:text-white whitespace-pre-wrap">
                           {selectedEx.mitigation_plan}
                         </p>
                       </div>
                     </div>
                   )}
 
-                  {selectedEx.tags && selectedEx.tags.length > 0 && (
-                    <div>
-                      <h4 className="font-medium text-sm mb-2">Tags</h4>
-                      <div className="flex flex-wrap gap-2">
-                        {selectedEx.tags.map((tag, idx) => (
-                          <span
-                            key={idx}
-                            className="px-2 py-1 text-xs rounded-full bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300"
-                          >
-                            {tag}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                  {/* Timeline */}
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">
+                      Exception Lifecycle
+                    </h3>
+                    <Timeline>
+                      {buildTimeline(selectedEx).map((event, idx) => (
+                        <Timeline.Item
+                          key={idx}
+                          icon={event.icon}
+                          iconColor={event.iconColor}
+                          title={event.title}
+                          description={event.description}
+                          timestamp={event.timestamp}
+                        />
+                      ))}
+                    </Timeline>
+                  </div>
                 </div>
-              </DetailSection>
+              </SlideOver.Body>
 
-              {/* Actions */}
-              <div className="pt-4 border-t border-gray-200 dark:border-gray-700 space-y-2">
+              <SlideOver.Footer>
                 {selectedEx.status === "pending" && (
-                  <>
-                    <Button
+                  <div className="flex gap-3 w-full">
+                    <button
                       onClick={() => handleApprove(selectedEx.id)}
                       disabled={approveExceptionMutation.isPending}
-                      className="w-full bg-green-600 hover:bg-green-700"
+                      className="flex-1 inline-flex items-center justify-center px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 text-white rounded-lg text-sm font-medium transition-colors"
                     >
                       <CheckCircle className="h-4 w-4 mr-2" />
-                      Approve Exception
-                    </Button>
-                    <Button
+                      Approve
+                    </button>
+                    <button
                       onClick={() => handleDeny(selectedEx.id)}
                       disabled={denyExceptionMutation.isPending}
-                      className="w-full bg-red-600 hover:bg-red-700"
+                      className="flex-1 inline-flex items-center justify-center px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-gray-300 text-white rounded-lg text-sm font-medium transition-colors"
                     >
                       <XCircle className="h-4 w-4 mr-2" />
-                      Deny Exception
-                    </Button>
-                  </>
+                      Deny
+                    </button>
+                  </div>
                 )}
 
                 {selectedEx.status === "approved" && (
-                  <Button
+                  <button
                     onClick={() => handleRevoke(selectedEx.id)}
                     disabled={revokeExceptionMutation.isPending}
-                    className="w-full bg-orange-600 hover:bg-orange-700"
+                    className="w-full inline-flex items-center justify-center px-4 py-2 bg-orange-600 hover:bg-orange-700 disabled:bg-gray-300 text-white rounded-lg text-sm font-medium transition-colors"
                   >
                     <ShieldX className="h-4 w-4 mr-2" />
                     Revoke Exception
-                  </Button>
+                  </button>
                 )}
-              </div>
-            </DetailPanel>
-          ) : (
-            <EmptyState
-              icon={ShieldAlert}
-              title="Select an exception"
-              description="Click on an exception to view details and take actions"
-            />
+              </SlideOver.Footer>
+            </>
           )}
-        </div>
-      </div>
+        </SlideOver>
 
-      {/* Create Exception Modal */}
-      {showCreateModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6">
-            <h2 className="text-2xl font-bold mb-6">Request Risk Exception</h2>
+        {/* Create Exception Modal */}
+        {showCreateModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white dark:bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6">
+              <h2 className="text-2xl font-bold mb-6">Request Risk Exception</h2>
 
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-2">Scope Type</label>
-                <select
-                  value={createScopeType}
-                  onChange={(e) => setCreateScopeType(e.target.value)}
-                  className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2"
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium mb-2">Scope Type</label>
+                  <select
+                    value={createScopeType}
+                    onChange={(e) => setCreateScopeType(e.target.value)}
+                    className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2"
+                  >
+                    <option value="cve">CVE</option>
+                    <option value="policy_rule">Policy Rule</option>
+                    <option value="deployment">Deployment</option>
+                    <option value="package">Package</option>
+                    <option value="image">Image</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-2">
+                    {createScopeType === "cve" && "CVE ID (e.g., CVE-2024-1234)"}
+                    {createScopeType === "policy_rule" && "Policy Rule Name"}
+                    {createScopeType === "deployment" && "Deployment ID"}
+                    {createScopeType === "package" && "Package Name"}
+                    {createScopeType === "image" && "Image Reference"}
+                  </label>
+                  <input
+                    type="text"
+                    value={createScopeRef}
+                    onChange={(e) => setCreateScopeRef(e.target.value)}
+                    placeholder="Enter reference..."
+                    className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-2">
+                    Justification (minimum 50 characters)
+                  </label>
+                  <textarea
+                    value={createJustification}
+                    onChange={(e) => setCreateJustification(e.target.value)}
+                    placeholder="Explain why this exception is needed..."
+                    rows={4}
+                    className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2"
+                    required
+                  />
+                  <p className="mt-1 text-xs text-gray-600">
+                    {createJustification.length} / 50 characters
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-2">
+                    Business Impact (optional)
+                  </label>
+                  <textarea
+                    value={createBusinessImpact}
+                    onChange={(e) => setCreateBusinessImpact(e.target.value)}
+                    placeholder="Describe the business impact if this is not excepted..."
+                    rows={3}
+                    className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-2">
+                    Mitigation Plan (optional)
+                  </label>
+                  <textarea
+                    value={createMitigationPlan}
+                    onChange={(e) => setCreateMitigationPlan(e.target.value)}
+                    placeholder="Describe compensating controls or mitigation steps..."
+                    rows={3}
+                    className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-2">
+                    Duration (days, max 365)
+                  </label>
+                  <input
+                    type="number"
+                    value={createDurationDays}
+                    onChange={(e) => setCreateDurationDays(parseInt(e.target.value))}
+                    min={1}
+                    max={365}
+                    className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2"
+                    required
+                  />
+                  <p className="mt-1 text-xs text-gray-600">
+                    Exception will expire on{" "}
+                    {new Date(
+                      Date.now() + createDurationDays * 24 * 60 * 60 * 1000
+                    ).toLocaleDateString()}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-3 mt-6">
+                <button
+                  onClick={handleCreateException}
+                  disabled={
+                    createExceptionMutation.isPending ||
+                    !createScopeRef ||
+                    createJustification.length < 50
+                  }
+                  className="flex-1 px-4 py-2 bg-primary-600 hover:bg-primary-700 disabled:bg-gray-300 text-white rounded-lg text-sm font-medium"
                 >
-                  <option value="cve">CVE</option>
-                  <option value="policy_rule">Policy Rule</option>
-                  <option value="deployment">Deployment</option>
-                  <option value="package">Package</option>
-                  <option value="image">Image</option>
-                </select>
+                  {createExceptionMutation.isPending ? "Creating..." : "Request Exception"}
+                </button>
+                <button
+                  onClick={() => {
+                    setShowCreateModal(false);
+                    resetCreateForm();
+                  }}
+                  className="flex-1 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg text-sm font-medium"
+                >
+                  Cancel
+                </button>
               </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  {createScopeType === "cve" && "CVE ID (e.g., CVE-2024-1234)"}
-                  {createScopeType === "policy_rule" && "Policy Rule Name"}
-                  {createScopeType === "deployment" && "Deployment ID"}
-                  {createScopeType === "package" && "Package Name"}
-                  {createScopeType === "image" && "Image Reference"}
-                </label>
-                <input
-                  type="text"
-                  value={createScopeRef}
-                  onChange={(e) => setCreateScopeRef(e.target.value)}
-                  placeholder="Enter reference..."
-                  className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  Justification (minimum 50 characters)
-                </label>
-                <textarea
-                  value={createJustification}
-                  onChange={(e) => setCreateJustification(e.target.value)}
-                  placeholder="Explain why this exception is needed..."
-                  rows={4}
-                  className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2"
-                  required
-                />
-                <p className="mt-1 text-xs text-gray-600">
-                  {createJustification.length} / 50 characters
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  Business Impact (optional)
-                </label>
-                <textarea
-                  value={createBusinessImpact}
-                  onChange={(e) => setCreateBusinessImpact(e.target.value)}
-                  placeholder="Describe the business impact if this is not excepted..."
-                  rows={3}
-                  className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  Mitigation Plan (optional)
-                </label>
-                <textarea
-                  value={createMitigationPlan}
-                  onChange={(e) => setCreateMitigationPlan(e.target.value)}
-                  placeholder="Describe compensating controls or mitigation steps..."
-                  rows={3}
-                  className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  Duration (days, max 365)
-                </label>
-                <input
-                  type="number"
-                  value={createDurationDays}
-                  onChange={(e) => setCreateDurationDays(parseInt(e.target.value))}
-                  min={1}
-                  max={365}
-                  className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2"
-                  required
-                />
-                <p className="mt-1 text-xs text-gray-600">
-                  Exception will expire on{" "}
-                  {new Date(
-                    Date.now() + createDurationDays * 24 * 60 * 60 * 1000
-                  ).toLocaleDateString()}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex gap-3 mt-6">
-              <Button
-                onClick={handleCreateException}
-                disabled={
-                  createExceptionMutation.isPending ||
-                  !createScopeRef ||
-                  createJustification.length < 50
-                }
-                className="flex-1"
-              >
-                {createExceptionMutation.isPending ? "Creating..." : "Request Exception"}
-              </Button>
-              <Button
-                onClick={() => {
-                  setShowCreateModal(false);
-                  resetCreateForm();
-                }}
-                className="flex-1 bg-gray-600 hover:bg-gray-700"
-              >
-                Cancel
-              </Button>
             </div>
           </div>
-        </div>
-      )}
-    </PageLayout>
+        )}
+      </div>
+    </div>
   );
 }

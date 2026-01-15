@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Users,
@@ -8,11 +8,12 @@ import {
   Mail,
   MessageSquare,
   Plus,
-  Edit2,
   Trash2,
   ExternalLink,
   FileText,
   Link as LinkIcon,
+  UserPlus,
+  Shield,
 } from "lucide-react";
 import {
   api,
@@ -22,18 +23,18 @@ import {
   CreateTeamRequest,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import {
-  PageLayout,
-  ListCard,
-  EmptyState,
-  Button,
-  Tabs,
-} from "@/components/ui/page-layout";
-import {
-  DetailPanel,
-  DetailSection,
-  DetailRow,
-} from "@/components/ui/detail-panel";
+
+// New component library imports
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Breadcrumb } from "@/components/ui/Breadcrumb";
+import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
+import { Table } from "@/components/ui/Table";
+import { Badge, StatusBadge } from "@/components/ui/Badge";
+import { SlideOver } from "@/components/ui/SlideOver";
+import { FilterPanel, FilterGroup } from "@/components/ui/FilterPanel";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { Spinner } from "@/components/ui/Spinner";
+import { Button } from "@/components/ui/page-layout";
 
 type PageTab = "services" | "teams";
 
@@ -44,6 +45,10 @@ export default function OwnershipPage() {
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
   const [showCreateServiceModal, setShowCreateServiceModal] = useState(false);
   const [showCreateTeamModal, setShowCreateTeamModal] = useState(false);
+
+  // Filter states
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Service ownership form state
   const [serviceName, setServiceName] = useState("");
@@ -117,6 +122,66 @@ export default function OwnershipPage() {
   const ownerships = ownershipsData?.ownerships || [];
   const teams = teamsData?.teams || [];
 
+  // Filter and search logic
+  const filteredOwnerships = useMemo(() => {
+    let filtered = ownerships;
+
+    // Apply status filter
+    if (statusFilter.length > 0) {
+      filtered = filtered.filter((o) => statusFilter.includes(o.status));
+    }
+
+    // Apply search
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(
+        (o) =>
+          o.service_name.toLowerCase().includes(query) ||
+          o.team_name.toLowerCase().includes(query)
+      );
+    }
+
+    return filtered;
+  }, [ownerships, statusFilter, searchQuery]);
+
+  const filteredTeams = useMemo(() => {
+    let filtered = teams;
+
+    // Apply status filter
+    if (statusFilter.length > 0) {
+      filtered = filtered.filter((t) =>
+        statusFilter.includes(t.active ? "active" : "inactive")
+      );
+    }
+
+    // Apply search
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(
+        (t) =>
+          t.name.toLowerCase().includes(query) ||
+          (t.display_name && t.display_name.toLowerCase().includes(query)) ||
+          (t.email && t.email.toLowerCase().includes(query))
+      );
+    }
+
+    return filtered;
+  }, [teams, statusFilter, searchQuery]);
+
+  // Calculate metrics
+  const servicesMetrics = {
+    total: ownerships.length,
+    active: ownerships.filter((o) => o.status === "active").length,
+    teams: new Set(ownerships.map((o) => o.team_name)).size,
+  };
+
+  const teamsMetrics = {
+    total: teams.length,
+    active: teams.filter((t) => t.active).length,
+    withEmail: teams.filter((t) => t.email).length,
+    withSlack: teams.filter((t) => t.slack_channel).length,
+  };
+
   const resetServiceForm = () => {
     setServiceName("");
     setTeamName("");
@@ -181,378 +246,677 @@ export default function OwnershipPage() {
     }
   };
 
+  const resetFilters = () => {
+    setStatusFilter([]);
+    setSearchQuery("");
+  };
+
+  // Service ownership table columns
+  const serviceColumns = [
+    {
+      key: "service_name",
+      header: "Service Name",
+      sortable: true,
+      render: (value: string, row: ServiceOwnership) => (
+        <div className="flex items-center gap-2">
+          <Building2 className="h-4 w-4 text-blue-600" />
+          <span className="font-medium">{value}</span>
+        </div>
+      ),
+    },
+    {
+      key: "team_name",
+      header: "Team",
+      sortable: true,
+      render: (value: string) => (
+        <div className="flex items-center gap-2">
+          <Users className="h-4 w-4 text-gray-500" />
+          <span>{value}</span>
+        </div>
+      ),
+    },
+    {
+      key: "team_slack_channel",
+      header: "Slack",
+      render: (value: string) =>
+        value ? (
+          <div className="flex items-center gap-1 text-sm text-gray-600">
+            <MessageSquare className="h-3 w-3" />
+            <span>{value}</span>
+          </div>
+        ) : (
+          <span className="text-gray-400">-</span>
+        ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      sortable: true,
+      render: (value: string) => (
+        <StatusBadge status={value as any} size="sm">
+          {value}
+        </StatusBadge>
+      ),
+    },
+  ];
+
+  // Teams table columns
+  const teamColumns = [
+    {
+      key: "name",
+      header: "Team Name",
+      sortable: true,
+      render: (value: string, row: Team) => (
+        <div className="flex items-center gap-2">
+          <Users className="h-4 w-4 text-purple-600" />
+          <span className="font-medium">{row.display_name || value}</span>
+        </div>
+      ),
+    },
+    {
+      key: "email",
+      header: "Email",
+      render: (value: string) =>
+        value ? (
+          <div className="flex items-center gap-1 text-sm text-gray-600">
+            <Mail className="h-3 w-3" />
+            <span>{value}</span>
+          </div>
+        ) : (
+          <span className="text-gray-400">-</span>
+        ),
+    },
+    {
+      key: "slack_channel",
+      header: "Slack",
+      render: (value: string) =>
+        value ? (
+          <div className="flex items-center gap-1 text-sm text-gray-600">
+            <MessageSquare className="h-3 w-3" />
+            <span>{value}</span>
+          </div>
+        ) : (
+          <span className="text-gray-400">-</span>
+        ),
+    },
+    {
+      key: "active",
+      header: "Status",
+      sortable: true,
+      render: (value: boolean) => (
+        <StatusBadge status={value ? "success" : "error"} size="sm">
+          {value ? "Active" : "Inactive"}
+        </StatusBadge>
+      ),
+    },
+  ];
+
+  // Filter configuration
+  const serviceFilters: FilterGroup[] = [
+    {
+      id: "search",
+      label: "Search",
+      type: "search",
+      value: searchQuery,
+      onChange: (value) => setSearchQuery(value as string),
+    },
+    {
+      id: "status",
+      label: "Status",
+      type: "checkbox",
+      options: [
+        { label: "Active", value: "active", count: servicesMetrics.active },
+        { label: "Inactive", value: "inactive", count: servicesMetrics.total - servicesMetrics.active },
+      ],
+      value: statusFilter,
+      onChange: (value) => setStatusFilter(value as string[]),
+    },
+  ];
+
+  const teamFilters: FilterGroup[] = [
+    {
+      id: "search",
+      label: "Search",
+      type: "search",
+      value: searchQuery,
+      onChange: (value) => setSearchQuery(value as string),
+    },
+    {
+      id: "status",
+      label: "Status",
+      type: "checkbox",
+      options: [
+        { label: "Active", value: "active", count: teamsMetrics.active },
+        { label: "Inactive", value: "inactive", count: teamsMetrics.total - teamsMetrics.active },
+      ],
+      value: statusFilter,
+      onChange: (value) => setStatusFilter(value as string[]),
+    },
+  ];
+
   return (
-    <PageLayout
-      title="Ownership & Teams"
-      subtitle="Manage service ownership and team accountability"
-      icon={<Users className="h-8 w-8" />}
-      action={
-        <Button
-          onClick={() =>
-            pageTab === "services" ? setShowCreateServiceModal(true) : setShowCreateTeamModal(true)
-          }
-        >
-          <Plus className="h-4 w-4 mr-2" />
-          {pageTab === "services" ? "Assign Service" : "Create Team"}
-        </Button>
-      }
-    >
-      <Tabs
-        tabs={[
-          { id: "services", label: "Service Ownership", icon: Building2 },
-          { id: "teams", label: "Teams", icon: Users },
-        ]}
-        activeTab={pageTab}
-        onChange={(tab) => setPageTab(tab as PageTab)}
+    <div className="h-full flex flex-col">
+      {/* Section 1: Header with Breadcrumb */}
+      <PageHeader
+        title="Teams & Ownership"
+        description="Manage service ownership and team accountability"
+        breadcrumbs={
+          <Breadcrumb
+            items={[
+              { label: "Govern", href: "/govern" },
+              { label: "Teams & Ownership", current: true },
+            ]}
+          />
+        }
+        action={
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => setPageTab(pageTab === "services" ? "teams" : "services")}
+            >
+              <Shield className="h-4 w-4" />
+              View {pageTab === "services" ? "Teams" : "Services"}
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() =>
+                pageTab === "services" ? setShowCreateServiceModal(true) : setShowCreateTeamModal(true)
+              }
+            >
+              <Plus className="h-4 w-4" />
+              {pageTab === "services" ? "Assign Service" : "Create Team"}
+            </Button>
+          </div>
+        }
       />
 
-      {pageTab === "services" && (
-        <div className="flex flex-col lg:flex-row gap-6 h-full">
-          {/* Service Ownership List */}
-          <div className="lg:w-1/2">
-            {loadingOwnerships ? (
-              <div className="flex items-center justify-center h-64">
-                <Users className="h-8 w-8 animate-spin text-gray-400" />
+      {/* Section 2: Metrics */}
+      <div className="px-6 pb-6">
+        {pageTab === "services" ? (
+          <MetricsGrid columns={4}>
+            <StatCard
+              label="Total Services"
+              value={servicesMetrics.total}
+              icon={Building2}
+              iconColor="text-blue-600"
+            />
+            <StatCard
+              label="Active Services"
+              value={servicesMetrics.active}
+              icon={Shield}
+              iconColor="text-green-600"
+            />
+            <StatCard
+              label="Unique Teams"
+              value={servicesMetrics.teams}
+              icon={Users}
+              iconColor="text-purple-600"
+            />
+            <StatCard
+              label="Pending Assignments"
+              value={servicesMetrics.total - servicesMetrics.active}
+              icon={UserPlus}
+              iconColor="text-orange-600"
+            />
+          </MetricsGrid>
+        ) : (
+          <MetricsGrid columns={4}>
+            <StatCard
+              label="Total Teams"
+              value={teamsMetrics.total}
+              icon={Users}
+              iconColor="text-purple-600"
+            />
+            <StatCard
+              label="Active Teams"
+              value={teamsMetrics.active}
+              icon={Shield}
+              iconColor="text-green-600"
+            />
+            <StatCard
+              label="With Email"
+              value={teamsMetrics.withEmail}
+              icon={Mail}
+              iconColor="text-blue-600"
+            />
+            <StatCard
+              label="With Slack"
+              value={teamsMetrics.withSlack}
+              icon={MessageSquare}
+              iconColor="text-indigo-600"
+            />
+          </MetricsGrid>
+        )}
+      </div>
+
+      {/* Section 3: Filters & Content */}
+      <div className="flex-1 flex gap-6 px-6 pb-6 overflow-hidden">
+        {/* Filters */}
+        <div className="w-64 flex-shrink-0">
+          <FilterPanel
+            filters={pageTab === "services" ? serviceFilters : teamFilters}
+            onReset={resetFilters}
+          />
+        </div>
+
+        {/* Section 4: Data Table */}
+        <div className="flex-1 overflow-hidden">
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg h-full flex flex-col">
+            {pageTab === "services" ? (
+              loadingOwnerships ? (
+                <div className="flex items-center justify-center h-full">
+                  <Spinner size="lg" label="Loading services..." />
+                </div>
+              ) : filteredOwnerships.length === 0 ? (
+                <EmptyState
+                  icon={Building2}
+                  title={searchQuery || statusFilter.length > 0 ? "No services found" : "No service ownership assigned"}
+                  description={
+                    searchQuery || statusFilter.length > 0
+                      ? "Try adjusting your filters"
+                      : "Assign services to teams to enable accountability and routing"
+                  }
+                  action={
+                    searchQuery || statusFilter.length > 0 ? (
+                      <Button variant="secondary" onClick={resetFilters}>
+                        Clear Filters
+                      </Button>
+                    ) : (
+                      <Button variant="primary" onClick={() => setShowCreateServiceModal(true)}>
+                        <Plus className="h-4 w-4" />
+                        Assign Service
+                      </Button>
+                    )
+                  }
+                />
+              ) : (
+                <div className="overflow-auto">
+                  <Table
+                    columns={serviceColumns}
+                    data={filteredOwnerships}
+                    keyExtractor={(row) => row.id}
+                    onRowClick={(row) => setSelectedOwnership(row)}
+                    stickyHeader
+                    hoverable
+                  />
+                </div>
+              )
+            ) : loadingTeams ? (
+              <div className="flex items-center justify-center h-full">
+                <Spinner size="lg" label="Loading teams..." />
               </div>
-            ) : ownerships.length === 0 ? (
+            ) : filteredTeams.length === 0 ? (
               <EmptyState
-                icon={Building2}
-                title="No service ownership assigned"
-                description="Assign services to teams to enable accountability and routing"
+                icon={Users}
+                title={searchQuery || statusFilter.length > 0 ? "No teams found" : "No teams created"}
+                description={
+                  searchQuery || statusFilter.length > 0
+                    ? "Try adjusting your filters"
+                    : "Create teams to organize service ownership"
+                }
+                action={
+                  searchQuery || statusFilter.length > 0 ? (
+                    <Button variant="secondary" onClick={resetFilters}>
+                      Clear Filters
+                    </Button>
+                  ) : (
+                    <Button variant="primary" onClick={() => setShowCreateTeamModal(true)}>
+                      <Plus className="h-4 w-4" />
+                      Create Team
+                    </Button>
+                  )
+                }
               />
             ) : (
-              <div className="space-y-2">
-                {ownerships.map((ownership) => (
-                  <ListCard
-                    key={ownership.id}
-                    selected={selectedOwnership?.id === ownership.id}
-                    onClick={() => setSelectedOwnership(ownership)}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <Building2 className="h-4 w-4 text-blue-600" />
-                          <span className="font-medium text-sm">
-                            {ownership.service_name}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
-                          <Users className="h-3 w-3" />
-                          <span>{ownership.team_name}</span>
-                        </div>
-                        {ownership.team_slack_channel && (
-                          <div className="flex items-center gap-1 mt-1 text-xs text-gray-500">
-                            <MessageSquare className="h-3 w-3" />
-                            <span>{ownership.team_slack_channel}</span>
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 ml-4">
-                        <span
-                          className={cn(
-                            "px-2 py-0.5 text-xs font-medium rounded-full",
-                            ownership.status === "active"
-                              ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                              : "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400"
-                          )}
-                        >
-                          {ownership.status}
-                        </span>
-                      </div>
-                    </div>
-                  </ListCard>
-                ))}
+              <div className="overflow-auto">
+                <Table
+                  columns={teamColumns}
+                  data={filteredTeams}
+                  keyExtractor={(row) => row.id}
+                  onRowClick={(row) => setSelectedTeam(row)}
+                  stickyHeader
+                  hoverable
+                />
               </div>
             )}
           </div>
+        </div>
+      </div>
 
-          {/* Service Ownership Detail */}
-          <div className="lg:w-1/2">
-            {selectedOwnership ? (
-              <DetailPanel
-                title={selectedOwnership.service_name}
-                onClose={() => setSelectedOwnership(null)}
-              >
-                <DetailSection title="Team Information">
-                  <DetailRow label="Team Name">
-                    <div className="flex items-center gap-2">
-                      <Users className="h-4 w-4" />
-                      <span>{selectedOwnership.team_name}</span>
-                    </div>
-                  </DetailRow>
-                  {selectedOwnership.team_email && (
-                    <DetailRow label="Team Email">
-                      <a
-                        href={`mailto:${selectedOwnership.team_email}`}
-                        className="flex items-center gap-1 text-blue-600 hover:underline"
-                      >
-                        <Mail className="h-4 w-4" />
-                        {selectedOwnership.team_email}
-                      </a>
-                    </DetailRow>
-                  )}
-                  {selectedOwnership.team_slack_channel && (
-                    <DetailRow label="Slack Channel">
-                      <div className="flex items-center gap-1">
-                        <MessageSquare className="h-4 w-4" />
-                        <span>{selectedOwnership.team_slack_channel}</span>
+      {/* Service Ownership Detail SlideOver */}
+      <SlideOver
+        isOpen={!!selectedOwnership}
+        onClose={() => setSelectedOwnership(null)}
+        size="lg"
+      >
+        {selectedOwnership && (
+          <>
+            <SlideOver.Header onClose={() => setSelectedOwnership(null)}>
+              <div>
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white">
+                  {selectedOwnership.service_name}
+                </h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                  Service Ownership Details
+                </p>
+              </div>
+            </SlideOver.Header>
+
+            <SlideOver.Body>
+              <div className="space-y-6">
+                {/* Team Information */}
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">
+                    Team Information
+                  </h3>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                        Team Name
+                      </label>
+                      <div className="flex items-center gap-2 mt-1">
+                        <Users className="h-4 w-4 text-gray-400" />
+                        <span className="text-sm text-gray-900 dark:text-white">
+                          {selectedOwnership.team_name}
+                        </span>
                       </div>
-                    </DetailRow>
-                  )}
-                </DetailSection>
+                    </div>
+                    {selectedOwnership.team_email && (
+                      <div>
+                        <label className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                          Team Email
+                        </label>
+                        <a
+                          href={`mailto:${selectedOwnership.team_email}`}
+                          className="flex items-center gap-2 mt-1 text-blue-600 hover:underline"
+                        >
+                          <Mail className="h-4 w-4" />
+                          <span className="text-sm">{selectedOwnership.team_email}</span>
+                        </a>
+                      </div>
+                    )}
+                    {selectedOwnership.team_slack_channel && (
+                      <div>
+                        <label className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                          Slack Channel
+                        </label>
+                        <div className="flex items-center gap-2 mt-1">
+                          <MessageSquare className="h-4 w-4 text-gray-400" />
+                          <span className="text-sm text-gray-900 dark:text-white">
+                            {selectedOwnership.team_slack_channel}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
 
-                <DetailSection title="Contacts">
-                  {selectedOwnership.primary_contact_email && (
-                    <DetailRow label="Primary Contact">
-                      <a
-                        href={`mailto:${selectedOwnership.primary_contact_email}`}
-                        className="text-blue-600 hover:underline"
-                      >
-                        {selectedOwnership.primary_contact_email}
-                      </a>
-                    </DetailRow>
-                  )}
-                  {selectedOwnership.secondary_contact_email && (
-                    <DetailRow label="Secondary Contact">
-                      <a
-                        href={`mailto:${selectedOwnership.secondary_contact_email}`}
-                        className="text-blue-600 hover:underline"
-                      >
-                        {selectedOwnership.secondary_contact_email}
-                      </a>
-                    </DetailRow>
-                  )}
-                </DetailSection>
+                {/* Contacts */}
+                {(selectedOwnership.primary_contact_email || selectedOwnership.secondary_contact_email) && (
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">
+                      Contacts
+                    </h3>
+                    <div className="space-y-3">
+                      {selectedOwnership.primary_contact_email && (
+                        <div>
+                          <label className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                            Primary Contact
+                          </label>
+                          <a
+                            href={`mailto:${selectedOwnership.primary_contact_email}`}
+                            className="block mt-1 text-sm text-blue-600 hover:underline"
+                          >
+                            {selectedOwnership.primary_contact_email}
+                          </a>
+                        </div>
+                      )}
+                      {selectedOwnership.secondary_contact_email && (
+                        <div>
+                          <label className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                            Secondary Contact
+                          </label>
+                          <a
+                            href={`mailto:${selectedOwnership.secondary_contact_email}`}
+                            className="block mt-1 text-sm text-blue-600 hover:underline"
+                          >
+                            {selectedOwnership.secondary_contact_email}
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
 
-                <DetailSection title="Links">
-                  {selectedOwnership.repository_url && (
-                    <DetailRow label="Repository">
-                      <a
-                        href={selectedOwnership.repository_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-blue-600 hover:underline"
-                      >
-                        <LinkIcon className="h-3 w-3" />
-                        {selectedOwnership.repository_url}
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
-                    </DetailRow>
-                  )}
-                  {selectedOwnership.documentation_url && (
-                    <DetailRow label="Documentation">
-                      <a
-                        href={selectedOwnership.documentation_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-blue-600 hover:underline"
-                      >
-                        <FileText className="h-3 w-3" />
-                        {selectedOwnership.documentation_url}
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
-                    </DetailRow>
-                  )}
-                  {selectedOwnership.oncall_url && (
-                    <DetailRow label="On-Call">
-                      <a
-                        href={selectedOwnership.oncall_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-blue-600 hover:underline"
-                      >
-                        {selectedOwnership.oncall_url}
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
-                    </DetailRow>
-                  )}
-                </DetailSection>
+                {/* Links */}
+                {(selectedOwnership.repository_url ||
+                  selectedOwnership.documentation_url ||
+                  selectedOwnership.oncall_url) && (
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">
+                      Links
+                    </h3>
+                    <div className="space-y-3">
+                      {selectedOwnership.repository_url && (
+                        <div>
+                          <label className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                            Repository
+                          </label>
+                          <a
+                            href={selectedOwnership.repository_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1 mt-1 text-sm text-blue-600 hover:underline"
+                          >
+                            <LinkIcon className="h-3 w-3" />
+                            {selectedOwnership.repository_url}
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                        </div>
+                      )}
+                      {selectedOwnership.documentation_url && (
+                        <div>
+                          <label className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                            Documentation
+                          </label>
+                          <a
+                            href={selectedOwnership.documentation_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1 mt-1 text-sm text-blue-600 hover:underline"
+                          >
+                            <FileText className="h-3 w-3" />
+                            {selectedOwnership.documentation_url}
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                        </div>
+                      )}
+                      {selectedOwnership.oncall_url && (
+                        <div>
+                          <label className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                            On-Call
+                          </label>
+                          <a
+                            href={selectedOwnership.oncall_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1 mt-1 text-sm text-blue-600 hover:underline"
+                          >
+                            {selectedOwnership.oncall_url}
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
 
+                {/* Description */}
                 {selectedOwnership.description && (
-                  <DetailSection title="Description">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">
+                      Description
+                    </h3>
                     <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
                       {selectedOwnership.description}
                     </p>
-                  </DetailSection>
+                  </div>
                 )}
 
+                {/* Tags */}
                 {selectedOwnership.tags && selectedOwnership.tags.length > 0 && (
-                  <DetailSection title="Tags">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">
+                      Tags
+                    </h3>
                     <div className="flex flex-wrap gap-2">
                       {selectedOwnership.tags.map((tag, idx) => (
-                        <span
-                          key={idx}
-                          className="px-2 py-1 text-xs rounded-full bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300"
-                        >
-                          {tag}
-                        </span>
+                        <Badge key={idx}>{tag}</Badge>
                       ))}
                     </div>
-                  </DetailSection>
+                  </div>
                 )}
-
-                <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
-                  <Button
-                    onClick={() => handleDeleteOwnership(selectedOwnership.id)}
-                    disabled={deleteOwnershipMutation.isPending}
-                    className="w-full bg-red-600 hover:bg-red-700"
-                  >
-                    <Trash2 className="h-4 w-4 mr-2" />
-                    Delete Ownership
-                  </Button>
-                </div>
-              </DetailPanel>
-            ) : (
-              <EmptyState
-                icon={Building2}
-                title="Select a service"
-                description="Click on a service to view ownership details"
-              />
-            )}
-          </div>
-        </div>
-      )}
-
-      {pageTab === "teams" && (
-        <div className="flex flex-col lg:flex-row gap-6 h-full">
-          {/* Teams List */}
-          <div className="lg:w-1/2">
-            {loadingTeams ? (
-              <div className="flex items-center justify-center h-64">
-                <Users className="h-8 w-8 animate-spin text-gray-400" />
               </div>
-            ) : teams.length === 0 ? (
-              <EmptyState
-                icon={Users}
-                title="No teams created"
-                description="Create teams to organize service ownership"
-              />
-            ) : (
-              <div className="space-y-2">
-                {teams.map((team) => (
-                  <ListCard
-                    key={team.id}
-                    selected={selectedTeam?.id === team.id}
-                    onClick={() => setSelectedTeam(team)}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <Users className="h-4 w-4 text-purple-600" />
-                          <span className="font-medium text-sm">
-                            {team.display_name || team.name}
-                          </span>
-                        </div>
-                        {team.email && (
-                          <div className="flex items-center gap-1 text-xs text-gray-600 dark:text-gray-400">
-                            <Mail className="h-3 w-3" />
-                            <span>{team.email}</span>
-                          </div>
-                        )}
-                        {team.slack_channel && (
-                          <div className="flex items-center gap-1 mt-1 text-xs text-gray-500">
-                            <MessageSquare className="h-3 w-3" />
-                            <span>{team.slack_channel}</span>
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 ml-4">
-                        <span
-                          className={cn(
-                            "px-2 py-0.5 text-xs font-medium rounded-full",
-                            team.active
-                              ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                              : "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400"
-                          )}
-                        >
-                          {team.active ? "active" : "inactive"}
-                        </span>
-                      </div>
-                    </div>
-                  </ListCard>
-                ))}
-              </div>
-            )}
-          </div>
+            </SlideOver.Body>
 
-          {/* Team Detail */}
-          <div className="lg:w-1/2">
-            {selectedTeam ? (
-              <DetailPanel
-                title={selectedTeam.display_name || selectedTeam.name}
-                onClose={() => setSelectedTeam(null)}
+            <SlideOver.Footer align="between">
+              <Button variant="secondary" onClick={() => setSelectedOwnership(null)}>
+                Close
+              </Button>
+              <Button
+                variant="danger"
+                onClick={() => handleDeleteOwnership(selectedOwnership.id)}
+                disabled={deleteOwnershipMutation.isPending}
               >
-                <DetailSection title="Team Information">
-                  <DetailRow label="Name">{selectedTeam.name}</DetailRow>
-                  {selectedTeam.display_name && (
-                    <DetailRow label="Display Name">{selectedTeam.display_name}</DetailRow>
-                  )}
-                  {selectedTeam.email && (
-                    <DetailRow label="Email">
-                      <a
-                        href={`mailto:${selectedTeam.email}`}
-                        className="text-blue-600 hover:underline"
-                      >
-                        {selectedTeam.email}
-                      </a>
-                    </DetailRow>
-                  )}
-                  {selectedTeam.slack_channel && (
-                    <DetailRow label="Slack Channel">{selectedTeam.slack_channel}</DetailRow>
-                  )}
-                  {selectedTeam.pagerduty_integration_key && (
-                    <DetailRow label="PagerDuty">
-                      <span className="text-xs font-mono bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">
-                        Configured
-                      </span>
-                    </DetailRow>
-                  )}
-                </DetailSection>
+                <Trash2 className="h-4 w-4" />
+                Delete
+              </Button>
+            </SlideOver.Footer>
+          </>
+        )}
+      </SlideOver>
 
+      {/* Team Detail SlideOver */}
+      <SlideOver
+        isOpen={!!selectedTeam}
+        onClose={() => setSelectedTeam(null)}
+        size="lg"
+      >
+        {selectedTeam && (
+          <>
+            <SlideOver.Header onClose={() => setSelectedTeam(null)}>
+              <div>
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white">
+                  {selectedTeam.display_name || selectedTeam.name}
+                </h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Team Details</p>
+              </div>
+            </SlideOver.Header>
+
+            <SlideOver.Body>
+              <div className="space-y-6">
+                {/* Team Information */}
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">
+                    Team Information
+                  </h3>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                        Name
+                      </label>
+                      <p className="text-sm text-gray-900 dark:text-white mt-1">
+                        {selectedTeam.name}
+                      </p>
+                    </div>
+                    {selectedTeam.display_name && (
+                      <div>
+                        <label className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                          Display Name
+                        </label>
+                        <p className="text-sm text-gray-900 dark:text-white mt-1">
+                          {selectedTeam.display_name}
+                        </p>
+                      </div>
+                    )}
+                    {selectedTeam.email && (
+                      <div>
+                        <label className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                          Email
+                        </label>
+                        <a
+                          href={`mailto:${selectedTeam.email}`}
+                          className="block mt-1 text-sm text-blue-600 hover:underline"
+                        >
+                          {selectedTeam.email}
+                        </a>
+                      </div>
+                    )}
+                    {selectedTeam.slack_channel && (
+                      <div>
+                        <label className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                          Slack Channel
+                        </label>
+                        <p className="text-sm text-gray-900 dark:text-white mt-1">
+                          {selectedTeam.slack_channel}
+                        </p>
+                      </div>
+                    )}
+                    {selectedTeam.pagerduty_integration_key && (
+                      <div>
+                        <label className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                          PagerDuty
+                        </label>
+                        <Badge className="mt-1">Configured</Badge>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Description */}
                 {selectedTeam.description && (
-                  <DetailSection title="Description">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">
+                      Description
+                    </h3>
                     <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
                       {selectedTeam.description}
                     </p>
-                  </DetailSection>
+                  </div>
                 )}
 
+                {/* Tags */}
                 {selectedTeam.tags && selectedTeam.tags.length > 0 && (
-                  <DetailSection title="Tags">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">
+                      Tags
+                    </h3>
                     <div className="flex flex-wrap gap-2">
                       {selectedTeam.tags.map((tag, idx) => (
-                        <span
-                          key={idx}
-                          className="px-2 py-1 text-xs rounded-full bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300"
-                        >
-                          {tag}
-                        </span>
+                        <Badge key={idx}>{tag}</Badge>
                       ))}
                     </div>
-                  </DetailSection>
+                  </div>
                 )}
+              </div>
+            </SlideOver.Body>
 
-                <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
-                  <Button
-                    onClick={() => handleDeleteTeam(selectedTeam.id)}
-                    disabled={deleteTeamMutation.isPending}
-                    className="w-full bg-red-600 hover:bg-red-700"
-                  >
-                    <Trash2 className="h-4 w-4 mr-2" />
-                    Delete Team
-                  </Button>
-                </div>
-              </DetailPanel>
-            ) : (
-              <EmptyState
-                icon={Users}
-                title="Select a team"
-                description="Click on a team to view details"
-              />
-            )}
-          </div>
-        </div>
-      )}
+            <SlideOver.Footer align="between">
+              <Button variant="secondary" onClick={() => setSelectedTeam(null)}>
+                Close
+              </Button>
+              <Button
+                variant="danger"
+                onClick={() => handleDeleteTeam(selectedTeam.id)}
+                disabled={deleteTeamMutation.isPending}
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete
+              </Button>
+            </SlideOver.Footer>
+          </>
+        )}
+      </SlideOver>
 
       {/* Create Service Ownership Modal */}
       {showCreateServiceModal && (
@@ -665,7 +1029,8 @@ export default function OwnershipPage() {
                   setShowCreateServiceModal(false);
                   resetServiceForm();
                 }}
-                className="flex-1 bg-gray-600 hover:bg-gray-700"
+                variant="secondary"
+                className="flex-1"
               >
                 Cancel
               </Button>
@@ -754,7 +1119,8 @@ export default function OwnershipPage() {
                   setShowCreateTeamModal(false);
                   resetTeamForm();
                 }}
-                className="flex-1 bg-gray-600 hover:bg-gray-700"
+                variant="secondary"
+                className="flex-1"
               >
                 Cancel
               </Button>
@@ -762,6 +1128,6 @@ export default function OwnershipPage() {
           </div>
         </div>
       )}
-    </PageLayout>
+    </div>
   );
 }

@@ -15,7 +15,9 @@ import {
   Network,
   Check,
   ChevronRight,
+  ChevronDown,
   Lock,
+  Gauge,
   Code,
   Pencil,
   X,
@@ -25,23 +27,21 @@ import {
 } from "lucide-react";
 import { api, Container, SecurityHeaders, RateLimit } from "@/lib/api";
 import { formatRelativeTime, cn } from "@/lib/utils";
+import { AlertBar } from "@/components/ui/alert-bar";
 import { SSLWizard } from "@/components/ssl-wizard";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { Breadcrumb } from "@/components/ui/Breadcrumb";
-import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
-import { Table } from "@/components/ui/Table";
-import { SlideOver } from "@/components/ui/SlideOver";
-import { Badge } from "@/components/ui/Badge";
-import { StatusIndicator } from "@/components/ui/StatusIndicator";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { Spinner } from "@/components/ui/Spinner";
-import { Card } from "@/components/ui/Card";
 import {
   PageLayout,
+  ListCard,
+  EmptyState,
   Button,
   Tabs,
   Input,
 } from "@/components/ui/page-layout";
+import {
+  DetailPanel,
+  DetailSection,
+  DetailRow,
+} from "@/components/ui/detail-panel";
 
 interface ProxyHost {
   id: string;
@@ -122,6 +122,31 @@ export default function ProxiesPage() {
   const [sslWizardDomain, setSSLWizardDomain] = useState("");
   const [sslWizardProxyId, setSSLWizardProxyId] = useState("");
 
+  // Proxy settings panel state
+  const [showProxySettings, setShowProxySettings] = useState(false);
+  const [domainInput, setDomainInput] = useState("");
+  const [sslEnabled, setSSLEnabled] = useState(true);
+  const [forceSSL, setForceSSL] = useState(true);
+  const [http2Enabled, setHTTP2Enabled] = useState(true);
+  const [domainHasChanges, setDomainHasChanges] = useState(false);
+
+  // Domain setup wizard state
+  type WizardStep = "domain" | "ssl" | "complete";
+  const [showDomainWizard, setShowDomainWizard] = useState(false);
+  const [wizardStep, setWizardStep] = useState<WizardStep>("domain");
+  const [wizardDomain, setWizardDomain] = useState("");
+  const [wizardSSLEnabled, setWizardSSLEnabled] = useState(true);
+  const [wizardForceSSL, setWizardForceSSL] = useState(true);
+  const [wizardHTTP2, setWizardHTTP2] = useState(true);
+  const [certCheckLoading, setCertCheckLoading] = useState(false);
+  const [certCheckResult, setCertCheckResult] = useState<{
+    exists: boolean;
+    expires_at?: string;
+    issuer?: string;
+    days_left?: number;
+    error?: string;
+  } | null>(null);
+
   // Fetch agents
   const { data: agents } = useQuery({
     queryKey: ["agents"],
@@ -165,6 +190,93 @@ export default function ProxiesPage() {
   });
 
   const activeAgents = agents?.filter((a) => a.status === "active") || [];
+
+  // Fetch InfraPilot domain settings
+  const { data: domainSettings, isLoading: domainLoading } = useQuery({
+    queryKey: ["infrapilotDomain"],
+    queryFn: () => api.getInfraPilotDomain(),
+  });
+
+  // Update domain form when settings load
+  useEffect(() => {
+    if (domainSettings?.domain) {
+      setDomainInput(domainSettings.domain);
+      setSSLEnabled(domainSettings.ssl_enabled);
+      setForceSSL(domainSettings.force_ssl);
+      setHTTP2Enabled(domainSettings.http2_enabled);
+    }
+  }, [domainSettings]);
+
+  // Domain save mutation
+  const domainSaveMutation = useMutation({
+    mutationFn: () =>
+      api.updateInfraPilotDomain({
+        domain: domainInput,
+        ssl_enabled: sslEnabled,
+        force_ssl: forceSSL,
+        http2_enabled: http2Enabled,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["infrapilotDomain"] });
+      setDomainHasChanges(false);
+    },
+  });
+
+  // Wizard save mutation
+  const wizardSaveMutation = useMutation({
+    mutationFn: () =>
+      api.updateInfraPilotDomain({
+        domain: wizardDomain,
+        ssl_enabled: wizardSSLEnabled,
+        force_ssl: wizardForceSSL,
+        http2_enabled: wizardHTTP2,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["infrapilotDomain"] });
+      setWizardStep("complete");
+    },
+  });
+
+  // Wizard helper functions
+  const openDomainWizard = () => {
+    setWizardDomain(domainSettings?.domain || "");
+    setWizardSSLEnabled(domainSettings?.ssl_enabled ?? true);
+    setWizardForceSSL(domainSettings?.force_ssl ?? true);
+    setWizardHTTP2(domainSettings?.http2_enabled ?? true);
+    setWizardStep("domain");
+    setCertCheckResult(null);
+    setShowDomainWizard(true);
+  };
+
+  const closeDomainWizard = () => {
+    setShowDomainWizard(false);
+    setWizardStep("domain");
+    setCertCheckResult(null);
+  };
+
+  const checkSSLCertificate = async () => {
+    if (!wizardDomain) return;
+    setCertCheckLoading(true);
+    setCertCheckResult(null);
+    try {
+      const result = await api.checkSSL(wizardDomain);
+      setCertCheckResult(result);
+    } catch {
+      setCertCheckResult({ exists: false, error: "Failed to check certificate" });
+    } finally {
+      setCertCheckLoading(false);
+    }
+  };
+
+  // Nginx test mutation
+  const nginxTestMutation = useMutation({
+    mutationFn: () => (selectedAgent ? api.testNginxConfig(selectedAgent) : Promise.reject("No agent")),
+  });
+
+  // Nginx reload mutation
+  const nginxReloadMutation = useMutation({
+    mutationFn: () => (selectedAgent ? api.reloadNginx(selectedAgent) : Promise.reject("No agent")),
+  });
 
   // Auto-select first active agent
   useEffect(() => {
@@ -349,33 +461,27 @@ export default function ProxiesPage() {
     }
   };
 
-  const getSSLStatus = (proxy: ProxyHost): "healthy" | "warning" | "critical" => {
-    if (!proxy.ssl_enabled) return "warning";
+  const getSSLIcon = (proxy: ProxyHost) => {
+    if (!proxy.ssl_enabled) return <ShieldAlert className="h-4 w-4 text-yellow-500" />;
     if (proxy.ssl_expires_at) {
       const daysUntilExpiry = Math.ceil((new Date(proxy.ssl_expires_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-      if (daysUntilExpiry < 7) return "critical";
+      if (daysUntilExpiry < 7) return <ShieldAlert className="h-4 w-4 text-red-500" />;
     }
-    return "healthy";
+    return <ShieldCheck className="h-4 w-4 text-green-500" />;
   };
 
-  const getProxyStatus = (status: string): "healthy" | "warning" | "critical" | "degraded" => {
+  const getStatusBadgeClass = (status: string) => {
     switch (status) {
       case "active":
-        return "healthy";
+        return "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400";
       case "ssl_pending":
-        return "warning";
+        return "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400";
       case "error":
-        return "critical";
+        return "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400";
       default:
-        return "degraded";
+        return "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400";
     }
   };
-
-  // Calculate metrics
-  const totalProxies = proxies?.length || 0;
-  const sslEnabled = proxies?.filter((p: ProxyHost) => p.ssl_enabled).length || 0;
-  const activeProxies = proxies?.filter((p: ProxyHost) => p.status === "active").length || 0;
-  const uniqueDomains = new Set(proxies?.map((p: ProxyHost) => p.domain.split('.').slice(-2).join('.'))).size || 0;
 
   // Render panel content
   const renderPanelContent = () => {
@@ -513,7 +619,7 @@ export default function ProxiesPage() {
                       <div className="flex items-center gap-2">
                         <span className="font-medium text-gray-900 dark:text-white text-sm">{rl.zone_name}</span>
                         {!rl.enabled && (
-                          <Badge size="sm">Disabled</Badge>
+                          <span className="px-1.5 py-0.5 text-xs bg-gray-200 dark:bg-gray-700 text-gray-500 rounded">Disabled</span>
                         )}
                       </div>
                       <p className="text-xs text-gray-500">
@@ -653,7 +759,7 @@ export default function ProxiesPage() {
           <div className="h-full">
             {configLoading ? (
               <div className="flex items-center justify-center h-32">
-                <Spinner />
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-500" />
               </div>
             ) : (
               <div className="bg-gray-900 rounded-lg p-4 overflow-auto max-h-[500px]">
@@ -718,113 +824,135 @@ export default function ProxiesPage() {
                 </div>
               </form>
             ) : (
-              <div className="space-y-6">
-                {/* Actions */}
-                <div className="flex flex-wrap gap-2">
-                  <Button variant="secondary" size="sm" icon={Pencil} onClick={() => setIsEditing(true)}>
-                    Edit
-                  </Button>
-                  {!selectedProxy.ssl_enabled && selectedProxy.status !== "ssl_pending" && (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      icon={ShieldCheck}
-                      onClick={() => sslMutation.mutate(selectedProxy.id)}
-                      disabled={sslMutation.isPending}
-                    >
-                      Request SSL
+              <>
+                <DetailSection title="Actions">
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="secondary" size="sm" icon={Pencil} onClick={() => setIsEditing(true)}>
+                      Edit
                     </Button>
-                  )}
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    icon={Trash2}
-                    onClick={() => {
-                      if (confirm("Are you sure you want to delete this proxy?")) {
-                        deleteMutation.mutate(selectedProxy.id);
-                      }
-                    }}
-                  >
-                    Delete
-                  </Button>
-                </div>
+                    {!selectedProxy.ssl_enabled && selectedProxy.status !== "ssl_pending" && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        icon={ShieldCheck}
+                        onClick={() => sslMutation.mutate(selectedProxy.id)}
+                        disabled={sslMutation.isPending}
+                      >
+                        Request SSL
+                      </Button>
+                    )}
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      icon={Trash2}
+                      onClick={() => {
+                        if (confirm("Are you sure you want to delete this proxy?")) {
+                          deleteMutation.mutate(selectedProxy.id);
+                        }
+                      }}
+                    >
+                      Delete
+                    </Button>
+                  </div>
+                </DetailSection>
 
-                {/* Proxy Info */}
-                <div>
-                  <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Proxy Info</h3>
-                  <div className="space-y-3">
-                    <div>
-                      <p className="text-xs text-gray-500 mb-1">Domain</p>
+                <DetailSection title="Proxy Info">
+                  <DetailRow
+                    label="Domain"
+                    value={
                       <a
                         href={`http${selectedProxy.ssl_enabled ? "s" : ""}://${selectedProxy.domain}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-sm text-primary-600 hover:text-primary-500 flex items-center gap-1"
+                        className="text-primary-600 hover:text-primary-500 flex items-center gap-1"
                       >
                         {selectedProxy.domain}
                         <ExternalLink className="h-3 w-3" />
                       </a>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-500 mb-1">Status</p>
-                      <StatusIndicator status={getProxyStatus(selectedProxy.status)} />
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-500 mb-1">Created</p>
-                      <p className="text-sm text-gray-900 dark:text-white">{formatRelativeTime(selectedProxy.created_at)}</p>
-                    </div>
-                  </div>
-                </div>
+                    }
+                  />
+                  <DetailRow
+                    label="Status"
+                    value={
+                      <span className={cn("px-2 py-0.5 text-xs font-medium rounded-full", getStatusBadgeClass(selectedProxy.status))}>
+                        {selectedProxy.status}
+                      </span>
+                    }
+                  />
+                  <DetailRow label="Created" value={formatRelativeTime(selectedProxy.created_at)} />
+                </DetailSection>
 
-                {/* Upstream */}
-                <div>
-                  <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Upstream</h3>
+                <DetailSection title="Upstream">
                   <div className="bg-gray-100 dark:bg-gray-800/50 rounded-lg p-3">
                     <code className="text-sm text-gray-900 dark:text-white font-mono break-all">
                       {selectedProxy.upstream_target}
                     </code>
                   </div>
-                </div>
+                </DetailSection>
 
-                {/* SSL / TLS */}
-                <div>
-                  <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">SSL / TLS</h3>
-                  <div className="space-y-3">
-                    <StatusIndicator
-                      status={getSSLStatus(selectedProxy)}
-                      label={selectedProxy.ssl_enabled
+                <DetailSection title="SSL / TLS">
+                  <div className="flex items-center gap-3 mb-3">
+                    {getSSLIcon(selectedProxy)}
+                    <span className="text-sm text-gray-700 dark:text-gray-300">
+                      {selectedProxy.ssl_enabled
                         ? selectedProxy.ssl_expires_at
                           ? `Expires ${formatRelativeTime(selectedProxy.ssl_expires_at)}`
                           : "SSL Enabled"
                         : selectedProxy.status === "ssl_pending"
                         ? "SSL Certificate Pending"
                         : "SSL Not Enabled"}
-                    />
-                    <div className="flex flex-wrap gap-2">
-                      {selectedProxy.force_ssl && (
-                        <Badge>Force SSL</Badge>
-                      )}
-                      {selectedProxy.http2_enabled && (
-                        <Badge>HTTP/2</Badge>
-                      )}
-                    </div>
-                    {!selectedProxy.ssl_enabled && selectedProxy.status !== "ssl_pending" && (
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        icon={Lock}
-                        onClick={() => {
-                          setSSLWizardDomain(selectedProxy.domain);
-                          setSSLWizardProxyId(selectedProxy.id);
-                          setShowSSLWizard(true);
-                        }}
-                      >
-                        Setup SSL Certificate
-                      </Button>
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    {selectedProxy.force_ssl && (
+                      <span className="px-2 py-1 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-lg">
+                        Force SSL
+                      </span>
+                    )}
+                    {selectedProxy.http2_enabled && (
+                      <span className="px-2 py-1 text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 rounded-lg">
+                        HTTP/2
+                      </span>
                     )}
                   </div>
-                </div>
-              </div>
+                  {!selectedProxy.ssl_enabled && selectedProxy.status !== "ssl_pending" && (
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      icon={Lock}
+                      onClick={() => {
+                        setSSLWizardDomain(selectedProxy.domain);
+                        setSSLWizardProxyId(selectedProxy.id);
+                        setShowSSLWizard(true);
+                      }}
+                    >
+                      Setup SSL Certificate
+                    </Button>
+                  )}
+                  {selectedProxy.ssl_enabled && selectedProxy.ssl_expires_at && (
+                    (() => {
+                      const daysLeft = Math.ceil((new Date(selectedProxy.ssl_expires_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                      if (daysLeft < 30) {
+                        return (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            icon={RefreshCw}
+                            onClick={() => {
+                              setSSLWizardDomain(selectedProxy.domain);
+                              setSSLWizardProxyId(selectedProxy.id);
+                              setShowSSLWizard(true);
+                            }}
+                          >
+                            Renew Certificate
+                          </Button>
+                        );
+                      }
+                      return null;
+                    })()
+                  )}
+                </DetailSection>
+              </>
             )}
           </>
         );
@@ -838,106 +966,44 @@ export default function ProxiesPage() {
     { id: "config", label: "Config" },
   ] as { id: PanelTab; label: string }[];
 
-  // Define table columns
-  const columns = [
-    {
-      key: "domain",
-      header: "Domain",
-      sortable: true,
-      render: (value: string, row: ProxyHost) => (
-        <div className="flex items-center gap-2">
-          <Globe className="h-4 w-4 text-gray-400" />
-          <span className="font-medium">{value}</span>
-          <StatusIndicator status={getSSLStatus(row)} showLabel={false} size="sm" />
-        </div>
-      ),
-    },
-    {
-      key: "upstream_target",
-      header: "Upstream",
-      render: (value: string) => (
-        <code className="text-xs text-gray-600 dark:text-gray-400">{value}</code>
-      ),
-    },
-    {
-      key: "status",
-      header: "Status",
-      sortable: true,
-      render: (value: string) => (
-        <StatusIndicator status={getProxyStatus(value)} />
-      ),
-    },
-    {
-      key: "created_at",
-      header: "Created",
-      sortable: true,
-      render: (value: string) => (
-        <span className="text-sm text-gray-600 dark:text-gray-400">
-          {formatRelativeTime(value)}
-        </span>
-      ),
-    },
-  ];
-
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Proxy Hosts"
-        description="Manage nginx reverse proxy configurations"
-        breadcrumbs={
-          <Breadcrumb
-            items={[
-              { label: "Platform", href: "/" },
-              { label: "Proxies", current: true },
-            ]}
-          />
-        }
-        action={
-          <Button
-            variant="primary"
-            icon={Plus}
-            onClick={() => setShowCreateModal(true)}
-            disabled={!selectedAgent}
-          >
-            Add Proxy Host
-          </Button>
-        }
-      />
-
-      {/* Metrics */}
-      {selectedAgent && (
-        <MetricsGrid columns={4}>
-          <StatCard
-            label="Total Proxies"
-            value={totalProxies}
-            icon={Globe}
-            iconColor="text-blue-600"
-          />
-          <StatCard
-            label="SSL Enabled"
-            value={sslEnabled}
-            description={`${totalProxies > 0 ? Math.round((sslEnabled / totalProxies) * 100) : 0}% of total`}
-            icon={ShieldCheck}
-            iconColor="text-green-600"
-          />
-          <StatCard
-            label="Active"
-            value={activeProxies}
-            icon={Check}
-            iconColor="text-emerald-600"
-          />
-          <StatCard
-            label="Domains"
-            value={uniqueDomains}
-            icon={Network}
-            iconColor="text-purple-600"
-          />
-        </MetricsGrid>
-      )}
-
+    <PageLayout
+      title="Proxy Hosts"
+      description="Manage nginx reverse proxy configurations"
+      actions={
+        <Button
+          variant="primary"
+          icon={Plus}
+          onClick={() => setShowCreateModal(true)}
+          disabled={!selectedAgent}
+        >
+          Add Proxy Host
+        </Button>
+      }
+      panelOpen={!!selectedProxy}
+      panel={
+        <DetailPanel
+          open={!!selectedProxy}
+          onClose={() => {
+            setSelectedProxy(null);
+            setIsEditing(false);
+          }}
+          title={selectedProxy?.domain}
+          subtitle={selectedProxy?.upstream_target}
+          defaultWidth={520}
+        >
+          {selectedProxy && (
+            <div className="space-y-4">
+              <Tabs tabs={panelTabs} activeTab={panelTab} onChange={(id) => setPanelTab(id as PanelTab)} />
+              <div className="mt-4">{renderPanelContent()}</div>
+            </div>
+          )}
+        </DetailPanel>
+      }
+    >
       {/* Agent selector */}
-      <div className="flex items-center gap-4">
-        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+      <div className="mb-6">
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
           Select Agent
         </label>
         <select
@@ -946,7 +1012,7 @@ export default function ProxiesPage() {
             setSelectedAgent(e.target.value || null);
             setSelectedProxy(null);
           }}
-          className="px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+          className="w-full max-w-xs px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
         >
           <option value="">Select an agent...</option>
           {agents?.map((agent) => (
@@ -957,26 +1023,236 @@ export default function ProxiesPage() {
         </select>
       </div>
 
-      {/* Proxies table */}
+      {/* Proxy Settings (collapsible) */}
+      <div className="mb-6">
+        <button
+          onClick={() => setShowProxySettings(!showProxySettings)}
+          className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
+        >
+          <Settings className="h-4 w-4" />
+          Proxy Settings
+          {showProxySettings ? (
+            <ChevronDown className="h-4 w-4" />
+          ) : (
+            <ChevronRight className="h-4 w-4" />
+          )}
+        </button>
+
+        {showProxySettings && (
+          <div className="mt-4 p-4 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 space-y-6">
+            {/* InfraPilot Domain */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                  <Globe className="h-4 w-4 text-blue-400" />
+                  InfraPilot Domain
+                </h3>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={openDomainWizard}
+                >
+                  {domainSettings?.domain ? "Edit Domain" : "Set Up Domain"}
+                </Button>
+              </div>
+              {domainLoading ? (
+                <div className="flex items-center justify-center py-4">
+                  <Loader2 className="h-5 w-5 text-gray-400 animate-spin" />
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {domainSettings?.domain && (
+                    <div className="flex items-center gap-2 p-2 bg-green-500/5 border border-green-500/20 rounded-lg">
+                      <div className="w-2 h-2 rounded-full bg-green-500" />
+                      <span className="text-sm font-medium text-gray-900 dark:text-white">
+                        {domainSettings.domain}
+                      </span>
+                      <span className="text-xs text-gray-500">
+                        {domainSettings.ssl_enabled ? "HTTPS" : "HTTP"}
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex gap-4">
+                    <input
+                      type="text"
+                      value={domainInput}
+                      onChange={(e) => {
+                        setDomainInput(e.target.value);
+                        setDomainHasChanges(true);
+                      }}
+                      placeholder="infrapilot.example.com"
+                      className="flex-1 px-3 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    />
+                    {domainHasChanges && domainInput && (
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={() => domainSaveMutation.mutate()}
+                        disabled={domainSaveMutation.isPending}
+                      >
+                        {domainSaveMutation.isPending ? "Saving..." : "Save"}
+                      </Button>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-4 text-sm">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={sslEnabled}
+                        onChange={(e) => {
+                          setSSLEnabled(e.target.checked);
+                          setDomainHasChanges(true);
+                        }}
+                        className="w-4 h-4 rounded"
+                      />
+                      <span className="text-gray-700 dark:text-gray-300">SSL/HTTPS</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={forceSSL}
+                        onChange={(e) => {
+                          setForceSSL(e.target.checked);
+                          setDomainHasChanges(true);
+                        }}
+                        className="w-4 h-4 rounded"
+                        disabled={!sslEnabled}
+                      />
+                      <span className={cn("text-gray-700 dark:text-gray-300", !sslEnabled && "opacity-50")}>
+                        Force HTTPS
+                      </span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={http2Enabled}
+                        onChange={(e) => {
+                          setHTTP2Enabled(e.target.checked);
+                          setDomainHasChanges(true);
+                        }}
+                        className="w-4 h-4 rounded"
+                        disabled={!sslEnabled}
+                      />
+                      <span className={cn("text-gray-700 dark:text-gray-300", !sslEnabled && "opacity-50")}>
+                        HTTP/2
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Nginx Controls */}
+            {selectedAgent && (
+              <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
+                  <Network className="h-4 w-4 text-orange-400" />
+                  Nginx Controls
+                </h3>
+                <div className="flex flex-wrap gap-3">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={Check}
+                    onClick={() => nginxTestMutation.mutate()}
+                    disabled={nginxTestMutation.isPending}
+                    className={cn(
+                      nginxTestMutation.isSuccess && nginxTestMutation.data?.success
+                        ? "!text-green-500 !border-green-500/30"
+                        : nginxTestMutation.isError
+                        ? "!text-red-500 !border-red-500/30"
+                        : ""
+                    )}
+                  >
+                    {nginxTestMutation.isPending ? "Testing..." : "Test Config"}
+                  </Button>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    icon={RefreshCw}
+                    onClick={() => nginxReloadMutation.mutate()}
+                    disabled={nginxReloadMutation.isPending}
+                  >
+                    {nginxReloadMutation.isPending ? "Reloading..." : "Reload Nginx"}
+                  </Button>
+                </div>
+                {(nginxTestMutation.isSuccess || nginxReloadMutation.isSuccess) && (
+                  <div
+                    className={cn(
+                      "mt-3 p-2 rounded-lg text-xs",
+                      (nginxTestMutation.data?.success || nginxReloadMutation.data?.success)
+                        ? "bg-green-500/10 text-green-400 border border-green-500/30"
+                        : "bg-red-500/10 text-red-400 border border-red-500/30"
+                    )}
+                  >
+                    {nginxTestMutation.data?.message || nginxReloadMutation.data?.message}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Proxies list */}
       {selectedAgent ? (
         proxiesLoading ? (
-          <div className="flex items-center justify-center h-64">
-            <Spinner size="lg" />
+          <div className="flex items-center justify-center h-32">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500" />
           </div>
         ) : proxies && proxies.length > 0 ? (
-          <Card>
-            <Table
-              columns={columns}
-              data={proxies}
-              keyExtractor={(row: ProxyHost) => row.id}
-              onRowClick={(row: ProxyHost) => {
-                setSelectedProxy(row);
-                setPanelTab("details");
-                setIsEditing(false);
-              }}
-              hoverable
-            />
-          </Card>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {proxies.map((proxy: ProxyHost) => {
+              const isSelected = selectedProxy?.id === proxy.id;
+
+              return (
+                <ListCard
+                  key={proxy.id}
+                  selected={isSelected}
+                  onClick={() => {
+                    setSelectedProxy(proxy);
+                    setPanelTab("details");
+                    setIsEditing(false);
+                  }}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="p-2 bg-gray-100 dark:bg-gray-800 rounded-lg">
+                        <Globe className="h-4 w-4 text-gray-500" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-gray-900 dark:text-white truncate">
+                            {proxy.domain}
+                          </span>
+                          {getSSLIcon(proxy)}
+                        </div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">
+                          {proxy.upstream_target}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={cn("px-2 py-0.5 text-xs font-medium rounded-full", getStatusBadgeClass(proxy.status))}>
+                        {proxy.status}
+                      </span>
+                      <ChevronRight className={cn("h-4 w-4 text-gray-400", isSelected && "text-primary-500")} />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 mt-3 text-xs text-gray-500 dark:text-gray-400">
+                    {proxy.http2_enabled && (
+                      <span className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded">HTTP/2</span>
+                    )}
+                    {proxy.force_ssl && (
+                      <span className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded">Force SSL</span>
+                    )}
+                    <span>{formatRelativeTime(proxy.created_at)}</span>
+                  </div>
+                </ListCard>
+              );
+            })}
+          </div>
         ) : (
           <EmptyState
             icon={Globe}
@@ -994,28 +1270,6 @@ export default function ProxiesPage() {
           }
         />
       )}
-
-      {/* SlideOver for proxy details */}
-      <SlideOver isOpen={!!selectedProxy} onClose={() => setSelectedProxy(null)} size="lg">
-        <SlideOver.Header onClose={() => setSelectedProxy(null)}>
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-              {selectedProxy?.domain}
-            </h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              {selectedProxy?.upstream_target}
-            </p>
-          </div>
-        </SlideOver.Header>
-        <SlideOver.Body>
-          {selectedProxy && (
-            <div className="space-y-4">
-              <Tabs tabs={panelTabs} activeTab={panelTab} onChange={(id) => setPanelTab(id as PanelTab)} />
-              <div className="mt-4">{renderPanelContent()}</div>
-            </div>
-          )}
-        </SlideOver.Body>
-      </SlideOver>
 
       {/* Create Modal */}
       {showCreateModal && (
@@ -1236,6 +1490,289 @@ export default function ProxiesPage() {
         </div>
       )}
 
+      {/* Domain Setup Wizard Modal */}
+      {showDomainWizard && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
+            {/* Header */}
+            <div className="p-6 border-b border-gray-200 dark:border-gray-800">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                  {wizardStep === "complete" ? "Setup Complete" : "Set Up Domain"}
+                </h2>
+                <button
+                  onClick={closeDomainWizard}
+                  className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              {wizardStep !== "complete" && (
+                <div className="flex items-center gap-2 mt-4">
+                  <div className={cn(
+                    "flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium",
+                    wizardStep === "domain"
+                      ? "bg-primary-600 text-white"
+                      : "bg-green-500 text-white"
+                  )}>
+                    {wizardStep === "domain" ? "1" : <Check className="h-4 w-4" />}
+                  </div>
+                  <div className="h-0.5 flex-1 bg-gray-200 dark:bg-gray-700">
+                    <div className={cn(
+                      "h-full bg-primary-600 transition-all",
+                      wizardStep !== "domain" ? "w-full" : "w-0"
+                    )} />
+                  </div>
+                  <div className={cn(
+                    "flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium",
+                    wizardStep === "ssl"
+                      ? "bg-primary-600 text-white"
+                      : wizardStep === "domain"
+                        ? "bg-gray-200 dark:bg-gray-700 text-gray-500"
+                        : "bg-green-500 text-white"
+                  )}>
+                    {"2"}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Content */}
+            <div className="p-6">
+              {wizardStep === "domain" && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Domain Name
+                    </label>
+                    <input
+                      type="text"
+                      value={wizardDomain}
+                      onChange={(e) => setWizardDomain(e.target.value)}
+                      placeholder="infrapilot.example.com"
+                      className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    />
+                    <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                      Enter the domain you want to use to access InfraPilot. Make sure DNS is pointing to this server.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {wizardStep === "ssl" && (
+                <div className="space-y-6">
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                      Domain: <span className="text-gray-900 dark:text-white">{wizardDomain}</span>
+                    </h3>
+                  </div>
+
+                  {/* SSL Options */}
+                  <div className="space-y-3">
+                    <label className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={wizardSSLEnabled}
+                        onChange={(e) => setWizardSSLEnabled(e.target.checked)}
+                        className="w-5 h-5 rounded"
+                      />
+                      <div>
+                        <span className="font-medium text-gray-900 dark:text-white">Enable SSL/HTTPS</span>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">Secure your connection with HTTPS</p>
+                      </div>
+                    </label>
+
+                    {wizardSSLEnabled && (
+                      <>
+                        <label className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg cursor-pointer ml-4">
+                          <input
+                            type="checkbox"
+                            checked={wizardForceSSL}
+                            onChange={(e) => setWizardForceSSL(e.target.checked)}
+                            className="w-5 h-5 rounded"
+                          />
+                          <div>
+                            <span className="font-medium text-gray-900 dark:text-white">Force HTTPS</span>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">Redirect HTTP to HTTPS</p>
+                          </div>
+                        </label>
+
+                        <label className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg cursor-pointer ml-4">
+                          <input
+                            type="checkbox"
+                            checked={wizardHTTP2}
+                            onChange={(e) => setWizardHTTP2(e.target.checked)}
+                            className="w-5 h-5 rounded"
+                          />
+                          <div>
+                            <span className="font-medium text-gray-900 dark:text-white">Enable HTTP/2</span>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">Faster page loads with HTTP/2</p>
+                          </div>
+                        </label>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Certificate Check */}
+                  {wizardSSLEnabled && (
+                    <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                          SSL Certificate Status
+                        </h4>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={checkSSLCertificate}
+                            disabled={certCheckLoading}
+                          >
+                            {certCheckLoading ? "Checking..." : "Check Certificate"}
+                          </Button>
+                        </div>
+                      </div>
+
+                      {certCheckResult && (
+                        <div className={cn(
+                          "p-3 rounded-lg text-sm",
+                          certCheckResult.exists
+                            ? "bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800"
+                            : "bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-400 border border-yellow-200 dark:border-yellow-800"
+                        )}>
+                          {certCheckResult.exists ? (
+                            <div className="flex items-start gap-2">
+                              <ShieldCheck className="h-5 w-5 flex-shrink-0 mt-0.5" />
+                              <div>
+                                <p className="font-medium">Certificate found</p>
+                                <p className="text-xs mt-1">
+                                  Issuer: {certCheckResult.issuer || "Unknown"} |
+                                  Expires in: {certCheckResult.days_left} days
+                                </p>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex items-start gap-2">
+                              <ShieldAlert className="h-5 w-5 flex-shrink-0 mt-0.5" />
+                              <div>
+                                <p className="font-medium">No certificate found</p>
+                                <p className="text-xs mt-1">
+                                  {certCheckResult.error || "You'll need to set up an SSL certificate."}
+                                </p>
+                                <Button
+                                  variant="primary"
+                                  size="sm"
+                                  icon={Lock}
+                                  className="mt-2"
+                                  onClick={() => {
+                                    setSSLWizardDomain(wizardDomain);
+                                    setShowSSLWizard(true);
+                                  }}
+                                >
+                                  Setup SSL with Let's Encrypt
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {!certCheckResult && (
+                        <div className="space-y-2">
+                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                            Click "Check Certificate" to see if SSL is already configured for this domain.
+                          </p>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            icon={Lock}
+                            onClick={() => {
+                              setSSLWizardDomain(wizardDomain);
+                              setShowSSLWizard(true);
+                            }}
+                          >
+                            Setup SSL with Let's Encrypt
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {wizardStep === "complete" && (
+                <div className="text-center py-4">
+                  <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Check className="h-8 w-8 text-green-600 dark:text-green-400" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+                    Domain Configured Successfully
+                  </h3>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                    Your InfraPilot instance is now accessible at:
+                  </p>
+                  <a
+                    href={`${wizardSSLEnabled ? "https" : "http"}://${wizardDomain}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 text-primary-600 dark:text-primary-400 hover:underline"
+                  >
+                    {wizardSSLEnabled ? "https" : "http"}://{wizardDomain}
+                    <ExternalLink className="h-4 w-4" />
+                  </a>
+                  {wizardSSLEnabled && !certCheckResult?.exists && (
+                    <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                      <p className="text-xs text-blue-700 dark:text-blue-400">
+                        SSL certificate will be automatically requested. This may take a few minutes.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-6 border-t border-gray-200 dark:border-gray-800 flex justify-between">
+              {wizardStep === "domain" && (
+                <>
+                  <Button variant="ghost" onClick={closeDomainWizard}>
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="primary"
+                    onClick={() => setWizardStep("ssl")}
+                    disabled={!wizardDomain.trim()}
+                  >
+                    Next
+                    <ChevronRight className="h-4 w-4 ml-1" />
+                  </Button>
+                </>
+              )}
+
+              {wizardStep === "ssl" && (
+                <>
+                  <Button variant="ghost" onClick={() => setWizardStep("domain")}>
+                    Back
+                  </Button>
+                  <Button
+                    variant="primary"
+                    onClick={() => wizardSaveMutation.mutate()}
+                    disabled={wizardSaveMutation.isPending}
+                  >
+                    {wizardSaveMutation.isPending ? "Saving..." : "Complete Setup"}
+                  </Button>
+                </>
+              )}
+
+              {wizardStep === "complete" && (
+                <Button variant="primary" onClick={closeDomainWizard} className="ml-auto">
+                  Done
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* SSL Certificate Wizard */}
       <SSLWizard
         domain={sslWizardDomain}
@@ -1247,6 +1784,6 @@ export default function ProxiesPage() {
           queryClient.invalidateQueries({ queryKey: ["proxies", selectedAgent] });
         }}
       />
-    </div>
+    </PageLayout>
   );
 }

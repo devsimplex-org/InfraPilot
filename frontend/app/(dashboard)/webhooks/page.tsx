@@ -1,13 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import {
   Webhook,
   GitBranch,
   Clock,
   Plus,
-  Eye,
   Copy,
   CheckCircle,
   XCircle,
@@ -16,20 +15,15 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import {
-  PageLayout,
-  ListCard,
-  EmptyState,
-  Button,
-  Tabs,
-} from "@/components/ui/page-layout";
-import {
-  DetailPanel,
-  DetailSection,
-  DetailRow,
-} from "@/components/ui/detail-panel";
-
-type WebhookTab = "all" | "events";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Breadcrumb } from "@/components/ui/Breadcrumb";
+import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
+import { Table } from "@/components/ui/Table";
+import { SlideOver } from "@/components/ui/SlideOver";
+import { StatusIndicator } from "@/components/ui/StatusIndicator";
+import { Badge } from "@/components/ui/Badge";
+import { Timeline } from "@/components/ui/Timeline";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 interface WebhookConfig {
   id: string;
@@ -56,13 +50,6 @@ interface WebhookEvent {
   processed_at?: string;
 }
 
-interface CreateWebhookData {
-  name: string;
-  provider: "github" | "gitlab" | "jenkins" | "generic";
-  service_name: string;
-  environment: "dev" | "staging" | "prod";
-}
-
 const providerIcons: Record<string, string> = {
   github: "🐙",
   gitlab: "🦊",
@@ -78,10 +65,7 @@ const providerColors: Record<string, string> = {
 };
 
 export default function WebhooksPage() {
-  const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<WebhookTab>("all");
   const [selectedWebhook, setSelectedWebhook] = useState<WebhookConfig | null>(null);
-  const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [copiedSecret, setCopiedSecret] = useState(false);
   const [copiedURL, setCopiedURL] = useState(false);
 
@@ -116,10 +100,12 @@ export default function WebhooksPage() {
     ? {
         total: webhooks.length,
         enabled: webhooks.filter((w) => w.enabled).length,
-        github: webhooks.filter((w) => w.provider === "github").length,
-        gitlab: webhooks.filter((w) => w.provider === "gitlab").length,
+        deliveryRate: webhooks.length > 0
+          ? Math.round((webhooks.filter((w) => w.last_used_at).length / webhooks.length) * 100)
+          : 0,
+        failures: webhookEvents?.filter((e) => e.error).length || 0,
       }
-    : { total: 0, enabled: 0, github: 0, gitlab: 0 };
+    : { total: 0, enabled: 0, deliveryRate: 0, failures: 0 };
 
   const copyToClipboard = (text: string, type: "secret" | "url") => {
     navigator.clipboard.writeText(text);
@@ -132,370 +118,342 @@ export default function WebhooksPage() {
     }
   };
 
-  return (
-    <PageLayout
-      title="CI/CD Webhooks"
-      description="Manage webhook integrations for automated deployments"
-      panel={
-        selectedWebhook && (
-          <DetailPanel
-            open={!!selectedWebhook}
-            onClose={() => setSelectedWebhook(null)}
-            title={selectedWebhook.name}
-            subtitle={`${providerIcons[selectedWebhook.provider]} ${selectedWebhook.provider}`}
-          >
-            <DetailSection title="Configuration">
-              <DetailRow label="Service" value={selectedWebhook.service_name} />
-              <DetailRow
-                label="Environment"
-                value={
-                  <span
-                    className={cn(
-                      "px-2 py-1 text-xs font-medium rounded-full",
-                      selectedWebhook.environment === "prod"
-                        ? "bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-400"
-                        : selectedWebhook.environment === "staging"
-                        ? "bg-yellow-100 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-400"
-                        : "bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-400"
-                    )}
-                  >
-                    {selectedWebhook.environment}
-                  </span>
-                }
-              />
-              <DetailRow
-                label="Status"
-                value={
-                  <span
-                    className={cn(
-                      "px-2 py-1 text-xs font-medium rounded-full",
-                      selectedWebhook.enabled
-                        ? "bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-400"
-                        : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
-                    )}
-                  >
-                    {selectedWebhook.enabled ? "Enabled" : "Disabled"}
-                  </span>
-                }
-              />
-              <DetailRow
-                label="Created"
-                value={new Date(selectedWebhook.created_at).toLocaleString()}
-              />
-              {selectedWebhook.last_used_at && (
-                <DetailRow
-                  label="Last Used"
-                  value={new Date(selectedWebhook.last_used_at).toLocaleString()}
-                />
-              )}
-            </DetailSection>
+  const getEventStatus = (event: WebhookEvent) => {
+    if (event.processed) return "healthy";
+    if (event.error) return "critical";
+    return "warning";
+  };
 
-            <DetailSection title="Webhook URL">
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    readOnly
-                    value={`${window.location.origin}${selectedWebhook.webhook_url}`}
-                    className="flex-1 px-3 py-2 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white"
-                  />
-                  <button
-                    onClick={() =>
-                      copyToClipboard(
-                        `${window.location.origin}${selectedWebhook.webhook_url}`,
-                        "url"
-                      )
-                    }
-                    className="p-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
-                  >
-                    {copiedURL ? (
-                      <CheckCircle className="w-4 h-4 text-green-600" />
-                    ) : (
-                      <Copy className="w-4 h-4" />
-                    )}
-                  </button>
-                </div>
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Configure this URL in your CI/CD provider to trigger deployments
-                </p>
-              </div>
-            </DetailSection>
+  const getEnvironmentVariant = (env: string): "status" => "status";
+  const getEnvironmentStatus = (env: string) => {
+    if (env === "prod") return "critical";
+    if (env === "staging") return "warning";
+    return "healthy";
+  };
 
-            {webhookEvents && webhookEvents.length > 0 && (
-              <DetailSection title="Recent Events">
-                <div className="space-y-2">
-                  {webhookEvents.slice(0, 5).map((event) => (
-                    <div
-                      key={event.id}
-                      className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg"
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm font-medium text-gray-900 dark:text-white">
-                          {event.event_type || "Deployment"}
-                        </span>
-                        <span
-                          className={cn(
-                            "px-2 py-0.5 text-xs font-medium rounded-full",
-                            event.processed
-                              ? "bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-400"
-                              : event.error
-                              ? "bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-400"
-                              : "bg-yellow-100 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-400"
-                          )}
-                        >
-                          {event.processed ? "Processed" : event.error ? "Failed" : "Pending"}
-                        </span>
-                      </div>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
-                        {new Date(event.created_at).toLocaleString()}
-                      </p>
-                      {event.error && (
-                        <p className="mt-1 text-xs text-red-600 dark:text-red-400">
-                          {event.error}
-                        </p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </DetailSection>
-            )}
-
-            <DetailSection title="Actions">
-              <div className="space-y-2">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    /* TODO: Implement toggle */
-                  }}
-                  className="w-full"
-                >
-                  <Settings className="w-4 h-4 mr-2" />
-                  {selectedWebhook.enabled ? "Disable Webhook" : "Enable Webhook"}
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    /* TODO: Implement delete */
-                  }}
-                  className="w-full text-red-600 hover:text-red-700"
-                >
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  Delete Webhook
-                </Button>
-              </div>
-            </DetailSection>
-          </DetailPanel>
+  // Table columns
+  const columns = [
+    {
+      key: "provider",
+      header: "Provider",
+      width: "80px",
+      render: (value: string) => (
+        <span className="text-2xl">{providerIcons[value]}</span>
+      ),
+    },
+    {
+      key: "name",
+      header: "Webhook Name",
+      render: (value: string, row: WebhookConfig) => (
+        <div>
+          <div className="font-medium text-gray-900 dark:text-white">{value}</div>
+          <div className="flex items-center gap-2 mt-1">
+            <GitBranch className="h-3 w-3 text-gray-400" />
+            <span className="text-xs text-gray-500 dark:text-gray-400">
+              {row.service_name}
+            </span>
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "environment",
+      header: "Environment",
+      render: (value: string) => (
+        <Badge
+          variant={getEnvironmentVariant(value)}
+          status={getEnvironmentStatus(value)}
+          size="sm"
+        >
+          {value}
+        </Badge>
+      ),
+    },
+    {
+      key: "enabled",
+      header: "Status",
+      render: (value: boolean) => (
+        <StatusIndicator
+          status={value ? "healthy" : "degraded"}
+          label={value ? "Enabled" : "Disabled"}
+          size="sm"
+        />
+      ),
+    },
+    {
+      key: "last_used_at",
+      header: "Last Used",
+      align: "right" as const,
+      render: (value: string) => (
+        value ? (
+          <div className="flex items-center justify-end gap-1 text-sm">
+            <Clock className="h-3 w-3 text-gray-400" />
+            <span>{new Date(value).toLocaleDateString()}</span>
+          </div>
+        ) : (
+          <span className="text-xs text-gray-400">Never used</span>
         )
-      }
-      panelOpen={!!selectedWebhook}
-    >
-      {/* Statistics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-500 dark:text-gray-400">Total Webhooks</p>
-              <p className="text-2xl font-semibold text-gray-900 dark:text-white mt-1">
-                {stats.total}
-              </p>
-            </div>
-            <Webhook className="w-8 h-8 text-primary-500" />
-          </div>
-        </div>
+      ),
+    },
+  ];
 
-        <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-500 dark:text-gray-400">Enabled</p>
-              <p className="text-2xl font-semibold text-gray-900 dark:text-white mt-1">
-                {stats.enabled}
-              </p>
-            </div>
-            <CheckCircle className="w-8 h-8 text-green-500" />
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-500 dark:text-gray-400">GitHub Actions</p>
-              <p className="text-2xl font-semibold text-gray-900 dark:text-white mt-1">
-                {stats.github}
-              </p>
-            </div>
-            <span className="text-4xl">{providerIcons.github}</span>
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-500 dark:text-gray-400">GitLab CI</p>
-              <p className="text-2xl font-semibold text-gray-900 dark:text-white mt-1">
-                {stats.gitlab}
-              </p>
-            </div>
-            <span className="text-4xl">{providerIcons.gitlab}</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Create Webhook Button */}
-      <div className="mb-6">
-        <Button onClick={() => setShowCreateDialog(true)}>
-          <Plus className="w-4 h-4 mr-2" />
-          Create Webhook
-        </Button>
-      </div>
-
-      {/* Tabs */}
-      <Tabs
-        tabs={[
-          { id: "all", label: "All Webhooks", count: stats.total },
-          { id: "events", label: "Recent Events", count: webhookEvents?.length || 0 },
-        ]}
-        activeTab={activeTab}
-        onChange={(id) => setActiveTab(id as WebhookTab)}
+  return (
+    <div className="p-6">
+      <PageHeader
+        title="CI/CD Webhooks"
+        description="Manage webhook integrations for automated deployments"
+        breadcrumbs={
+          <Breadcrumb
+            items={[
+              { label: "Govern", href: "/" },
+              { label: "Webhooks", current: true },
+            ]}
+          />
+        }
+        action={
+          <button className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors flex items-center gap-2">
+            <Plus className="h-4 w-4" />
+            Create Webhook
+          </button>
+        }
       />
 
-      <div className="mt-6">
-        {isLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
-          </div>
-        ) : webhooks && webhooks.length === 0 ? (
-          <EmptyState
-            icon={Webhook}
-            title="No Webhooks Configured"
-            description="Create a webhook to enable automated deployments from your CI/CD pipeline"
-            action={
-              <Button onClick={() => setShowCreateDialog(true)}>
-                <Plus className="w-4 h-4 mr-2" />
-                Create Your First Webhook
-              </Button>
-            }
-          />
-        ) : (
-          <div className="space-y-4">
-            {/* All Webhooks Tab */}
-            {activeTab === "all" &&
-              webhooks?.map((webhook) => (
-                <ListCard
-                  key={webhook.id}
-                  selected={selectedWebhook?.id === webhook.id}
-                  onClick={() => setSelectedWebhook(webhook)}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3 flex-1 min-w-0">
-                      <span className="text-2xl flex-shrink-0">
-                        {providerIcons[webhook.provider]}
-                      </span>
-                      <div className="flex-1 min-w-0">
-                        <h3 className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                          {webhook.name}
-                        </h3>
-                        <div className="flex items-center gap-4 mt-1">
-                          <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                            <GitBranch className="w-3 h-3" />
-                            {webhook.service_name}
-                          </div>
-                          <span
-                            className={cn(
-                              "px-2 py-0.5 text-xs font-medium rounded-full",
-                              webhook.environment === "prod"
-                                ? "bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-400"
-                                : webhook.environment === "staging"
-                                ? "bg-yellow-100 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-400"
-                                : "bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-400"
-                            )}
-                          >
-                            {webhook.environment}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <div className="text-right">
-                        {webhook.last_used_at ? (
-                          <>
-                            <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
-                              <Clock className="w-3 h-3" />
-                              Last used
-                            </p>
-                            <p className="text-xs text-gray-600 dark:text-gray-300">
-                              {new Date(webhook.last_used_at).toLocaleDateString()}
-                            </p>
-                          </>
-                        ) : (
-                          <p className="text-xs text-gray-400 dark:text-gray-500">Never used</p>
-                        )}
-                      </div>
-                      <div
-                        className={cn(
-                          "px-3 py-1 rounded-full text-xs font-medium",
-                          webhook.enabled
-                            ? "bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-400"
-                            : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
-                        )}
-                      >
-                        {webhook.enabled ? "Enabled" : "Disabled"}
-                      </div>
-                      <Eye className="w-4 h-4 text-gray-400" />
-                    </div>
-                  </div>
-                </ListCard>
-              ))}
+      {/* Metrics */}
+      <MetricsGrid columns={4} className="mb-6">
+        <StatCard
+          label="Total Webhooks"
+          value={stats.total}
+          icon={Webhook}
+          iconColor="text-primary-600 dark:text-primary-400"
+        />
+        <StatCard
+          label="Enabled"
+          value={stats.enabled}
+          icon={CheckCircle}
+          iconColor="text-green-600 dark:text-green-400"
+        />
+        <StatCard
+          label="Delivery Rate"
+          value={`${stats.deliveryRate}%`}
+          icon={GitBranch}
+          iconColor="text-blue-600 dark:text-blue-400"
+        />
+        <StatCard
+          label="Failures"
+          value={stats.failures}
+          icon={XCircle}
+          iconColor="text-red-600 dark:text-red-400"
+        />
+      </MetricsGrid>
 
-            {/* Events Tab */}
-            {activeTab === "events" && webhookEvents && (
-              <div className="space-y-4">
-                {webhookEvents.map((event) => (
-                  <div
-                    key={event.id}
-                    className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-4"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <span className="text-2xl">{providerIcons[event.provider]}</span>
-                        <div>
-                          <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-                            {event.event_type || "Deployment Event"}
-                          </h3>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">
-                            {new Date(event.created_at).toLocaleString()}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        {event.verified && (
-                          <CheckCircle className="w-4 h-4 text-green-600" />
-                        )}
-                        <span
-                          className={cn(
-                            "px-2 py-1 text-xs font-medium rounded-full",
-                            event.processed
-                              ? "bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-400"
-                              : event.error
-                              ? "bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-400"
-                              : "bg-yellow-100 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-400"
-                          )}
-                        >
-                          {event.processed ? "Processed" : event.error ? "Failed" : "Pending"}
-                        </span>
-                      </div>
+      {/* Webhooks Table */}
+      {isLoading ? (
+        <div className="flex items-center justify-center h-32">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500" />
+        </div>
+      ) : webhooks && webhooks.length > 0 ? (
+        <Table
+          columns={columns}
+          data={webhooks}
+          keyExtractor={(row) => row.id}
+          onRowClick={(row) => setSelectedWebhook(row)}
+          selectedRows={selectedWebhook ? new Set([selectedWebhook.id]) : undefined}
+          hoverable
+        />
+      ) : (
+        <EmptyState
+          icon={Webhook}
+          title="No Webhooks Configured"
+          description="Create a webhook to enable automated deployments from your CI/CD pipeline"
+          action={
+            <button className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors flex items-center gap-2">
+              <Plus className="h-4 w-4" />
+              Create Your First Webhook
+            </button>
+          }
+        />
+      )}
+
+      {/* SlideOver for webhook details */}
+      <SlideOver
+        isOpen={!!selectedWebhook}
+        onClose={() => setSelectedWebhook(null)}
+        size="lg"
+      >
+        {selectedWebhook && (
+          <>
+            <SlideOver.Header onClose={() => setSelectedWebhook(null)}>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl">{providerIcons[selectedWebhook.provider]}</span>
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                    {selectedWebhook.name}
+                  </h2>
+                </div>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                  {selectedWebhook.provider} webhook
+                </p>
+              </div>
+            </SlideOver.Header>
+
+            <SlideOver.Body>
+              <div className="space-y-6">
+                {/* Configuration */}
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
+                    Configuration
+                  </h3>
+                  <div className="space-y-3">
+                    <div className="flex justify-between">
+                      <span className="text-sm text-gray-500 dark:text-gray-400">Service</span>
+                      <span className="text-sm text-gray-900 dark:text-white font-medium">
+                        {selectedWebhook.service_name}
+                      </span>
                     </div>
-                    {event.error && (
-                      <div className="mt-2 p-2 bg-red-50 dark:bg-red-900/10 rounded text-xs text-red-600 dark:text-red-400">
-                        {event.error}
+                    <div className="flex justify-between">
+                      <span className="text-sm text-gray-500 dark:text-gray-400">Environment</span>
+                      <Badge
+                        variant={getEnvironmentVariant(selectedWebhook.environment)}
+                        status={getEnvironmentStatus(selectedWebhook.environment)}
+                        size="sm"
+                      >
+                        {selectedWebhook.environment}
+                      </Badge>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-sm text-gray-500 dark:text-gray-400">Status</span>
+                      <StatusIndicator
+                        status={selectedWebhook.enabled ? "healthy" : "degraded"}
+                        label={selectedWebhook.enabled ? "Enabled" : "Disabled"}
+                        size="sm"
+                      />
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-sm text-gray-500 dark:text-gray-400">Created</span>
+                      <span className="text-sm text-gray-900 dark:text-white">
+                        {new Date(selectedWebhook.created_at).toLocaleString()}
+                      </span>
+                    </div>
+                    {selectedWebhook.last_used_at && (
+                      <div className="flex justify-between">
+                        <span className="text-sm text-gray-500 dark:text-gray-400">Last Used</span>
+                        <span className="text-sm text-gray-900 dark:text-white">
+                          {new Date(selectedWebhook.last_used_at).toLocaleString()}
+                        </span>
                       </div>
                     )}
                   </div>
-                ))}
+                </div>
+
+                {/* Webhook URL */}
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
+                    Webhook URL
+                  </h3>
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        readOnly
+                        value={`${window.location.origin}${selectedWebhook.webhook_url}`}
+                        className="flex-1 px-3 py-2 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white"
+                      />
+                      <button
+                        onClick={() =>
+                          copyToClipboard(
+                            `${window.location.origin}${selectedWebhook.webhook_url}`,
+                            "url"
+                          )
+                        }
+                        className="p-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                      >
+                        {copiedURL ? (
+                          <CheckCircle className="w-4 h-4 text-green-600" />
+                        ) : (
+                          <Copy className="w-4 h-4" />
+                        )}
+                      </button>
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Configure this URL in your CI/CD provider to trigger deployments
+                    </p>
+                  </div>
+                </div>
+
+                {/* Recent Events Timeline */}
+                {webhookEvents && webhookEvents.length > 0 && (
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">
+                      Recent Events
+                    </h3>
+                    <Timeline>
+                      {webhookEvents.slice(0, 5).map((event) => {
+                        const statusIcon = event.processed ? CheckCircle : event.error ? XCircle : Clock;
+                        const statusColor = event.processed
+                          ? "text-green-600 dark:text-green-400"
+                          : event.error
+                          ? "text-red-600 dark:text-red-400"
+                          : "text-yellow-600 dark:text-yellow-400";
+
+                        return (
+                          <Timeline.Item
+                            key={event.id}
+                            icon={statusIcon}
+                            iconColor={statusColor}
+                            title={event.event_type || "Deployment"}
+                            timestamp={new Date(event.created_at).toLocaleString()}
+                            description={
+                              <div className="space-y-2">
+                                <div className="flex items-center gap-2">
+                                  <Badge
+                                    variant="status"
+                                    status={getEventStatus(event)}
+                                    size="sm"
+                                  >
+                                    {event.processed ? "Processed" : event.error ? "Failed" : "Pending"}
+                                  </Badge>
+                                  {event.verified && (
+                                    <Badge size="sm">
+                                      <CheckCircle className="h-3 w-3" />
+                                      Verified
+                                    </Badge>
+                                  )}
+                                </div>
+                                {event.error && (
+                                  <p className="text-xs text-red-600 dark:text-red-400">
+                                    {event.error}
+                                  </p>
+                                )}
+                              </div>
+                            }
+                          />
+                        );
+                      })}
+                    </Timeline>
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
+                    Actions
+                  </h3>
+                  <div className="space-y-2">
+                    <button className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors">
+                      <Settings className="w-4 h-4" />
+                      {selectedWebhook.enabled ? "Disable Webhook" : "Enable Webhook"}
+                    </button>
+                    <button className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-700 dark:text-red-400 bg-red-100 dark:bg-red-900/30 hover:bg-red-200 dark:hover:bg-red-900/50 rounded-lg transition-colors">
+                      <Trash2 className="w-4 h-4" />
+                      Delete Webhook
+                    </button>
+                  </div>
+                </div>
               </div>
-            )}
-          </div>
+            </SlideOver.Body>
+          </>
         )}
-      </div>
-    </PageLayout>
+      </SlideOver>
+    </div>
   );
 }

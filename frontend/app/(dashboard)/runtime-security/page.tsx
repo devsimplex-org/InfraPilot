@@ -8,17 +8,26 @@ import {
   AlertTriangle,
   Activity,
   RefreshCw,
-  CheckCircle2,
-  XCircle,
-  Clock,
-  TrendingUp,
-  Container,
-  AlertCircle,
   FileWarning,
-  Filter,
-  X as XIcon,
+  Container,
+  CheckCircle2,
+  Clock,
 } from "lucide-react";
 import { api, DriftEvent, BehavioralAnomaly } from "@/lib/api";
+
+// New component library imports
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Breadcrumb } from "@/components/ui/Breadcrumb";
+import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
+import { Table } from "@/components/ui/Table";
+import { SlideOver } from "@/components/ui/SlideOver";
+import { FilterPanel } from "@/components/ui/FilterPanel";
+import { StatusIndicator } from "@/components/ui/StatusIndicator";
+import { SeverityBadge } from "@/components/ui/Badge";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { Skeleton } from "@/components/ui/Skeleton";
+import { Spinner } from "@/components/ui/Spinner";
+import { Timeline } from "@/components/ui/Timeline";
 import { cn } from "@/lib/utils";
 
 type TabType = "overview" | "drift" | "anomalies";
@@ -95,81 +104,304 @@ export default function RuntimeSecurityPage() {
     }
   };
 
-  const getStatusBadge = (status: string) => {
-    const badges = {
-      healthy: {
-        icon: ShieldCheck,
-        color: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
-        label: "Healthy",
-      },
-      warning: {
-        icon: AlertTriangle,
-        color: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
-        label: "Warning",
-      },
-      degraded: {
-        icon: AlertCircle,
-        color: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
-        label: "Degraded",
-      },
-      critical: {
-        icon: ShieldX,
-        color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
-        label: "Critical",
-      },
-    };
-
-    const badge = badges[status as keyof typeof badges] || badges.warning;
-
-    return (
-      <div className={cn("inline-flex items-center gap-2 px-3 py-1.5 rounded-lg font-medium", badge.color)}>
-        <badge.icon className="h-4 w-4" />
-        {badge.label}
-      </div>
-    );
-  };
-
-  const getSeverityBadge = (severity: string) => {
-    const colors = {
-      critical: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
-      high: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
-      medium: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
-      low: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
-      info: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
-    };
-
-    return (
-      <span className={cn("px-2 py-1 rounded text-xs font-medium", colors[severity as keyof typeof colors] || colors.info)}>
-        {severity.toUpperCase()}
-      </span>
-    );
-  };
-
   const formatTimestamp = (timestamp: string) => {
     return new Date(timestamp).toLocaleString();
   };
 
+  // Breadcrumbs
+  const breadcrumbs = (
+    <Breadcrumb
+      items={[
+        { label: "Security", href: "#" },
+        { label: "Runtime Security", current: true },
+      ]}
+    />
+  );
+
+  // Page Header Action
+  const headerAction = (
+    <button
+      onClick={() => {
+        queryClient.invalidateQueries({ queryKey: ["runtime-security-posture"] });
+        queryClient.invalidateQueries({ queryKey: ["drift-events"] });
+        queryClient.invalidateQueries({ queryKey: ["behavioral-anomalies"] });
+      }}
+      className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+    >
+      <RefreshCw className="h-4 w-4" />
+      Refresh
+    </button>
+  );
+
+  // Drift Table Columns
+  const driftColumns = [
+    {
+      key: "container_name",
+      header: "Container",
+      sortable: true,
+      render: (value: string) => (
+        <span className="text-sm font-medium text-gray-900 dark:text-white">{value}</span>
+      ),
+    },
+    {
+      key: "drift_type",
+      header: "Drift Type",
+      render: (value: string) => (
+        <span className="text-sm text-gray-700 dark:text-gray-300 capitalize">
+          {value.replace(/_/g, " ")}
+        </span>
+      ),
+    },
+    {
+      key: "severity",
+      header: "Severity",
+      render: (value: string) => <SeverityBadge severity={value as any} size="sm" />,
+    },
+    {
+      key: "resolved",
+      header: "Status",
+      render: (value: boolean) =>
+        value ? (
+          <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 rounded text-xs">
+            <CheckCircle2 className="h-3 w-3" />
+            Resolved
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 px-2 py-1 bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 rounded text-xs">
+            <Clock className="h-3 w-3" />
+            Unresolved
+          </span>
+        ),
+    },
+    {
+      key: "detected_at",
+      header: "Detected At",
+      render: (value: string) => (
+        <span className="text-sm text-gray-500 dark:text-gray-400">{formatTimestamp(value)}</span>
+      ),
+    },
+    {
+      key: "id",
+      header: "Actions",
+      render: (value: string, row: DriftEvent) =>
+        !row.resolved ? (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              handleResolveDrift(value);
+            }}
+            className="text-sm text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
+          >
+            Resolve
+          </button>
+        ) : null,
+    },
+  ];
+
+  // Anomaly Table Columns
+  const anomalyColumns = [
+    {
+      key: "container_name",
+      header: "Container",
+      sortable: true,
+      render: (value: string) => (
+        <span className="text-sm font-medium text-gray-900 dark:text-white">{value || "N/A"}</span>
+      ),
+    },
+    {
+      key: "anomaly_type",
+      header: "Anomaly Type",
+      render: (value: string) => (
+        <span className="text-sm text-gray-700 dark:text-gray-300 capitalize">
+          {value.replace(/_/g, " ")}
+        </span>
+      ),
+    },
+    {
+      key: "severity",
+      header: "Severity",
+      render: (value: string) => <SeverityBadge severity={value as any} size="sm" />,
+    },
+    {
+      key: "occurrence_count",
+      header: "Occurrences",
+      render: (value: number) => <span className="text-sm text-gray-700 dark:text-gray-300">{value}</span>,
+    },
+    {
+      key: "resolved",
+      header: "Status",
+      render: (value: boolean) =>
+        value ? (
+          <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 rounded text-xs">
+            <CheckCircle2 className="h-3 w-3" />
+            Resolved
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 px-2 py-1 bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 rounded text-xs">
+            <Clock className="h-3 w-3" />
+            Unresolved
+          </span>
+        ),
+    },
+    {
+      key: "detected_at",
+      header: "Detected At",
+      render: (value: string) => (
+        <span className="text-sm text-gray-500 dark:text-gray-400">{formatTimestamp(value)}</span>
+      ),
+    },
+    {
+      key: "id",
+      header: "Actions",
+      render: (value: string, row: BehavioralAnomaly) =>
+        !row.resolved ? (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              handleResolveAnomaly(value);
+            }}
+            className="text-sm text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
+          >
+            Resolve
+          </button>
+        ) : null,
+    },
+  ];
+
+  // Drift Filter Configuration
+  const driftFilterGroups = [
+    {
+      id: "severity",
+      label: "Severity",
+      type: "radio" as const,
+      value: driftFilters.severity,
+      onChange: (value: string | string[]) =>
+        setDriftFilters({ ...driftFilters, severity: value as string }),
+      options: [
+        { label: "All Severities", value: "" },
+        { label: "Critical", value: "critical" },
+        { label: "High", value: "high" },
+        { label: "Medium", value: "medium" },
+        { label: "Low", value: "low" },
+        { label: "Info", value: "info" },
+      ],
+    },
+    {
+      id: "drift_type",
+      label: "Drift Type",
+      type: "radio" as const,
+      value: driftFilters.drift_type,
+      onChange: (value: string | string[]) =>
+        setDriftFilters({ ...driftFilters, drift_type: value as string }),
+      options: [
+        { label: "All Types", value: "" },
+        { label: "Image Changed", value: "image_changed" },
+        { label: "Port Added", value: "port_added" },
+        { label: "Port Removed", value: "port_removed" },
+        { label: "Privilege Escalation", value: "privilege_escalation" },
+        { label: "Config Modified", value: "config_modified" },
+        { label: "Container Restarted", value: "container_restarted" },
+        { label: "Volume Added", value: "volume_added" },
+        { label: "Volume Removed", value: "volume_removed" },
+      ],
+    },
+    {
+      id: "status",
+      label: "Status",
+      type: "radio" as const,
+      value: driftFilters.resolved === undefined ? "" : driftFilters.resolved.toString(),
+      onChange: (value: string | string[]) =>
+        setDriftFilters({
+          ...driftFilters,
+          resolved: value === "" ? undefined : (value as string) === "true",
+        }),
+      options: [
+        { label: "All Status", value: "" },
+        { label: "Unresolved", value: "false" },
+        { label: "Resolved", value: "true" },
+      ],
+    },
+    {
+      id: "container_name",
+      label: "Container",
+      type: "search" as const,
+      value: driftFilters.container_name,
+      onChange: (value: string | string[]) =>
+        setDriftFilters({ ...driftFilters, container_name: value as string }),
+    },
+  ];
+
+  // Anomaly Filter Configuration
+  const anomalyFilterGroups = [
+    {
+      id: "severity",
+      label: "Severity",
+      type: "radio" as const,
+      value: anomalyFilters.severity,
+      onChange: (value: string | string[]) =>
+        setAnomalyFilters({ ...anomalyFilters, severity: value as string }),
+      options: [
+        { label: "All Severities", value: "" },
+        { label: "Critical", value: "critical" },
+        { label: "High", value: "high" },
+        { label: "Medium", value: "medium" },
+        { label: "Low", value: "low" },
+        { label: "Info", value: "info" },
+      ],
+    },
+    {
+      id: "anomaly_type",
+      label: "Anomaly Type",
+      type: "radio" as const,
+      value: anomalyFilters.anomaly_type,
+      onChange: (value: string | string[]) =>
+        setAnomalyFilters({ ...anomalyFilters, anomaly_type: value as string }),
+      options: [
+        { label: "All Types", value: "" },
+        { label: "Crash Loop", value: "crash_loop" },
+        { label: "Log Volume Spike", value: "log_volume_spike" },
+        { label: "Error Rate Spike", value: "error_rate_spike" },
+        { label: "CPU Exhaustion", value: "cpu_exhaustion" },
+        { label: "Memory Exhaustion", value: "memory_exhaustion" },
+        { label: "Disk Exhaustion", value: "disk_exhaustion" },
+        { label: "Network Spike", value: "network_spike" },
+      ],
+    },
+    {
+      id: "status",
+      label: "Status",
+      type: "radio" as const,
+      value: anomalyFilters.resolved === undefined ? "" : anomalyFilters.resolved.toString(),
+      onChange: (value: string | string[]) =>
+        setAnomalyFilters({
+          ...anomalyFilters,
+          resolved: value === "" ? undefined : (value as string) === "true",
+        }),
+      options: [
+        { label: "All Status", value: "" },
+        { label: "Unresolved", value: "false" },
+        { label: "Resolved", value: "true" },
+      ],
+    },
+    {
+      id: "container_name",
+      label: "Container",
+      type: "search" as const,
+      value: anomalyFilters.container_name,
+      onChange: (value: string | string[]) =>
+        setAnomalyFilters({ ...anomalyFilters, container_name: value as string }),
+    },
+  ];
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Runtime Security</h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">
-            Monitor runtime drift detection and behavioral anomalies
-          </p>
-        </div>
-        <button
-          onClick={() => {
-            queryClient.invalidateQueries({ queryKey: ["runtime-security-posture"] });
-            queryClient.invalidateQueries({ queryKey: ["drift-events"] });
-            queryClient.invalidateQueries({ queryKey: ["behavioral-anomalies"] });
-          }}
-          className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
-        >
-          <RefreshCw className="h-4 w-4" />
-          Refresh
-        </button>
-      </div>
+      {/* Section 1: Page Header with Breadcrumbs */}
+      <PageHeader
+        title="Runtime Security"
+        description="Monitor runtime drift detection and behavioral anomalies"
+        breadcrumbs={breadcrumbs}
+        action={headerAction}
+      />
 
       {/* Tabs */}
       <div className="border-b border-gray-200 dark:border-gray-800">
@@ -225,66 +457,45 @@ export default function RuntimeSecurityPage() {
         <div className="space-y-6">
           {postureLoading ? (
             <div className="flex items-center justify-center h-64">
-              <RefreshCw className="h-8 w-8 animate-spin text-gray-400" />
+              <Spinner size="lg" label="Loading security posture..." />
             </div>
           ) : posture ? (
             <>
-              {/* Overall Status */}
+              {/* Section 2: Overall Status */}
               <div className="bg-white dark:bg-gray-900 rounded-lg p-6 border border-gray-200 dark:border-gray-800">
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Overall Status</h2>
-                {getStatusBadge(posture.overall_status)}
+                <StatusIndicator status={posture.overall_status as any} size="lg" pulse />
               </div>
 
-              {/* Key Metrics Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="bg-white dark:bg-gray-900 rounded-lg p-6 border border-gray-200 dark:border-gray-800">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">Drift Events (24h)</p>
-                      <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
-                        {posture.drift_events_last_24h}
-                      </p>
-                    </div>
-                    <Activity className="h-8 w-8 text-blue-500" />
-                  </div>
-                </div>
-
-                <div className="bg-white dark:bg-gray-900 rounded-lg p-6 border border-gray-200 dark:border-gray-800">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">Anomalies (24h)</p>
-                      <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
-                        {posture.anomalies_last_24h}
-                      </p>
-                    </div>
-                    <AlertTriangle className="h-8 w-8 text-yellow-500" />
-                  </div>
-                </div>
-
-                <div className="bg-white dark:bg-gray-900 rounded-lg p-6 border border-gray-200 dark:border-gray-800">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">Unresolved Drift</p>
-                      <p className="text-2xl font-bold text-orange-600 dark:text-orange-400 mt-1">
-                        {posture.unresolved_drift}
-                      </p>
-                    </div>
-                    <FileWarning className="h-8 w-8 text-orange-500" />
-                  </div>
-                </div>
-
-                <div className="bg-white dark:bg-gray-900 rounded-lg p-6 border border-gray-200 dark:border-gray-800">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">Critical Issues</p>
-                      <p className="text-2xl font-bold text-red-600 dark:text-red-400 mt-1">
-                        {posture.critical_drift + posture.critical_anomalies}
-                      </p>
-                    </div>
-                    <ShieldX className="h-8 w-8 text-red-500" />
-                  </div>
-                </div>
-              </div>
+              {/* Section 3: Key Metrics Grid */}
+              <MetricsGrid columns={4}>
+                <StatCard
+                  label="Drift Events (24h)"
+                  value={posture.drift_events_last_24h}
+                  icon={Activity}
+                  iconColor="text-blue-600"
+                />
+                <StatCard
+                  label="Anomalies (24h)"
+                  value={posture.anomalies_last_24h}
+                  icon={AlertTriangle}
+                  iconColor="text-yellow-600"
+                />
+                <StatCard
+                  label="Unresolved Drift"
+                  value={posture.unresolved_drift}
+                  icon={FileWarning}
+                  iconColor="text-orange-600"
+                  valueColor="text-orange-600 dark:text-orange-400"
+                />
+                <StatCard
+                  label="Critical Issues"
+                  value={posture.critical_drift + posture.critical_anomalies}
+                  icon={ShieldX}
+                  iconColor="text-red-600"
+                  valueColor="text-red-600 dark:text-red-400"
+                />
+              </MetricsGrid>
 
               {/* Drift by Type */}
               <div className="bg-white dark:bg-gray-900 rounded-lg p-6 border border-gray-200 dark:border-gray-800">
@@ -328,66 +539,62 @@ export default function RuntimeSecurityPage() {
                 )}
               </div>
 
-              {/* Top Affected Containers */}
+              {/* Section 4: Top Affected Containers Table */}
               {posture.top_affected_containers.length > 0 && (
-                <div className="bg-white dark:bg-gray-900 rounded-lg p-6 border border-gray-200 dark:border-gray-800">
-                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-                    Top Affected Containers (7 days)
-                  </h2>
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead className="border-b border-gray-200 dark:border-gray-800">
-                        <tr>
-                          <th className="text-left py-3 px-4 text-sm font-medium text-gray-700 dark:text-gray-300">
-                            Container
-                          </th>
-                          <th className="text-left py-3 px-4 text-sm font-medium text-gray-700 dark:text-gray-300">
-                            Total Drift
-                          </th>
-                          <th className="text-left py-3 px-4 text-sm font-medium text-gray-700 dark:text-gray-300">
-                            Unresolved
-                          </th>
-                          <th className="text-left py-3 px-4 text-sm font-medium text-gray-700 dark:text-gray-300">
-                            Last Drift
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
-                        {posture.top_affected_containers.map((container) => (
-                          <tr key={container.deployment_id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
-                            <td className="py-3 px-4">
-                              <div className="flex items-center gap-2">
-                                <Container className="h-4 w-4 text-gray-400" />
-                                <span className="text-sm text-gray-900 dark:text-white font-medium">
-                                  {container.container_name}
-                                </span>
-                              </div>
-                            </td>
-                            <td className="py-3 px-4">
-                              <span className="text-sm text-gray-700 dark:text-gray-300">{container.total_drift}</span>
-                            </td>
-                            <td className="py-3 px-4">
-                              <span className="text-sm font-medium text-orange-600 dark:text-orange-400">
-                                {container.unresolved_drift}
-                              </span>
-                            </td>
-                            <td className="py-3 px-4">
-                              <span className="text-sm text-gray-500 dark:text-gray-400">
-                                {formatTimestamp(container.last_drift_at)}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
+                  <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-800">
+                    <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                      Top Affected Containers (7 days)
+                    </h2>
                   </div>
+                  <Table
+                    columns={[
+                      {
+                        key: "container_name",
+                        header: "Container",
+                        render: (value: string) => (
+                          <div className="flex items-center gap-2">
+                            <Container className="h-4 w-4 text-gray-400" />
+                            <span className="text-sm text-gray-900 dark:text-white font-medium">{value}</span>
+                          </div>
+                        ),
+                      },
+                      {
+                        key: "total_drift",
+                        header: "Total Drift",
+                        render: (value: number) => (
+                          <span className="text-sm text-gray-700 dark:text-gray-300">{value}</span>
+                        ),
+                      },
+                      {
+                        key: "unresolved_drift",
+                        header: "Unresolved",
+                        render: (value: number) => (
+                          <span className="text-sm font-medium text-orange-600 dark:text-orange-400">{value}</span>
+                        ),
+                      },
+                      {
+                        key: "last_drift_at",
+                        header: "Last Drift",
+                        render: (value: string) => (
+                          <span className="text-sm text-gray-500 dark:text-gray-400">
+                            {formatTimestamp(value)}
+                          </span>
+                        ),
+                      },
+                    ]}
+                    data={posture.top_affected_containers}
+                    keyExtractor={(row) => row.deployment_id}
+                  />
                 </div>
               )}
             </>
           ) : (
-            <div className="bg-white dark:bg-gray-900 rounded-lg p-8 border border-gray-200 dark:border-gray-800 text-center">
-              <p className="text-gray-500 dark:text-gray-400">No runtime security data available</p>
-            </div>
+            <EmptyState
+              icon={ShieldCheck}
+              title="No runtime security data available"
+              description="Start monitoring your containers to see runtime security insights"
+            />
           )}
         </div>
       )}
@@ -395,415 +602,278 @@ export default function RuntimeSecurityPage() {
       {activeTab === "drift" && (
         <div className="space-y-6">
           {/* Filters */}
-          <div className="bg-white dark:bg-gray-900 rounded-lg p-4 border border-gray-200 dark:border-gray-800">
-            <div className="flex items-center gap-2 mb-3">
-              <Filter className="h-4 w-4 text-gray-500" />
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Filters</span>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <select
-                value={driftFilters.severity}
-                onChange={(e) => setDriftFilters({ ...driftFilters, severity: e.target.value })}
-                className="px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-sm"
-              >
-                <option value="">All Severities</option>
-                <option value="critical">Critical</option>
-                <option value="high">High</option>
-                <option value="medium">Medium</option>
-                <option value="low">Low</option>
-                <option value="info">Info</option>
-              </select>
-
-              <select
-                value={driftFilters.drift_type}
-                onChange={(e) => setDriftFilters({ ...driftFilters, drift_type: e.target.value })}
-                className="px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-sm"
-              >
-                <option value="">All Types</option>
-                <option value="image_changed">Image Changed</option>
-                <option value="port_added">Port Added</option>
-                <option value="port_removed">Port Removed</option>
-                <option value="privilege_escalation">Privilege Escalation</option>
-                <option value="config_modified">Config Modified</option>
-                <option value="container_restarted">Container Restarted</option>
-                <option value="volume_added">Volume Added</option>
-                <option value="volume_removed">Volume Removed</option>
-              </select>
-
-              <select
-                value={driftFilters.resolved === undefined ? "" : driftFilters.resolved.toString()}
-                onChange={(e) =>
-                  setDriftFilters({
-                    ...driftFilters,
-                    resolved: e.target.value === "" ? undefined : e.target.value === "true",
-                  })
-                }
-                className="px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-sm"
-              >
-                <option value="">All Status</option>
-                <option value="false">Unresolved</option>
-                <option value="true">Resolved</option>
-              </select>
-
-              <input
-                type="text"
-                placeholder="Container name..."
-                value={driftFilters.container_name}
-                onChange={(e) => setDriftFilters({ ...driftFilters, container_name: e.target.value })}
-                className="px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-sm"
-              />
-            </div>
-          </div>
+          <FilterPanel
+            filters={driftFilterGroups}
+            onReset={() =>
+              setDriftFilters({
+                severity: "",
+                drift_type: "",
+                resolved: undefined,
+                container_name: "",
+              })
+            }
+          />
 
           {/* Drift Events Table */}
           <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
             {driftLoading ? (
               <div className="flex items-center justify-center h-64">
-                <RefreshCw className="h-8 w-8 animate-spin text-gray-400" />
+                <Spinner size="lg" label="Loading drift events..." />
               </div>
             ) : driftData && driftData.drift_events.length > 0 ? (
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-                    <tr>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Container
-                      </th>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Drift Type
-                      </th>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Severity
-                      </th>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Status
-                      </th>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Detected At
-                      </th>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
-                    {driftData.drift_events.map((event) => (
-                      <tr
-                        key={event.id}
-                        onClick={() => setSelectedDrift(event)}
-                        className="hover:bg-gray-50 dark:hover:bg-gray-800/50 cursor-pointer"
-                      >
-                        <td className="py-3 px-4">
-                          <span className="text-sm font-medium text-gray-900 dark:text-white">
-                            {event.container_name}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4">
-                          <span className="text-sm text-gray-700 dark:text-gray-300 capitalize">
-                            {event.drift_type.replace(/_/g, " ")}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4">{getSeverityBadge(event.severity)}</td>
-                        <td className="py-3 px-4">
-                          {event.resolved ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 rounded text-xs">
-                              <CheckCircle2 className="h-3 w-3" />
-                              Resolved
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-1 bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 rounded text-xs">
-                              <Clock className="h-3 w-3" />
-                              Unresolved
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-3 px-4">
-                          <span className="text-sm text-gray-500 dark:text-gray-400">
-                            {formatTimestamp(event.detected_at)}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4">
-                          {!event.resolved && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleResolveDrift(event.id);
-                              }}
-                              className="text-sm text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
-                            >
-                              Resolve
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <Table
+                columns={driftColumns}
+                data={driftData.drift_events}
+                keyExtractor={(row) => row.id}
+                onRowClick={(row) => setSelectedDrift(row)}
+                hoverable
+              />
             ) : (
-              <div className="p-8 text-center">
-                <p className="text-gray-500 dark:text-gray-400">No drift events found</p>
-              </div>
+              <EmptyState
+                icon={ShieldCheck}
+                title="No drift events found"
+                description="No drift events match your current filters"
+                size="sm"
+              />
             )}
           </div>
-
-          {/* Detail Panel */}
-          {selectedDrift && (
-            <div className="bg-white dark:bg-gray-900 rounded-lg p-6 border border-gray-200 dark:border-gray-800">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Drift Event Details</h3>
-                <button
-                  onClick={() => setSelectedDrift(null)}
-                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-                >
-                  <XIcon className="h-5 w-5" />
-                </button>
-              </div>
-              <div className="space-y-4">
-                <div>
-                  <span className="text-sm font-medium text-gray-500 dark:text-gray-400">Container:</span>
-                  <p className="text-sm text-gray-900 dark:text-white mt-1">{selectedDrift.container_name}</p>
-                </div>
-                <div>
-                  <span className="text-sm font-medium text-gray-500 dark:text-gray-400">Description:</span>
-                  <p className="text-sm text-gray-900 dark:text-white mt-1">{selectedDrift.description}</p>
-                </div>
-                <div>
-                  <span className="text-sm font-medium text-gray-500 dark:text-gray-400">Expected State:</span>
-                  <pre className="text-xs bg-gray-100 dark:bg-gray-800 p-3 rounded mt-1 overflow-x-auto">
-                    {JSON.stringify(selectedDrift.expected_state, null, 2)}
-                  </pre>
-                </div>
-                <div>
-                  <span className="text-sm font-medium text-gray-500 dark:text-gray-400">Actual State:</span>
-                  <pre className="text-xs bg-gray-100 dark:bg-gray-800 p-3 rounded mt-1 overflow-x-auto">
-                    {JSON.stringify(selectedDrift.actual_state, null, 2)}
-                  </pre>
-                </div>
-                {selectedDrift.resolved && selectedDrift.resolution_notes && (
-                  <div>
-                    <span className="text-sm font-medium text-gray-500 dark:text-gray-400">Resolution Notes:</span>
-                    <p className="text-sm text-gray-900 dark:text-white mt-1">{selectedDrift.resolution_notes}</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
         </div>
       )}
 
       {activeTab === "anomalies" && (
         <div className="space-y-6">
           {/* Filters */}
-          <div className="bg-white dark:bg-gray-900 rounded-lg p-4 border border-gray-200 dark:border-gray-800">
-            <div className="flex items-center gap-2 mb-3">
-              <Filter className="h-4 w-4 text-gray-500" />
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Filters</span>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <select
-                value={anomalyFilters.severity}
-                onChange={(e) => setAnomalyFilters({ ...anomalyFilters, severity: e.target.value })}
-                className="px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-sm"
-              >
-                <option value="">All Severities</option>
-                <option value="critical">Critical</option>
-                <option value="high">High</option>
-                <option value="medium">Medium</option>
-                <option value="low">Low</option>
-                <option value="info">Info</option>
-              </select>
-
-              <select
-                value={anomalyFilters.anomaly_type}
-                onChange={(e) => setAnomalyFilters({ ...anomalyFilters, anomaly_type: e.target.value })}
-                className="px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-sm"
-              >
-                <option value="">All Types</option>
-                <option value="crash_loop">Crash Loop</option>
-                <option value="log_volume_spike">Log Volume Spike</option>
-                <option value="error_rate_spike">Error Rate Spike</option>
-                <option value="cpu_exhaustion">CPU Exhaustion</option>
-                <option value="memory_exhaustion">Memory Exhaustion</option>
-                <option value="disk_exhaustion">Disk Exhaustion</option>
-                <option value="network_spike">Network Spike</option>
-              </select>
-
-              <select
-                value={anomalyFilters.resolved === undefined ? "" : anomalyFilters.resolved.toString()}
-                onChange={(e) =>
-                  setAnomalyFilters({
-                    ...anomalyFilters,
-                    resolved: e.target.value === "" ? undefined : e.target.value === "true",
-                  })
-                }
-                className="px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-sm"
-              >
-                <option value="">All Status</option>
-                <option value="false">Unresolved</option>
-                <option value="true">Resolved</option>
-              </select>
-
-              <input
-                type="text"
-                placeholder="Container name..."
-                value={anomalyFilters.container_name}
-                onChange={(e) => setAnomalyFilters({ ...anomalyFilters, container_name: e.target.value })}
-                className="px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-sm"
-              />
-            </div>
-          </div>
+          <FilterPanel
+            filters={anomalyFilterGroups}
+            onReset={() =>
+              setAnomalyFilters({
+                severity: "",
+                anomaly_type: "",
+                resolved: undefined,
+                container_name: "",
+              })
+            }
+          />
 
           {/* Anomalies Table */}
           <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
             {anomalyLoading ? (
               <div className="flex items-center justify-center h-64">
-                <RefreshCw className="h-8 w-8 animate-spin text-gray-400" />
+                <Spinner size="lg" label="Loading anomalies..." />
               </div>
             ) : anomalyData && anomalyData.anomalies.length > 0 ? (
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-                    <tr>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Container
-                      </th>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Anomaly Type
-                      </th>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Severity
-                      </th>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Occurrences
-                      </th>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Status
-                      </th>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Detected At
-                      </th>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
-                    {anomalyData.anomalies.map((anomaly) => (
-                      <tr
-                        key={anomaly.id}
-                        onClick={() => setSelectedAnomaly(anomaly)}
-                        className="hover:bg-gray-50 dark:hover:bg-gray-800/50 cursor-pointer"
-                      >
-                        <td className="py-3 px-4">
-                          <span className="text-sm font-medium text-gray-900 dark:text-white">
-                            {anomaly.container_name || "N/A"}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4">
-                          <span className="text-sm text-gray-700 dark:text-gray-300 capitalize">
-                            {anomaly.anomaly_type.replace(/_/g, " ")}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4">{getSeverityBadge(anomaly.severity)}</td>
-                        <td className="py-3 px-4">
-                          <span className="text-sm text-gray-700 dark:text-gray-300">
-                            {anomaly.occurrence_count}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4">
-                          {anomaly.resolved ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 rounded text-xs">
-                              <CheckCircle2 className="h-3 w-3" />
-                              Resolved
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-1 bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 rounded text-xs">
-                              <Clock className="h-3 w-3" />
-                              Unresolved
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-3 px-4">
-                          <span className="text-sm text-gray-500 dark:text-gray-400">
-                            {formatTimestamp(anomaly.detected_at)}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4">
-                          {!anomaly.resolved && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleResolveAnomaly(anomaly.id);
-                              }}
-                              className="text-sm text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
-                            >
-                              Resolve
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <Table
+                columns={anomalyColumns}
+                data={anomalyData.anomalies}
+                keyExtractor={(row) => row.id}
+                onRowClick={(row) => setSelectedAnomaly(row)}
+                hoverable
+              />
             ) : (
-              <div className="p-8 text-center">
-                <p className="text-gray-500 dark:text-gray-400">No behavioral anomalies found</p>
-              </div>
+              <EmptyState
+                icon={ShieldCheck}
+                title="No behavioral anomalies found"
+                description="No anomalies match your current filters"
+                size="sm"
+              />
             )}
           </div>
-
-          {/* Detail Panel */}
-          {selectedAnomaly && (
-            <div className="bg-white dark:bg-gray-900 rounded-lg p-6 border border-gray-200 dark:border-gray-800">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Anomaly Details</h3>
-                <button
-                  onClick={() => setSelectedAnomaly(null)}
-                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-                >
-                  <XIcon className="h-5 w-5" />
-                </button>
-              </div>
-              <div className="space-y-4">
-                <div>
-                  <span className="text-sm font-medium text-gray-500 dark:text-gray-400">Container:</span>
-                  <p className="text-sm text-gray-900 dark:text-white mt-1">
-                    {selectedAnomaly.container_name || "N/A"}
-                  </p>
-                </div>
-                <div>
-                  <span className="text-sm font-medium text-gray-500 dark:text-gray-400">Description:</span>
-                  <p className="text-sm text-gray-900 dark:text-white mt-1">{selectedAnomaly.description}</p>
-                </div>
-                <div>
-                  <span className="text-sm font-medium text-gray-500 dark:text-gray-400">Occurrence Count:</span>
-                  <p className="text-sm text-gray-900 dark:text-white mt-1">{selectedAnomaly.occurrence_count}</p>
-                </div>
-                <div>
-                  <span className="text-sm font-medium text-gray-500 dark:text-gray-400">Metrics:</span>
-                  <pre className="text-xs bg-gray-100 dark:bg-gray-800 p-3 rounded mt-1 overflow-x-auto">
-                    {JSON.stringify(selectedAnomaly.metrics, null, 2)}
-                  </pre>
-                </div>
-                <div>
-                  <span className="text-sm font-medium text-gray-500 dark:text-gray-400">Threshold:</span>
-                  <pre className="text-xs bg-gray-100 dark:bg-gray-800 p-3 rounded mt-1 overflow-x-auto">
-                    {JSON.stringify(selectedAnomaly.threshold, null, 2)}
-                  </pre>
-                </div>
-                {selectedAnomaly.resolved && selectedAnomaly.resolution_notes && (
-                  <div>
-                    <span className="text-sm font-medium text-gray-500 dark:text-gray-400">Resolution Notes:</span>
-                    <p className="text-sm text-gray-900 dark:text-white mt-1">{selectedAnomaly.resolution_notes}</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
         </div>
       )}
+
+      {/* Drift Detail SlideOver */}
+      <SlideOver isOpen={!!selectedDrift} onClose={() => setSelectedDrift(null)} size="lg">
+        <SlideOver.Header onClose={() => setSelectedDrift(null)}>
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Drift Event Details</h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              {selectedDrift?.container_name}
+            </p>
+          </div>
+        </SlideOver.Header>
+
+        <SlideOver.Body>
+          {selectedDrift && (
+            <div className="space-y-6">
+              <div>
+                <h4 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Overview</h4>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-700 dark:text-gray-300">Severity</span>
+                    <SeverityBadge severity={selectedDrift.severity as any} />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-700 dark:text-gray-300">Type</span>
+                    <span className="text-sm font-medium text-gray-900 dark:text-white capitalize">
+                      {selectedDrift.drift_type.replace(/_/g, " ")}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-700 dark:text-gray-300">Detected At</span>
+                    <span className="text-sm text-gray-900 dark:text-white">
+                      {formatTimestamp(selectedDrift.detected_at)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <h4 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Description</h4>
+                <p className="text-sm text-gray-900 dark:text-white">{selectedDrift.description}</p>
+              </div>
+
+              <div>
+                <h4 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Expected State</h4>
+                <pre className="text-xs bg-gray-100 dark:bg-gray-800 p-3 rounded overflow-x-auto">
+                  {JSON.stringify(selectedDrift.expected_state, null, 2)}
+                </pre>
+              </div>
+
+              <div>
+                <h4 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Actual State</h4>
+                <pre className="text-xs bg-gray-100 dark:bg-gray-800 p-3 rounded overflow-x-auto">
+                  {JSON.stringify(selectedDrift.actual_state, null, 2)}
+                </pre>
+              </div>
+
+              {selectedDrift.resolved && (
+                <div>
+                  <h4 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Resolution</h4>
+                  <Timeline>
+                    <Timeline.Item
+                      icon={CheckCircle2}
+                      iconColor="text-green-600 dark:text-green-400"
+                      title="Resolved"
+                      timestamp={selectedDrift.resolved_at ? formatTimestamp(selectedDrift.resolved_at) : undefined}
+                      description={selectedDrift.resolution_notes}
+                    />
+                  </Timeline>
+                </div>
+              )}
+            </div>
+          )}
+        </SlideOver.Body>
+
+        {selectedDrift && !selectedDrift.resolved && (
+          <SlideOver.Footer>
+            <button
+              onClick={() => setSelectedDrift(null)}
+              className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
+            >
+              Close
+            </button>
+            <button
+              onClick={() => {
+                if (selectedDrift) handleResolveDrift(selectedDrift.id);
+              }}
+              className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700"
+            >
+              Mark as Resolved
+            </button>
+          </SlideOver.Footer>
+        )}
+      </SlideOver>
+
+      {/* Anomaly Detail SlideOver */}
+      <SlideOver isOpen={!!selectedAnomaly} onClose={() => setSelectedAnomaly(null)} size="lg">
+        <SlideOver.Header onClose={() => setSelectedAnomaly(null)}>
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Anomaly Details</h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              {selectedAnomaly?.container_name || "N/A"}
+            </p>
+          </div>
+        </SlideOver.Header>
+
+        <SlideOver.Body>
+          {selectedAnomaly && (
+            <div className="space-y-6">
+              <div>
+                <h4 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Overview</h4>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-700 dark:text-gray-300">Severity</span>
+                    <SeverityBadge severity={selectedAnomaly.severity as any} />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-700 dark:text-gray-300">Type</span>
+                    <span className="text-sm font-medium text-gray-900 dark:text-white capitalize">
+                      {selectedAnomaly.anomaly_type.replace(/_/g, " ")}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-700 dark:text-gray-300">Occurrences</span>
+                    <span className="text-sm font-medium text-gray-900 dark:text-white">
+                      {selectedAnomaly.occurrence_count}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-700 dark:text-gray-300">Detected At</span>
+                    <span className="text-sm text-gray-900 dark:text-white">
+                      {formatTimestamp(selectedAnomaly.detected_at)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <h4 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Description</h4>
+                <p className="text-sm text-gray-900 dark:text-white">{selectedAnomaly.description}</p>
+              </div>
+
+              <div>
+                <h4 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Metrics</h4>
+                <pre className="text-xs bg-gray-100 dark:bg-gray-800 p-3 rounded overflow-x-auto">
+                  {JSON.stringify(selectedAnomaly.metrics, null, 2)}
+                </pre>
+              </div>
+
+              <div>
+                <h4 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Threshold</h4>
+                <pre className="text-xs bg-gray-100 dark:bg-gray-800 p-3 rounded overflow-x-auto">
+                  {JSON.stringify(selectedAnomaly.threshold, null, 2)}
+                </pre>
+              </div>
+
+              {selectedAnomaly.resolved && (
+                <div>
+                  <h4 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Resolution</h4>
+                  <Timeline>
+                    <Timeline.Item
+                      icon={CheckCircle2}
+                      iconColor="text-green-600 dark:text-green-400"
+                      title="Resolved"
+                      timestamp={
+                        selectedAnomaly.resolved_at ? formatTimestamp(selectedAnomaly.resolved_at) : undefined
+                      }
+                      description={selectedAnomaly.resolution_notes}
+                    />
+                  </Timeline>
+                </div>
+              )}
+            </div>
+          )}
+        </SlideOver.Body>
+
+        {selectedAnomaly && !selectedAnomaly.resolved && (
+          <SlideOver.Footer>
+            <button
+              onClick={() => setSelectedAnomaly(null)}
+              className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
+            >
+              Close
+            </button>
+            <button
+              onClick={() => {
+                if (selectedAnomaly) handleResolveAnomaly(selectedAnomaly.id);
+              }}
+              className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700"
+            >
+              Mark as Resolved
+            </button>
+          </SlideOver.Footer>
+        )}
+      </SlideOver>
     </div>
   );
 }
