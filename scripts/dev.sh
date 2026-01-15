@@ -96,9 +96,9 @@ case "$1" in
   "dev")
     echo "Starting full local development environment..."
     echo ""
-    echo "Starting Docker services (DB, Redis, Nginx)..."
+    echo "Starting Docker services (DB, Redis only)..."
     cd "$PROJECT_ROOT"
-    $COMPOSE -f docker-compose.dev.yml up -d postgres redis nginx
+    $COMPOSE -f docker-compose.dev.yml up -d postgres redis
     echo "Waiting for services..."
     sleep 3
 
@@ -117,39 +117,51 @@ case "$1" in
     echo "        Backend PID: $BACKEND_PID"
 
     # Start frontend
-    echo "  [2/3] Starting frontend (Next.js)..."
+    echo "  [2/4] Starting frontend (Next.js)..."
     cd "$PROJECT_ROOT/frontend"
     pnpm dev > "$PROJECT_ROOT/.dev-logs/frontend.log" 2>&1 &
     FRONTEND_PID=$!
     echo "        Frontend PID: $FRONTEND_PID"
 
     # Start Storybook
-    echo "  [3/3] Starting Storybook..."
+    echo "  [3/4] Starting Storybook..."
     pnpm storybook > "$PROJECT_ROOT/.dev-logs/storybook.log" 2>&1 &
     STORYBOOK_PID=$!
     echo "        Storybook PID: $STORYBOOK_PID"
+
+    # Start Agent
+    echo "  [4/4] Starting Agent..."
+    cd "$PROJECT_ROOT/agent"
+    AGENT_ID=00000000-0000-0000-0000-000000000001 \
+    BACKEND_GRPC_ADDR=localhost:9090 \
+    BACKEND_HTTP_URL=http://localhost:8080 \
+    go run ./cmd/agent > "$PROJECT_ROOT/.dev-logs/agent.log" 2>&1 &
+    AGENT_PID=$!
+    echo "        Agent PID: $AGENT_PID"
 
     # Save PIDs for cleanup
     echo "$BACKEND_PID" > "$PROJECT_ROOT/.dev-logs/backend.pid"
     echo "$FRONTEND_PID" > "$PROJECT_ROOT/.dev-logs/frontend.pid"
     echo "$STORYBOOK_PID" > "$PROJECT_ROOT/.dev-logs/storybook.pid"
+    echo "$AGENT_PID" > "$PROJECT_ROOT/.dev-logs/agent.pid"
 
     echo ""
     echo "✅ Development environment started!"
     echo ""
-    echo "Services:"
-    echo "  📊 Dashboard:   http://localhost"
-    echo "  🔌 API:         http://localhost/api/v1"
+    echo "Services (Direct Access - No Nginx):"
+    echo "  📊 Dashboard:   http://localhost:3000"
+    echo "  🔌 API:         http://localhost:8080/api/v1"
     echo "  📖 Storybook:   http://localhost:6006"
     echo ""
-    echo "Direct Access (Bypasses Nginx):"
-    echo "  Frontend:   http://localhost:3000"
-    echo "  Backend:    http://localhost:8080/api/v1"
+    echo "Database:"
+    echo "  PostgreSQL:  localhost:5432 (infrapilot/infrapilot)"
+    echo "  Redis:       localhost:6379"
     echo ""
     echo "Logs:"
     echo "  Backend:    tail -f $PROJECT_ROOT/.dev-logs/backend.log"
     echo "  Frontend:   tail -f $PROJECT_ROOT/.dev-logs/frontend.log"
     echo "  Storybook:  tail -f $PROJECT_ROOT/.dev-logs/storybook.log"
+    echo "  Agent:      tail -f $PROJECT_ROOT/.dev-logs/agent.log"
     echo ""
     echo "To stop all services: ./scripts/dev.sh dev:stop"
     echo ""
@@ -180,6 +192,13 @@ case "$1" in
       rm -f .dev-logs/storybook.pid
     fi
 
+    if [ -f ".dev-logs/agent.pid" ]; then
+      AGENT_PID=$(cat .dev-logs/agent.pid)
+      echo "  Stopping Agent (PID: $AGENT_PID)..."
+      kill $AGENT_PID 2>/dev/null || true
+      rm -f .dev-logs/agent.pid
+    fi
+
     echo "  Stopping database services..."
     $COMPOSE -f docker-compose.dev.yml down
 
@@ -194,9 +213,10 @@ case "$1" in
     echo "  1. Backend"
     echo "  2. Frontend"
     echo "  3. Storybook"
-    echo "  4. All (combined)"
+    echo "  4. Agent"
+    echo "  5. All (combined)"
     echo ""
-    read -p "Enter choice (1-4): " choice
+    read -p "Enter choice (1-5): " choice
 
     case $choice in
       1)
@@ -209,6 +229,9 @@ case "$1" in
         tail -f "$PROJECT_ROOT/.dev-logs/storybook.log"
         ;;
       4)
+        tail -f "$PROJECT_ROOT/.dev-logs/agent.log"
+        ;;
+      5)
         tail -f "$PROJECT_ROOT/.dev-logs/"*.log
         ;;
       *)
@@ -241,10 +264,11 @@ case "$1" in
     echo "  seed        Apply seed data (org, agent - no users)"
     echo "  air         Install Air for hot reload"
     echo ""
-    echo "Quick Start (Local Development):"
+    echo "Quick Start (Local Development - Recommended):"
     echo "  ./scripts/dev.sh dev"
     echo "  Open http://localhost:3000 (Dashboard)"
     echo "  Open http://localhost:6006 (Storybook)"
+    echo "  (Runs locally with hot reload, DB in Docker)"
     echo ""
     echo "Quick Start (Docker):"
     echo "  ./scripts/dev.sh up"

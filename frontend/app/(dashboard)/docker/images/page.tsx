@@ -48,11 +48,12 @@ export default function ImagesPage() {
   });
 
   // Fetch images for selected agent
-  const { data: images, isLoading } = useQuery({
+  const { data: images, isLoading, error, isError } = useQuery({
     queryKey: ["docker-images", selectedAgent],
     queryFn: () =>
       selectedAgent ? api.getDockerImages(selectedAgent) : Promise.resolve([]),
     enabled: !!selectedAgent,
+    retry: 1, // Only retry once for 503 errors
   });
 
   // Pull image mutation
@@ -253,6 +254,26 @@ export default function ImagesPage() {
         <div className="flex items-center justify-center h-64">
           <Spinner size="lg" />
         </div>
+      ) : isError ? (
+        <EmptyState
+          icon={AlertTriangle}
+          title="Unable to fetch images"
+          description={
+            error instanceof Error && error.message.includes('503')
+              ? "The agent is unavailable or Docker is not running. Please check that the agent is online and Docker daemon is running."
+              : error instanceof Error
+              ? error.message
+              : "Failed to connect to the agent. Please try again later."
+          }
+          action={
+            <button
+              onClick={() => queryClient.invalidateQueries({ queryKey: ["docker-images", selectedAgent] })}
+              className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+            >
+              Retry
+            </button>
+          }
+        />
       ) : (
         <>
           {/* Metrics */}

@@ -108,7 +108,7 @@ const navigationSections: NavigationSection[] = [
       { name: "Proxies", href: "/proxies", icon: Globe },
       { name: "Networks", href: "/docker/networks", icon: Network },
       { name: "Volumes", href: "/docker/volumes", icon: HardDrive },
-      { name: "Health", href: "/health", icon: Activity },
+      { name: "Health", href: "/system-health", icon: Activity },
       { name: "Users", href: "/users", icon: Users },
       { name: "Settings", href: "/settings", icon: Settings },
     ],
