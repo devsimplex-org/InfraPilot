@@ -303,6 +303,42 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				codeQuality.DELETE("/policies/:id", h.RequireManageAlerts(), h.deleteCodeQualityPolicy)
 			}
 
+			// Platform Security (Epic 6: DevSecOps Hardening)
+			security := protected.Group("/security")
+			{
+				// Configuration
+				security.GET("/config", h.getPlatformSecurityConfig)
+				security.PUT("/config", h.RequireManageAlerts(), h.updatePlatformSecurityConfig)
+
+				// Self-Check & Posture
+				security.POST("/self-check", h.runSecuritySelfCheck)
+				security.GET("/posture", h.getSecurityPosture)
+
+				// Policy Violations
+				security.GET("/violations", h.listPolicyViolations)
+				security.GET("/violations/summary", h.getViolationSummary)
+				security.POST("/violations/:id/acknowledge", h.RequireManageAlerts(), h.acknowledgeViolation)
+			}
+
+			// Runtime Security (Epic 3: Runtime Security & Drift Detection)
+			runtime := protected.Group("/runtime")
+			{
+				// Drift Events
+				runtime.GET("/drift-events", h.listDriftEvents)
+				runtime.GET("/drift-events/:id", h.getDriftEvent)
+				runtime.POST("/drift-events/:id/resolve", h.RequireManageAlerts(), h.resolveDriftEvent)
+
+				// Behavioral Anomalies
+				runtime.GET("/anomalies", h.listBehavioralAnomalies)
+				runtime.GET("/anomalies/:id", h.getBehavioralAnomaly)
+				runtime.POST("/anomalies/:id/resolve", h.RequireManageAlerts(), h.resolveBehavioralAnomaly)
+
+				// Configuration & Posture
+				runtime.GET("/config", h.getRuntimeSecurityConfig)
+				runtime.PUT("/config", h.RequireManageAlerts(), h.updateRuntimeSecurityConfig)
+				runtime.GET("/posture", h.getRuntimeSecurityPosture)
+			}
+
 			// Alerts
 			alerts := protected.Group("/alerts")
 			{
