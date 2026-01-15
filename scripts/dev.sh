@@ -96,14 +96,14 @@ case "$1" in
   "dev")
     echo "Starting full local development environment..."
     echo ""
-    echo "Starting database services..."
+    echo "Starting Docker services (DB, Redis, Nginx)..."
     cd "$PROJECT_ROOT"
-    $COMPOSE -f docker-compose.dev.yml up -d postgres redis
-    echo "Waiting for database..."
+    $COMPOSE -f docker-compose.dev.yml up -d postgres redis nginx
+    echo "Waiting for services..."
     sleep 3
 
     echo ""
-    echo "Starting services in background..."
+    echo "Starting local services in background..."
     echo ""
 
     # Create a temporary directory for log files
@@ -138,9 +138,13 @@ case "$1" in
     echo "✅ Development environment started!"
     echo ""
     echo "Services:"
-    echo "  📊 Dashboard:   http://localhost:3000"
-    echo "  🔌 API:         http://localhost:8080/api/v1"
+    echo "  📊 Dashboard:   http://localhost"
+    echo "  🔌 API:         http://localhost/api/v1"
     echo "  📖 Storybook:   http://localhost:6006"
+    echo ""
+    echo "Direct Access (Bypasses Nginx):"
+    echo "  Frontend:   http://localhost:3000"
+    echo "  Backend:    http://localhost:8080/api/v1"
     echo ""
     echo "Logs:"
     echo "  Backend:    tail -f $PROJECT_ROOT/.dev-logs/backend.log"
