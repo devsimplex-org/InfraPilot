@@ -193,10 +193,10 @@ func (h *Handler) getVulnerabilityStatistics(c *gin.Context, orgID uuid.UUID) (V
 	query := `
 		SELECT
 			COUNT(DISTINCT v.id) as total,
-			COUNT(DISTINCT v.id) FILTER (WHERE v.severity = 'CRITICAL') as critical,
-			COUNT(DISTINCT v.id) FILTER (WHERE v.severity = 'HIGH') as high,
-			COUNT(DISTINCT v.id) FILTER (WHERE v.severity = 'MEDIUM') as medium,
-			COUNT(DISTINCT v.id) FILTER (WHERE v.severity = 'LOW') as low,
+			COUNT(DISTINCT v.id) FILTER (WHERE v.severity = 'critical') as critical,
+			COUNT(DISTINCT v.id) FILTER (WHERE v.severity = 'high') as high,
+			COUNT(DISTINCT v.id) FILTER (WHERE v.severity = 'medium') as medium,
+			COUNT(DISTINCT v.id) FILTER (WHERE v.severity = 'low') as low,
 			COUNT(DISTINCT v.id) FILTER (WHERE v.fixed_version IS NOT NULL AND v.fixed_version != '') as fixable,
 			COUNT(DISTINCT sr.image_digest) as affected_images
 		FROM vulnerabilities v
