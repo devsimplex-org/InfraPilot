@@ -990,6 +990,105 @@ export interface CreateDeploymentRequest {
   ci_build_url?: string;
 }
 
+// Developer Feedback (Epic 8)
+export interface Feedback {
+  id: string;
+  org_id: string;
+  source_type: "vulnerability" | "policy_violation" | "sbom" | "drift" | "code_quality";
+  source_id: string;
+  provider: "github" | "gitlab" | "bitbucket" | "azure_devops";
+  repo_full_name: string;
+  pull_request_number?: number;
+  commit_sha?: string;
+  branch_name?: string;
+  severity?: string;
+  title: string;
+  message: string;
+  remediation?: string;
+  metadata?: Record<string, any>;
+  delivery_status: "pending" | "delivered" | "failed" | "skipped";
+  delivered_at?: string;
+  delivery_error?: string;
+  external_id?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VCSConfiguration {
+  id: string;
+  org_id: string;
+  provider: "github" | "gitlab" | "bitbucket" | "azure_devops";
+  enabled: boolean;
+  auth_type: string;
+  app_id?: string;
+  installation_id?: string;
+  default_repo?: string;
+  auto_comment_on_pr: boolean;
+  auto_comment_on_commit: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SaveVCSConfigRequest {
+  provider: string;
+  enabled: boolean;
+  token?: string;
+  default_repo?: string;
+  auto_comment_on_pr: boolean;
+  auto_comment_on_commit: boolean;
+}
+
+// Risk Exceptions (Epic 9)
+export interface RiskException {
+  id: string;
+  org_id: string;
+  scope_type: "cve" | "policy_rule" | "deployment" | "package" | "image";
+  scope_reference: string;
+  deployment_id?: string;
+  scan_result_id?: string;
+  requested_by: string;
+  justification: string;
+  business_impact?: string;
+  mitigation_plan?: string;
+  status: "pending" | "approved" | "denied" | "expired" | "revoked";
+  approved_by?: string;
+  approved_at?: string;
+  denial_reason?: string;
+  expires_at: string;
+  auto_renewed: boolean;
+  renewal_count: number;
+  revoked_at?: string;
+  revoked_by?: string;
+  revoked_reason?: string;
+  tags?: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateExceptionRequest {
+  scope_type: string;
+  scope_reference: string;
+  deployment_id?: string;
+  scan_result_id?: string;
+  justification: string;
+  business_impact?: string;
+  mitigation_plan?: string;
+  duration_days: number;
+  tags?: string[];
+}
+
+export interface ApproveExceptionRequest {
+  comment?: string;
+}
+
+export interface DenyExceptionRequest {
+  reason: string;
+}
+
+export interface RevokeExceptionRequest {
+  reason: string;
+}
+
 // API methods
 export const api = {
   // Setup (first-run)
@@ -1964,4 +2063,77 @@ export const api = {
     const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
     window.open(`${API_BASE}/sboms/${sbomId}/download${token ? `?token=${token}` : ""}`, "_blank");
   },
+
+  // Developer Feedback (Epic 8)
+  listFeedback: (params?: { source_type?: string; status?: string; repo?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.source_type) searchParams.set("source_type", params.source_type);
+    if (params?.status) searchParams.set("status", params.status);
+    if (params?.repo) searchParams.set("repo", params.repo);
+    const query = searchParams.toString();
+    return fetchAPI<{ feedbacks: Feedback[]; count: number }>(`/feedback${query ? `?${query}` : ""}`);
+  },
+
+  getFeedback: (feedbackId: string) =>
+    fetchAPI<Feedback>(`/feedback/${feedbackId}`),
+
+  deliverFeedback: (feedbackId: string) =>
+    fetchAPI<{ message: string }>(`/feedback/${feedbackId}/deliver`, {
+      method: "POST",
+    }),
+
+  // VCS Configuration
+  getVCSConfig: (provider: string) =>
+    fetchAPI<VCSConfiguration>(`/vcs/${provider}`),
+
+  saveVCSConfig: (provider: string, config: SaveVCSConfigRequest) =>
+    fetchAPI<VCSConfiguration>(`/vcs/${provider}`, {
+      method: "PUT",
+      body: JSON.stringify(config),
+    }),
+
+  deleteVCSConfig: (provider: string) =>
+    fetchAPI<{ message: string }>(`/vcs/${provider}`, {
+      method: "DELETE",
+    }),
+
+  // Risk Exceptions (Epic 9)
+  listExceptions: (params?: { scope_type?: string; status?: string; scope_reference?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.scope_type) searchParams.set("scope_type", params.scope_type);
+    if (params?.status) searchParams.set("status", params.status);
+    if (params?.scope_reference) searchParams.set("scope_reference", params.scope_reference);
+    const query = searchParams.toString();
+    return fetchAPI<{ exceptions: RiskException[]; count: number }>(`/exceptions${query ? `?${query}` : ""}`);
+  },
+
+  getException: (exceptionId: string) =>
+    fetchAPI<RiskException>(`/exceptions/${exceptionId}`),
+
+  createException: (request: CreateExceptionRequest) =>
+    fetchAPI<RiskException>(`/exceptions`, {
+      method: "POST",
+      body: JSON.stringify(request),
+    }),
+
+  approveException: (exceptionId: string, request?: ApproveExceptionRequest) =>
+    fetchAPI<{ message: string }>(`/exceptions/${exceptionId}/approve`, {
+      method: "POST",
+      body: JSON.stringify(request || {}),
+    }),
+
+  denyException: (exceptionId: string, request: DenyExceptionRequest) =>
+    fetchAPI<{ message: string }>(`/exceptions/${exceptionId}/deny`, {
+      method: "POST",
+      body: JSON.stringify(request),
+    }),
+
+  revokeException: (exceptionId: string, request: RevokeExceptionRequest) =>
+    fetchAPI<{ message: string }>(`/exceptions/${exceptionId}/revoke`, {
+      method: "POST",
+      body: JSON.stringify(request),
+    }),
+
+  getExceptionHistory: (exceptionId: string) =>
+    fetchAPI<{ history: any[]; count: number }>(`/exceptions/${exceptionId}/history`),
 };
