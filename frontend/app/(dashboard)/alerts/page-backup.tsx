@@ -22,18 +22,12 @@ import {
 } from "lucide-react";
 import { api, AlertChannel, AlertRule, AlertHistoryEntry } from "@/lib/api";
 import { formatRelativeTime, cn } from "@/lib/utils";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { Breadcrumb } from "@/components/ui/Breadcrumb";
-import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
-import { Card } from "@/components/ui/Card";
-import { Badge, SeverityBadge } from "@/components/ui/Badge";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { Spinner } from "@/components/ui/Spinner";
 import {
   PageLayout,
   Button,
   Tabs,
   Input,
+  EmptyState,
 } from "@/components/ui/page-layout";
 
 type Tab = "channels" | "rules" | "history";
@@ -51,12 +45,15 @@ export default function AlertsPage() {
     name: "",
     channel_type: "slack" as "smtp" | "slack" | "webhook",
     enabled: true,
+    // Slack config
     webhook_url: "",
     slack_channel: "",
+    // SMTP config
     smtp_host: "",
     smtp_port: 587,
     smtp_from: "",
     smtp_to: "",
+    // Webhook config
     webhook_method: "POST",
     webhook_headers: "",
   });
@@ -68,10 +65,13 @@ export default function AlertsPage() {
     enabled: true,
     cooldown_mins: 15,
     channels: [] as string[],
+    // Conditions
     threshold: 3,
     duration_mins: 5,
+    // SSL expiry specific
     warning_days: 14,
     critical_days: 7,
+    // High error rate specific
     window_mins: 5,
     container_pattern: "",
   });
@@ -362,89 +362,43 @@ export default function AlertsPage() {
     { id: "history", label: "History" },
   ];
 
-  // Calculate metrics
-  const activeAlerts = history?.filter(h => !h.resolved_at).length || 0;
-  const criticalAlerts = history?.filter(h => !h.resolved_at && h.severity === 'critical').length || 0;
-  const resolvedAlerts = history?.filter(h => h.resolved_at).length || 0;
-  const totalAlerts = history?.length || 0;
-
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Alerts"
-        description="Configure notification channels and alert rules"
-        breadcrumbs={
-          <Breadcrumb
-            items={[
-              { label: "Run", href: "/" },
-              { label: "Alerts", current: true },
-            ]}
-          />
-        }
-        action={
-          activeTab !== "history" && (
-            <Button
-              variant="primary"
-              icon={Plus}
-              onClick={() => {
-                if (activeTab === "channels") {
-                  resetChannelForm();
-                  setEditingChannel(null);
-                  setShowChannelModal(true);
-                } else {
-                  resetRuleForm();
-                  setEditingRule(null);
-                  setShowRuleModal(true);
-                }
-              }}
-            >
-              Add {activeTab === "channels" ? "Channel" : "Rule"}
-            </Button>
-          )
-        }
-      />
-
-      {/* Metrics */}
-      {activeTab === "history" && (
-        <MetricsGrid columns={4}>
-          <StatCard
-            label="Active Alerts"
-            value={activeAlerts}
-            icon={Bell}
-            iconColor="text-yellow-600"
-          />
-          <StatCard
-            label="Critical"
-            value={criticalAlerts}
-            icon={AlertTriangle}
-            iconColor="text-red-600"
-          />
-          <StatCard
-            label="Resolved"
-            value={resolvedAlerts}
-            icon={Check}
-            iconColor="text-green-600"
-          />
-          <StatCard
-            label="Total Alerts"
-            value={totalAlerts}
-            icon={History}
-            iconColor="text-blue-600"
-          />
-        </MetricsGrid>
-      )}
-
+    <PageLayout
+      title="Alerts"
+      description="Configure notification channels and alert rules"
+      actions={
+        activeTab !== "history" && (
+          <Button
+            variant="primary"
+            icon={Plus}
+            onClick={() => {
+              if (activeTab === "channels") {
+                resetChannelForm();
+                setEditingChannel(null);
+                setShowChannelModal(true);
+              } else {
+                resetRuleForm();
+                setEditingRule(null);
+                setShowRuleModal(true);
+              }
+            }}
+          >
+            Add {activeTab === "channels" ? "Channel" : "Rule"}
+          </Button>
+        )
+      }
+    >
       {/* Tabs */}
-      <div>
+      <div className="mb-6">
         <Tabs tabs={tabs} activeTab={activeTab} onChange={(id) => setActiveTab(id as Tab)} />
       </div>
 
       {/* Channels Tab */}
       {activeTab === "channels" && (
-        <Card>
+        <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800">
           {channelsLoading ? (
             <div className="flex items-center justify-center h-32">
-              <Spinner size="lg" />
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500" />
             </div>
           ) : channels && channels.length > 0 ? (
             <div className="divide-y divide-gray-100 dark:divide-gray-800">
@@ -463,13 +417,13 @@ export default function AlertsPage() {
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="text-gray-900 dark:text-white font-medium">{channel.name}</span>
-                        <Badge size="sm">
+                        <span className="text-xs px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 uppercase">
                           {channel.channel_type}
-                        </Badge>
+                        </span>
                         {!channel.enabled && (
-                          <Badge size="sm" className="bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400">
+                          <span className="text-xs px-2 py-0.5 rounded bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400">
                             Disabled
-                          </Badge>
+                          </span>
                         )}
                       </div>
                       <p className="text-sm text-gray-500 mt-0.5">
@@ -513,15 +467,15 @@ export default function AlertsPage() {
               />
             </div>
           )}
-        </Card>
+        </div>
       )}
 
       {/* Rules Tab */}
       {activeTab === "rules" && (
-        <Card>
+        <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800">
           {rulesLoading ? (
             <div className="flex items-center justify-center h-32">
-              <Spinner size="lg" />
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500" />
             </div>
           ) : rules && rules.length > 0 ? (
             <div className="divide-y divide-gray-100 dark:divide-gray-800">
@@ -547,9 +501,9 @@ export default function AlertsPage() {
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="text-gray-900 dark:text-white font-medium">{rule.name}</span>
-                        <Badge size="sm">
+                        <span className="text-xs px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500">
                           {ruleTypes.find((t) => t.value === rule.rule_type)?.label || rule.rule_type}
-                        </Badge>
+                        </span>
                       </div>
                       <p className="text-sm text-gray-500 mt-0.5">
                         Cooldown: {rule.cooldown_mins} mins | {rule.channels.length} channel(s)
@@ -584,15 +538,15 @@ export default function AlertsPage() {
               />
             </div>
           )}
-        </Card>
+        </div>
       )}
 
       {/* History Tab */}
       {activeTab === "history" && (
-        <Card>
+        <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800">
           {historyLoading ? (
             <div className="flex items-center justify-center h-32">
-              <Spinner size="lg" />
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500" />
             </div>
           ) : history && history.length > 0 ? (
             <div className="divide-y divide-gray-100 dark:divide-gray-800">
@@ -647,7 +601,7 @@ export default function AlertsPage() {
               />
             </div>
           )}
-        </Card>
+        </div>
       )}
 
       {/* Channel Modal */}
@@ -972,6 +926,6 @@ export default function AlertsPage() {
           </div>
         </div>
       )}
-    </div>
+    </PageLayout>
   );
 }

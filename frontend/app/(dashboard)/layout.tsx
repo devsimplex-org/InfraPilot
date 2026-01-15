@@ -25,6 +25,11 @@ import {
   ShieldAlert,
   Trophy,
   Code2,
+  Gauge,
+  Rocket,
+  Play,
+  Scale,
+  Wrench,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuthStore } from "@/lib/auth";
@@ -32,32 +37,82 @@ import { cn, isIPAddress } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { AlertBar } from "@/components/ui/alert-bar";
 import { api } from "@/lib/api";
+import { Navigation, NavigationSection } from "@/components/ui/Navigation";
 
-const navigation = [
-  { name: "Overview", href: "/", icon: LayoutDashboard },
-  { name: "Security", href: "/security", icon: Shield },
-  { name: "Runtime Security", href: "/runtime-security", icon: Activity },
-  { name: "Platform Security", href: "/platform-security", icon: ShieldCheck },
-  { name: "Security Maturity", href: "/maturity", icon: Trophy },
-  { name: "Code Quality", href: "/code-quality", icon: Code2 },
-  { name: "Containers", href: "/containers", icon: Container },
-  { name: "Deployments", href: "/deployments", icon: ShieldCheck },
-  { name: "Webhooks", href: "/webhooks", icon: Activity },
-  { name: "Policies", href: "/policies", icon: FileText },
-  { name: "Vulnerabilities", href: "/vulnerabilities", icon: AlertTriangle },
-  { name: "SBOMs", href: "/sboms", icon: Package },
-  { name: "Developer Feedback", href: "/feedback", icon: MessageSquare },
-  { name: "Risk Exceptions", href: "/exceptions", icon: ShieldAlert },
-  { name: "Ownership & Teams", href: "/ownership", icon: Users },
-  { name: "Networks", href: "/docker/networks", icon: Network },
-  { name: "Volumes", href: "/docker/volumes", icon: HardDrive },
-  { name: "Images", href: "/docker/images", icon: Image },
-  { name: "Proxies", href: "/proxies", icon: Globe },
-  { name: "Logs", href: "/logs", icon: FileText },
-  { name: "Alerts", href: "/alerts", icon: Bell },
-  { name: "Health", href: "/health", icon: Activity },
-  { name: "Users", href: "/users", icon: Users },
-  { name: "Settings", href: "/settings", icon: Settings },
+// DevSecOps Lifecycle Navigation Structure
+const navigationSections: NavigationSection[] = [
+  {
+    id: "overview",
+    label: "Overview",
+    icon: Gauge,
+    color: "text-blue-600 dark:text-blue-400",
+    items: [
+      { name: "Dashboard", href: "/", icon: LayoutDashboard },
+      { name: "Security Posture", href: "/security", icon: Shield },
+    ],
+  },
+  {
+    id: "build",
+    label: "Build",
+    icon: Code2,
+    color: "text-yellow-600 dark:text-yellow-400",
+    items: [
+      { name: "Code Quality", href: "/code-quality", icon: Code2 },
+      { name: "Developer Feedback", href: "/feedback", icon: MessageSquare },
+      { name: "Policies", href: "/policies", icon: FileText },
+    ],
+  },
+  {
+    id: "deploy",
+    label: "Deploy",
+    icon: Rocket,
+    color: "text-orange-600 dark:text-orange-400",
+    items: [
+      { name: "Deployments", href: "/deployments", icon: Package },
+      { name: "Vulnerabilities", href: "/vulnerabilities", icon: AlertTriangle },
+      { name: "SBOMs", href: "/sboms", icon: Package },
+      { name: "Images", href: "/docker/images", icon: Image },
+    ],
+  },
+  {
+    id: "run",
+    label: "Run",
+    icon: Play,
+    color: "text-red-600 dark:text-red-400",
+    items: [
+      { name: "Runtime Security", href: "/runtime-security", icon: ShieldCheck },
+      { name: "Containers", href: "/containers", icon: Container },
+      { name: "Logs", href: "/logs", icon: FileText },
+      { name: "Alerts", href: "/alerts", icon: Bell },
+    ],
+  },
+  {
+    id: "govern",
+    label: "Govern",
+    icon: Scale,
+    color: "text-purple-600 dark:text-purple-400",
+    items: [
+      { name: "Risk Exceptions", href: "/exceptions", icon: ShieldAlert },
+      { name: "Teams & Ownership", href: "/ownership", icon: Users },
+      { name: "Security Maturity", href: "/maturity", icon: Trophy },
+      { name: "Webhooks", href: "/webhooks", icon: Activity },
+    ],
+  },
+  {
+    id: "platform",
+    label: "Platform",
+    icon: Wrench,
+    color: "text-gray-600 dark:text-gray-400",
+    items: [
+      { name: "Platform Security", href: "/platform-security", icon: ShieldCheck },
+      { name: "Proxies", href: "/proxies", icon: Globe },
+      { name: "Networks", href: "/docker/networks", icon: Network },
+      { name: "Volumes", href: "/docker/volumes", icon: HardDrive },
+      { name: "Health", href: "/health", icon: Activity },
+      { name: "Users", href: "/users", icon: Users },
+      { name: "Settings", href: "/settings", icon: Settings },
+    ],
+  },
 ];
 
 export default function DashboardLayout({
@@ -178,30 +233,10 @@ export default function DashboardLayout({
         </div>
 
         <nav className="flex-1 px-3 overflow-y-auto">
-          <ul className="space-y-1">
-            {navigation.map((item) => {
-              const isActive =
-                pathname === item.href ||
-                (item.href !== "/" && pathname.startsWith(item.href));
-              return (
-                <li key={item.name}>
-                  <Link
-                    href={item.href}
-                    onClick={() => setSidebarOpen(false)}
-                    className={cn(
-                      "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
-                      isActive
-                        ? "bg-primary-600 text-white"
-                        : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800"
-                    )}
-                  >
-                    <item.icon className="h-5 w-5" />
-                    {item.name}
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
+          <Navigation
+            sections={navigationSections}
+            onItemClick={() => setSidebarOpen(false)}
+          />
         </nav>
 
         {/* Theme toggle */}

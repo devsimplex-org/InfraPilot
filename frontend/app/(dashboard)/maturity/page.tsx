@@ -6,7 +6,6 @@ import {
   Trophy,
   TrendingUp,
   TrendingDown,
-  Minus,
   Shield,
   AlertTriangle,
   CheckCircle,
@@ -17,39 +16,21 @@ import {
 } from "lucide-react";
 import { api, TeamScore, TeamLeaderboard } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import {
-  PageLayout,
-  ListCard,
-  EmptyState,
-  Button,
-  Tabs,
-} from "@/components/ui/page-layout";
-import {
-  DetailPanel,
-  DetailSection,
-  DetailRow,
-} from "@/components/ui/detail-panel";
-
-type PageTab = "leaderboard" | "teams";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Breadcrumb } from "@/components/ui/Breadcrumb";
+import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
+import { Table } from "@/components/ui/Table";
+import { Card } from "@/components/ui/Card";
+import { Badge } from "@/components/ui/Badge";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 export default function SecurityMaturityPage() {
   const queryClient = useQueryClient();
-  const [pageTab, setPageTab] = useState<PageTab>("leaderboard");
-  const [selectedTeam, setSelectedTeam] = useState<TeamScore | null>(null);
 
   // Fetch team leaderboard
   const { data: leaderboardData, isLoading: loadingLeaderboard } = useQuery({
     queryKey: ["teamLeaderboard"],
     queryFn: () => api.getTeamLeaderboard(),
-    enabled: pageTab === "leaderboard",
-    refetchInterval: 60000, // Refresh every minute
-  });
-
-  // Fetch latest team scores
-  const { data: teamScoresData, isLoading: loadingTeamScores } = useQuery({
-    queryKey: ["latestTeamScores"],
-    queryFn: () => api.getLatestTeamScores(),
-    enabled: pageTab === "teams",
     refetchInterval: 60000,
   });
 
@@ -63,7 +44,6 @@ export default function SecurityMaturityPage() {
   });
 
   const leaderboard = leaderboardData?.leaderboard || [];
-  const teamScores = teamScoresData?.team_scores || [];
 
   const getScoreColor = (score: number) => {
     if (score >= 80) return "text-green-600 dark:text-green-400";
@@ -79,6 +59,13 @@ export default function SecurityMaturityPage() {
     return "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400";
   };
 
+  const getMaturityLevel = (score: number): "healthy" | "warning" | "degraded" | "critical" => {
+    if (score >= 80) return "healthy";
+    if (score >= 60) return "warning";
+    if (score >= 40) return "degraded";
+    return "critical";
+  };
+
   const getRankMedal = (rank: number) => {
     if (rank === 1) return "🥇";
     if (rank === 2) return "🥈";
@@ -86,524 +73,378 @@ export default function SecurityMaturityPage() {
     return null;
   };
 
-  const formatMTTF = (hours?: number) => {
-    if (!hours) return "N/A";
-    if (hours < 24) return `${hours.toFixed(1)}h`;
-    const days = (hours / 24).toFixed(1);
-    return `${days}d`;
-  };
+  const avgScore = leaderboard.length > 0
+    ? Math.round(
+        leaderboard.reduce((sum, t) => sum + t.overall_score, 0) / leaderboard.length
+      )
+    : 0;
 
-  const getVulnerabilityRate = (team: TeamScore) => {
-    if (team.total_deployments === 0) return 0;
-    return ((team.vulnerable_deployments / team.total_deployments) * 100).toFixed(1);
-  };
+  const highPerformers = leaderboard.filter((t) => t.overall_score >= 80).length;
+  const topScore = leaderboard[0]?.overall_score || 0;
+
+  // Table columns
+  const columns = [
+    {
+      key: "rank",
+      header: "Rank",
+      width: "100px",
+      render: (value: number) => (
+        <div className="flex items-center gap-2">
+          <span className="text-2xl">{getRankMedal(value)}</span>
+          <span className="text-sm font-medium">#{value}</span>
+        </div>
+      ),
+    },
+    {
+      key: "team_name",
+      header: "Team",
+      render: (value: string) => (
+        <div className="flex items-center gap-2">
+          <Users className="h-4 w-4 text-gray-400" />
+          <span className="font-medium">{value}</span>
+        </div>
+      ),
+    },
+    {
+      key: "overall_score",
+      header: "Overall",
+      align: "center" as const,
+      render: (value: number) => (
+        <Badge
+          variant="status"
+          status={getMaturityLevel(value)}
+          size="sm"
+        >
+          {value}
+        </Badge>
+      ),
+    },
+    {
+      key: "vulnerability_score",
+      header: "Vulnerabilities",
+      align: "center" as const,
+      render: (value: number) => (
+        <span className={cn("text-sm font-medium", getScoreColor(value || 0))}>
+          {value || "-"}
+        </span>
+      ),
+    },
+    {
+      key: "policy_score",
+      header: "Policy",
+      align: "center" as const,
+      render: (value: number) => (
+        <span className={cn("text-sm font-medium", getScoreColor(value || 0))}>
+          {value || "-"}
+        </span>
+      ),
+    },
+    {
+      key: "response_score",
+      header: "Response",
+      align: "center" as const,
+      render: (value: number) => (
+        <span className={cn("text-sm font-medium", getScoreColor(value || 0))}>
+          {value || "-"}
+        </span>
+      ),
+    },
+    {
+      key: "calculated_at",
+      header: "Last Updated",
+      align: "right" as const,
+      render: (value: string) => (
+        <span className="text-sm text-gray-500 dark:text-gray-400">
+          {new Date(value).toLocaleDateString()}
+        </span>
+      ),
+    },
+  ];
+
+  // Recommendation data (mock for now)
+  const recommendations = [
+    {
+      id: 1,
+      category: "Vulnerability Management",
+      priority: "high",
+      description: "Address 12 critical vulnerabilities in production deployments",
+      impact: "High",
+    },
+    {
+      id: 2,
+      category: "Policy Compliance",
+      priority: "medium",
+      description: "Update 5 teams to meet latest security policy requirements",
+      impact: "Medium",
+    },
+    {
+      id: 3,
+      category: "Response Time",
+      priority: "high",
+      description: "Reduce mean time to fix from 48h to 24h for critical issues",
+      impact: "High",
+    },
+  ];
+
+  const recommendationColumns = [
+    {
+      key: "category",
+      header: "Category",
+      render: (value: string) => (
+        <div className="font-medium text-gray-900 dark:text-white">{value}</div>
+      ),
+    },
+    {
+      key: "description",
+      header: "Recommendation",
+      render: (value: string) => (
+        <div className="text-sm text-gray-600 dark:text-gray-400">{value}</div>
+      ),
+    },
+    {
+      key: "priority",
+      header: "Priority",
+      render: (value: string) => (
+        <Badge
+          variant="status"
+          status={value === "high" ? "critical" : value === "medium" ? "warning" : "healthy"}
+          size="sm"
+        >
+          {value}
+        </Badge>
+      ),
+    },
+    {
+      key: "impact",
+      header: "Impact",
+      align: "right" as const,
+      render: (value: string) => (
+        <span className="text-sm font-medium text-gray-900 dark:text-white">{value}</span>
+      ),
+    },
+  ];
 
   return (
-    <PageLayout
-      title="Security Maturity"
-      subtitle="Team security scores and performance benchmarks"
-      icon={<Trophy className="h-8 w-8" />}
-      action={
-        <Button
-          onClick={() => calculateAllScoresMutation.mutate()}
-          disabled={calculateAllScoresMutation.isPending}
-        >
-          <RefreshCw
-            className={cn(
-              "h-4 w-4 mr-2",
-              calculateAllScoresMutation.isPending && "animate-spin"
-            )}
+    <div className="p-6">
+      <PageHeader
+        title="Security Maturity"
+        description="Team security scores and performance benchmarks"
+        breadcrumbs={
+          <Breadcrumb
+            items={[
+              { label: "Govern", href: "/" },
+              { label: "Security Maturity", current: true },
+            ]}
           />
-          {calculateAllScoresMutation.isPending ? "Calculating..." : "Recalculate Scores"}
-        </Button>
-      }
-    >
-      <Tabs
-        tabs={[
-          { id: "leaderboard", label: "Leaderboard", icon: Trophy },
-          { id: "teams", label: "Team Scores", icon: Users },
-        ]}
-        activeTab={pageTab}
-        onChange={(tab) => setPageTab(tab as PageTab)}
+        }
+        action={
+          <button
+            onClick={() => calculateAllScoresMutation.mutate()}
+            disabled={calculateAllScoresMutation.isPending}
+            className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:bg-primary-400 transition-colors flex items-center gap-2"
+          >
+            <RefreshCw
+              className={cn(
+                "h-4 w-4",
+                calculateAllScoresMutation.isPending && "animate-spin"
+              )}
+            />
+            {calculateAllScoresMutation.isPending ? "Calculating..." : "Recalculate Scores"}
+          </button>
+        }
       />
 
-      {pageTab === "leaderboard" && (
-        <div className="space-y-6">
-          {/* Stats Overview */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
-                  <Users className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-                </div>
-                <div>
-                  <p className="text-xs text-gray-600 dark:text-gray-400">Total Teams</p>
-                  <p className="text-2xl font-bold">{leaderboard.length}</p>
-                </div>
-              </div>
-            </div>
+      {/* Stats Overview */}
+      <MetricsGrid columns={4} className="mb-6">
+        <StatCard
+          label="Maturity Score"
+          value={avgScore}
+          icon={Trophy}
+          iconColor="text-yellow-600 dark:text-yellow-400"
+          description="Average across all teams"
+        />
+        <StatCard
+          label="Improvements Needed"
+          value={recommendations.length}
+          icon={TrendingUp}
+          iconColor="text-blue-600 dark:text-blue-400"
+          description="High priority items"
+        />
+        <StatCard
+          label="Areas Covered"
+          value={5}
+          icon={Shield}
+          iconColor="text-green-600 dark:text-green-400"
+          description="Security categories"
+        />
+        <StatCard
+          label="High Performers"
+          value={highPerformers}
+          icon={Target}
+          iconColor="text-purple-600 dark:text-purple-400"
+          description="Teams with score ≥ 80"
+        />
+      </MetricsGrid>
 
-            <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-green-100 dark:bg-green-900/30 rounded-lg">
-                  <Trophy className="h-5 w-5 text-green-600 dark:text-green-400" />
+      {/* Maturity Breakdown by Category */}
+      <div className="mb-6">
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+          Maturity Breakdown by Category
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <Card>
+            <Card.Body>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <Shield className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                  <h4 className="font-medium text-gray-900 dark:text-white">
+                    Vulnerability Management
+                  </h4>
                 </div>
-                <div>
-                  <p className="text-xs text-gray-600 dark:text-gray-400">Top Score</p>
-                  <p className="text-2xl font-bold">
-                    {leaderboard[0]?.overall_score || 0}
-                  </p>
-                </div>
+                <Badge variant="status" status="healthy" size="sm">
+                  85
+                </Badge>
               </div>
-            </div>
-
-            <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg">
-                  <Target className="h-5 w-5 text-yellow-600 dark:text-yellow-400" />
-                </div>
-                <div>
-                  <p className="text-xs text-gray-600 dark:text-gray-400">Average Score</p>
-                  <p className="text-2xl font-bold">
-                    {leaderboard.length > 0
-                      ? Math.round(
-                          leaderboard.reduce((sum, t) => sum + t.overall_score, 0) /
-                            leaderboard.length
-                        )
-                      : 0}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-purple-100 dark:bg-purple-900/30 rounded-lg">
-                  <Shield className="h-5 w-5 text-purple-600 dark:text-purple-400" />
-                </div>
-                <div>
-                  <p className="text-xs text-gray-600 dark:text-gray-400">High Performers</p>
-                  <p className="text-2xl font-bold">
-                    {leaderboard.filter((t) => t.overall_score >= 80).length}
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Leaderboard Table */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-            <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-              <h3 className="text-lg font-semibold">Team Rankings</h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                Based on last 30 days performance
-              </p>
-            </div>
-
-            {loadingLeaderboard ? (
-              <div className="flex items-center justify-center h-64">
-                <RefreshCw className="h-8 w-8 animate-spin text-gray-400" />
-              </div>
-            ) : leaderboard.length === 0 ? (
-              <div className="p-12">
-                <EmptyState
-                  icon={Trophy}
-                  title="No scores yet"
-                  description="Calculate scores to see team rankings"
+              <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                <div
+                  className="bg-green-600 h-2 rounded-full"
+                  style={{ width: "85%" }}
                 />
               </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-gray-50 dark:bg-gray-900">
-                    <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Rank
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Team
-                      </th>
-                      <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Overall
-                      </th>
-                      <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Vulnerabilities
-                      </th>
-                      <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Policy
-                      </th>
-                      <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Response
-                      </th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Last Updated
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                    {leaderboard.map((team) => (
-                      <tr
-                        key={team.team_name}
-                        className="hover:bg-gray-50 dark:hover:bg-gray-900/50 transition-colors"
-                      >
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center gap-2">
-                            <span className="text-2xl">{getRankMedal(team.rank)}</span>
-                            <span className="text-sm font-medium">#{team.rank}</span>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center gap-2">
-                            <Users className="h-4 w-4 text-gray-400" />
-                            <span className="font-medium">{team.team_name}</span>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-center">
-                          <span
-                            className={cn(
-                              "inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold",
-                              getScoreBadgeClass(team.overall_score)
-                            )}
-                          >
-                            {team.overall_score}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-center">
-                          <span className={cn("text-sm", getScoreColor(team.vulnerability_score || 0))}>
-                            {team.vulnerability_score || "-"}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-center">
-                          <span className={cn("text-sm", getScoreColor(team.policy_score || 0))}>
-                            {team.policy_score || "-"}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-center">
-                          <span className={cn("text-sm", getScoreColor(team.response_score || 0))}>
-                            {team.response_score || "-"}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-500">
-                          {new Date(team.calculated_at).toLocaleDateString()}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            </Card.Body>
+          </Card>
+
+          <Card>
+            <Card.Body>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400" />
+                  <h4 className="font-medium text-gray-900 dark:text-white">
+                    Policy Compliance
+                  </h4>
+                </div>
+                <Badge variant="status" status="warning" size="sm">
+                  72
+                </Badge>
               </div>
-            )}
-          </div>
+              <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                <div
+                  className="bg-yellow-600 h-2 rounded-full"
+                  style={{ width: "72%" }}
+                />
+              </div>
+            </Card.Body>
+          </Card>
+
+          <Card>
+            <Card.Body>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <Clock className="h-5 w-5 text-orange-600 dark:text-orange-400" />
+                  <h4 className="font-medium text-gray-900 dark:text-white">
+                    Response Time
+                  </h4>
+                </div>
+                <Badge variant="status" status="degraded" size="sm">
+                  68
+                </Badge>
+              </div>
+              <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                <div
+                  className="bg-orange-600 h-2 rounded-full"
+                  style={{ width: "68%" }}
+                />
+              </div>
+            </Card.Body>
+          </Card>
+
+          <Card>
+            <Card.Body>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <Target className="h-5 w-5 text-purple-600 dark:text-purple-400" />
+                  <h4 className="font-medium text-gray-900 dark:text-white">
+                    Deployment Security
+                  </h4>
+                </div>
+                <Badge variant="status" status="healthy" size="sm">
+                  78
+                </Badge>
+              </div>
+              <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                <div
+                  className="bg-yellow-600 h-2 rounded-full"
+                  style={{ width: "78%" }}
+                />
+              </div>
+            </Card.Body>
+          </Card>
+
+          <Card>
+            <Card.Body>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400" />
+                  <h4 className="font-medium text-gray-900 dark:text-white">
+                    Exception Management
+                  </h4>
+                </div>
+                <Badge variant="status" status="warning" size="sm">
+                  65
+                </Badge>
+              </div>
+              <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                <div
+                  className="bg-yellow-600 h-2 rounded-full"
+                  style={{ width: "65%" }}
+                />
+              </div>
+            </Card.Body>
+          </Card>
         </div>
-      )}
+      </div>
 
-      {pageTab === "teams" && (
-        <div className="flex flex-col lg:flex-row gap-6 h-full">
-          {/* Team List */}
-          <div className="lg:w-1/2">
-            {loadingTeamScores ? (
-              <div className="flex items-center justify-center h-64">
-                <RefreshCw className="h-8 w-8 animate-spin text-gray-400" />
-              </div>
-            ) : teamScores.length === 0 ? (
-              <EmptyState
-                icon={Users}
-                title="No team scores"
-                description="Calculate team scores to view detailed metrics"
-              />
-            ) : (
-              <div className="space-y-2">
-                {teamScores.map((team) => (
-                  <ListCard
-                    key={team.team_name}
-                    selected={selectedTeam?.team_name === team.team_name}
-                    onClick={() => setSelectedTeam(team)}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-2">
-                          <Users className="h-4 w-4 text-purple-600" />
-                          <span className="font-medium text-sm">{team.team_name}</span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2 text-xs">
-                          <div>
-                            <span className="text-gray-600 dark:text-gray-400">
-                              Deployments:
-                            </span>{" "}
-                            <span className="font-medium">{team.total_deployments}</span>
-                          </div>
-                          <div>
-                            <span className="text-gray-600 dark:text-gray-400">MTTF:</span>{" "}
-                            <span className="font-medium">
-                              {formatMTTF(team.mean_time_to_fix_hours)}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex flex-col items-end gap-2 ml-4">
-                        <span
-                          className={cn(
-                            "px-3 py-1 text-sm font-bold rounded-full",
-                            getScoreBadgeClass(team.overall_score)
-                          )}
-                        >
-                          {team.overall_score}
-                        </span>
-                        <span className="text-xs text-gray-500">
-                          {new Date(team.calculated_at).toLocaleDateString()}
-                        </span>
-                      </div>
-                    </div>
-                  </ListCard>
-                ))}
-              </div>
-            )}
+      {/* Improvement Recommendations */}
+      <div className="mb-6">
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+          Improvement Recommendations
+        </h3>
+        <Table
+          columns={recommendationColumns}
+          data={recommendations}
+          keyExtractor={(row) => row.id.toString()}
+          hoverable={false}
+        />
+      </div>
+
+      {/* Team Leaderboard */}
+      <div>
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+          Team Rankings
+        </h3>
+        {loadingLeaderboard ? (
+          <div className="flex items-center justify-center h-32">
+            <RefreshCw className="h-8 w-8 animate-spin text-gray-400" />
           </div>
-
-          {/* Team Detail */}
-          <div className="lg:w-1/2">
-            {selectedTeam ? (
-              <DetailPanel
-                title={selectedTeam.team_name}
-                onClose={() => setSelectedTeam(null)}
-              >
-                <DetailSection title="Overall Score">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="text-4xl font-bold">
-                      <span className={getScoreColor(selectedTeam.overall_score)}>
-                        {selectedTeam.overall_score}
-                      </span>
-                      <span className="text-gray-400 text-2xl">/100</span>
-                    </div>
-                    <div className="text-sm text-gray-600 dark:text-gray-400">
-                      Last calculated:{" "}
-                      {new Date(selectedTeam.calculated_at).toLocaleString()}
-                    </div>
-                  </div>
-
-                  {/* Score breakdown */}
-                  <div className="space-y-3">
-                    {selectedTeam.vulnerability_score !== undefined && (
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <div className="flex items-center gap-2">
-                            <Shield className="h-4 w-4 text-gray-600" />
-                            <span className="text-sm font-medium">
-                              Vulnerability Management
-                            </span>
-                          </div>
-                          <span
-                            className={cn(
-                              "text-sm font-semibold",
-                              getScoreColor(selectedTeam.vulnerability_score)
-                            )}
-                          >
-                            {selectedTeam.vulnerability_score}
-                          </span>
-                        </div>
-                        <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                          <div
-                            className={cn(
-                              "h-2 rounded-full transition-all",
-                              selectedTeam.vulnerability_score >= 80
-                                ? "bg-green-600"
-                                : selectedTeam.vulnerability_score >= 60
-                                ? "bg-yellow-600"
-                                : "bg-red-600"
-                            )}
-                            style={{ width: `${selectedTeam.vulnerability_score}%` }}
-                          />
-                        </div>
-                      </div>
-                    )}
-
-                    {selectedTeam.policy_score !== undefined && (
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <div className="flex items-center gap-2">
-                            <CheckCircle className="h-4 w-4 text-gray-600" />
-                            <span className="text-sm font-medium">Policy Compliance</span>
-                          </div>
-                          <span
-                            className={cn(
-                              "text-sm font-semibold",
-                              getScoreColor(selectedTeam.policy_score)
-                            )}
-                          >
-                            {selectedTeam.policy_score}
-                          </span>
-                        </div>
-                        <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                          <div
-                            className={cn(
-                              "h-2 rounded-full transition-all",
-                              selectedTeam.policy_score >= 80
-                                ? "bg-green-600"
-                                : selectedTeam.policy_score >= 60
-                                ? "bg-yellow-600"
-                                : "bg-red-600"
-                            )}
-                            style={{ width: `${selectedTeam.policy_score}%` }}
-                          />
-                        </div>
-                      </div>
-                    )}
-
-                    {selectedTeam.deployment_score !== undefined && (
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <div className="flex items-center gap-2">
-                            <Target className="h-4 w-4 text-gray-600" />
-                            <span className="text-sm font-medium">Deployment Security</span>
-                          </div>
-                          <span
-                            className={cn(
-                              "text-sm font-semibold",
-                              getScoreColor(selectedTeam.deployment_score)
-                            )}
-                          >
-                            {selectedTeam.deployment_score}
-                          </span>
-                        </div>
-                        <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                          <div
-                            className={cn(
-                              "h-2 rounded-full transition-all",
-                              selectedTeam.deployment_score >= 80
-                                ? "bg-green-600"
-                                : selectedTeam.deployment_score >= 60
-                                ? "bg-yellow-600"
-                                : "bg-red-600"
-                            )}
-                            style={{ width: `${selectedTeam.deployment_score}%` }}
-                          />
-                        </div>
-                      </div>
-                    )}
-
-                    {selectedTeam.exception_score !== undefined && (
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <div className="flex items-center gap-2">
-                            <AlertTriangle className="h-4 w-4 text-gray-600" />
-                            <span className="text-sm font-medium">Exception Management</span>
-                          </div>
-                          <span
-                            className={cn(
-                              "text-sm font-semibold",
-                              getScoreColor(selectedTeam.exception_score)
-                            )}
-                          >
-                            {selectedTeam.exception_score}
-                          </span>
-                        </div>
-                        <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                          <div
-                            className={cn(
-                              "h-2 rounded-full transition-all",
-                              selectedTeam.exception_score >= 80
-                                ? "bg-green-600"
-                                : selectedTeam.exception_score >= 60
-                                ? "bg-yellow-600"
-                                : "bg-red-600"
-                            )}
-                            style={{ width: `${selectedTeam.exception_score}%` }}
-                          />
-                        </div>
-                      </div>
-                    )}
-
-                    {selectedTeam.response_score !== undefined && (
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <div className="flex items-center gap-2">
-                            <Clock className="h-4 w-4 text-gray-600" />
-                            <span className="text-sm font-medium">Response Time</span>
-                          </div>
-                          <span
-                            className={cn(
-                              "text-sm font-semibold",
-                              getScoreColor(selectedTeam.response_score)
-                            )}
-                          >
-                            {selectedTeam.response_score}
-                          </span>
-                        </div>
-                        <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                          <div
-                            className={cn(
-                              "h-2 rounded-full transition-all",
-                              selectedTeam.response_score >= 80
-                                ? "bg-green-600"
-                                : selectedTeam.response_score >= 60
-                                ? "bg-yellow-600"
-                                : "bg-red-600"
-                            )}
-                            style={{ width: `${selectedTeam.response_score}%` }}
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </DetailSection>
-
-                <DetailSection title="Metrics">
-                  <DetailRow label="Total Deployments">
-                    <span className="font-semibold">{selectedTeam.total_deployments}</span>
-                  </DetailRow>
-                  <DetailRow label="Vulnerable Deployments">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold">
-                        {selectedTeam.vulnerable_deployments}
-                      </span>
-                      <span className="text-xs text-gray-500">
-                        ({getVulnerabilityRate(selectedTeam)}%)
-                      </span>
-                    </div>
-                  </DetailRow>
-                  <DetailRow label="Critical Vulnerabilities">
-                    <span
-                      className={cn(
-                        "font-semibold",
-                        selectedTeam.critical_vulnerabilities > 0
-                          ? "text-red-600"
-                          : "text-green-600"
-                      )}
-                    >
-                      {selectedTeam.critical_vulnerabilities}
-                    </span>
-                  </DetailRow>
-                  <DetailRow label="High Vulnerabilities">
-                    <span
-                      className={cn(
-                        "font-semibold",
-                        selectedTeam.high_vulnerabilities > 0
-                          ? "text-orange-600"
-                          : "text-green-600"
-                      )}
-                    >
-                      {selectedTeam.high_vulnerabilities}
-                    </span>
-                  </DetailRow>
-                  <DetailRow label="Mean Time To Fix">
-                    <div className="flex items-center gap-2">
-                      <Clock className="h-4 w-4 text-gray-400" />
-                      <span className="font-semibold">
-                        {formatMTTF(selectedTeam.mean_time_to_fix_hours)}
-                      </span>
-                    </div>
-                  </DetailRow>
-                </DetailSection>
-              </DetailPanel>
-            ) : (
+        ) : leaderboard.length === 0 ? (
+          <Card>
+            <Card.Body>
               <EmptyState
-                icon={Users}
-                title="Select a team"
-                description="Click on a team to view detailed security metrics"
+                icon={Trophy}
+                title="No scores yet"
+                description="Calculate scores to see team rankings"
               />
-            )}
-          </div>
-        </div>
-      )}
-    </PageLayout>
+            </Card.Body>
+          </Card>
+        ) : (
+          <Table
+            columns={columns}
+            data={leaderboard}
+            keyExtractor={(row) => row.team_name}
+            hoverable
+          />
+        )}
+      </div>
+    </div>
   );
 }

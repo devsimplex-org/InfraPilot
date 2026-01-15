@@ -1,35 +1,34 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState, useEffect, useMemo } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Package,
   Shield,
   AlertTriangle,
   CheckCircle,
-  Clock,
   GitBranch,
   FileCode,
   ExternalLink,
   RefreshCw,
   Download,
-  Eye,
-  ChevronRight,
+  Container,
+  Clock,
+  Activity,
 } from "lucide-react";
 import { api, Deployment, ScanResult, Vulnerability, SBOM } from "@/lib/api";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Table, type Column } from "@/components/ui/Table";
+import { SlideOver } from "@/components/ui/SlideOver";
+import { Card } from "@/components/ui/Card";
+import { Badge, SeverityBadge, StatusBadge } from "@/components/ui/Badge";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { Spinner } from "@/components/ui/Spinner";
+import { StatusIndicator } from "@/components/ui/StatusIndicator";
+import { Breadcrumb } from "@/components/ui/Breadcrumb";
+import { FilterPanel, type Filter } from "@/components/ui/FilterPanel";
+import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
 import { cn } from "@/lib/utils";
-import {
-  PageLayout,
-  ListCard,
-  EmptyState,
-  Button,
-  Tabs,
-} from "@/components/ui/page-layout";
-import {
-  DetailPanel,
-  DetailSection,
-  DetailRow,
-} from "@/components/ui/detail-panel";
 
 type PanelTab = "overview" | "scan" | "vulnerabilities" | "sbom";
 
@@ -38,7 +37,9 @@ export default function DeploymentsPage() {
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
   const [selectedDeployment, setSelectedDeployment] = useState<Deployment | null>(null);
   const [panelTab, setPanelTab] = useState<PanelTab>("overview");
-  const [vulnerabilitySeverityFilter, setVulnerabilitySeverityFilter] = useState<string | undefined>();
+  const [vulnerabilitySeverityFilter, setVulnerabilitySeverityFilter] = useState<string[]>([]);
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  const [environmentFilter, setEnvironmentFilter] = useState<string[]>([]);
 
   // Fetch agents
   const { data: agents } = useQuery({
@@ -52,7 +53,7 @@ export default function DeploymentsPage() {
     queryFn: () =>
       selectedAgent ? api.getDeployments(selectedAgent) : Promise.resolve([]),
     enabled: !!selectedAgent,
-    refetchInterval: 10000, // Refresh every 10s to see scan progress
+    refetchInterval: 10000,
   });
 
   // Fetch scan results for selected deployment
@@ -71,7 +72,7 @@ export default function DeploymentsPage() {
     queryFn: () =>
       selectedDeployment?.scan_result_id
         ? api.getScanVulnerabilities(selectedDeployment.scan_result_id, {
-            severity: vulnerabilitySeverityFilter,
+            severity: vulnerabilitySeverityFilter[0],
           })
         : Promise.resolve([]),
     enabled: !!selectedDeployment?.scan_result_id && panelTab === "vulnerabilities",
@@ -93,632 +94,963 @@ export default function DeploymentsPage() {
     }
   }, [activeAgents, selectedAgent]);
 
-  const getStatusBadgeClass = (status: Deployment["status"]) => {
+  // Calculate metrics
+  const metrics = useMemo(() => {
+    if (!deployments) return null;
+
+    const total = deployments.length;
+    const running = deployments.filter((d) => d.status === "running").length;
+    const failed = deployments.filter((d) => d.status === "failed").length;
+    const scanning = deployments.filter((d) =>
+      d.status === "scanning" || d.status === "policy_check" || d.status === "deploying"
+    ).length;
+
+    // Count deployments with critical vulnerabilities
+    const withScans = deployments.filter((d) => d.scan_result_id).length;
+
+    // Policy decisions
+    const blocked = deployments.filter((d) => d.policy_decision === "deny").length;
+    const warned = deployments.filter((d) => d.policy_decision === "warn").length;
+
+    // Unique environments
+    const environments = new Set(deployments.map((d) => d.environment)).size;
+
+    return {
+      total,
+      running,
+      failed,
+      scanning,
+      withScans,
+      blocked,
+      warned,
+      environments,
+    };
+  }, [deployments]);
+
+  // Filter deployments
+  const filteredDeployments = useMemo(() => {
+    if (!deployments) return [];
+
+    return deployments.filter((deployment) => {
+      // Status filter
+      if (statusFilter.length > 0 && !statusFilter.includes(deployment.status)) {
+        return false;
+      }
+
+      // Environment filter
+      if (environmentFilter.length > 0 && !environmentFilter.includes(deployment.environment)) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [deployments, statusFilter, environmentFilter]);
+
+  // Get unique values for filters
+  const uniqueStatuses = useMemo(() => {
+    if (!deployments) return [];
+    return Array.from(new Set(deployments.map((d) => d.status)));
+  }, [deployments]);
+
+  const uniqueEnvironments = useMemo(() => {
+    if (!deployments) return [];
+    return Array.from(new Set(deployments.map((d) => d.environment)));
+  }, [deployments]);
+
+  const getDeploymentStatus = (status: Deployment["status"]): "healthy" | "warning" | "degraded" | "critical" => {
     switch (status) {
       case "running":
-        return "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400";
+        return "healthy";
       case "failed":
-        return "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400";
+        return "critical";
       case "scanning":
       case "policy_check":
       case "deploying":
-        return "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400";
-      case "pending":
-        return "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400";
+        return "warning";
       case "rolled_back":
-        return "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400";
-      case "stopped":
-        return "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400";
+        return "degraded";
       default:
-        return "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400";
+        return "degraded";
     }
   };
 
-  const getPolicyDecisionBadge = (decision?: "allow" | "warn" | "deny") => {
-    if (!decision) return null;
+  const getPolicyDecisionStatus = (decision?: "allow" | "warn" | "deny"): "healthy" | "warning" | "critical" | undefined => {
+    if (!decision) return undefined;
+    switch (decision) {
+      case "allow":
+        return "healthy";
+      case "warn":
+        return "warning";
+      case "deny":
+        return "critical";
+    }
+  };
 
-    const config = {
-      allow: {
-        className: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
-        label: "Allowed"
-      },
-      warn: {
-        className: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
-        label: "Warning"
-      },
-      deny: {
-        className: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
-        label: "Blocked"
-      },
-    };
+  // Table columns
+  const columns: Column<Deployment>[] = [
+    {
+      key: "service_name",
+      header: "Service",
+      sortable: true,
+      render: (deployment) => (
+        <div className="flex items-center gap-3">
+          <Shield className="w-5 h-5 text-gray-400 flex-shrink-0" />
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                {deployment.service_name}
+              </p>
+              <Badge variant="default" size="sm">
+                {deployment.environment}
+              </Badge>
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400 font-mono truncate mt-0.5">
+              {deployment.image_repository}
+              {deployment.image_tag && `:${deployment.image_tag}`}
+            </p>
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      sortable: true,
+      render: (deployment) => (
+        <div className="space-y-1">
+          <StatusIndicator
+            status={getDeploymentStatus(deployment.status)}
+            label={deployment.status}
+            size="sm"
+            pulse={deployment.status === "running"}
+          />
+          {deployment.policy_decision && (
+            <StatusIndicator
+              status={getPolicyDecisionStatus(deployment.policy_decision)!}
+              label={deployment.policy_decision === "allow" ? "Allowed" : deployment.policy_decision === "warn" ? "Warning" : "Blocked"}
+              size="sm"
+            />
+          )}
+        </div>
+      ),
+    },
+    {
+      key: "git_commit",
+      header: "Git",
+      render: (deployment) =>
+        deployment.git_commit ? (
+          <div className="flex items-center gap-2">
+            <GitBranch className="w-4 h-4 text-gray-400" />
+            <span className="text-xs text-gray-600 dark:text-gray-400 font-mono">
+              {deployment.git_commit.substring(0, 8)}
+            </span>
+          </div>
+        ) : (
+          <span className="text-xs text-gray-400">—</span>
+        ),
+    },
+    {
+      key: "deployed_at",
+      header: "Deployed",
+      sortable: true,
+      render: (deployment) =>
+        deployment.deployed_at ? (
+          <span className="text-xs text-gray-600 dark:text-gray-400">
+            {new Date(deployment.deployed_at).toLocaleDateString()}
+          </span>
+        ) : (
+          <span className="text-xs text-gray-400">—</span>
+        ),
+    },
+  ];
 
-    const { className, label } = config[decision];
+  // Deployment filters
+  const deploymentFilters: Filter[] = [
+    {
+      id: "status",
+      label: "Status",
+      type: "checkbox",
+      options: uniqueStatuses.map((status) => ({
+        label: status.charAt(0).toUpperCase() + status.slice(1),
+        value: status,
+      })),
+      value: statusFilter,
+      onChange: (value) => setStatusFilter(value as string[]),
+    },
+    {
+      id: "environment",
+      label: "Environment",
+      type: "checkbox",
+      options: uniqueEnvironments.map((env) => ({
+        label: env.charAt(0).toUpperCase() + env.slice(1),
+        value: env,
+      })),
+      value: environmentFilter,
+      onChange: (value) => setEnvironmentFilter(value as string[]),
+    },
+  ];
+
+  // Vulnerability filters
+  const vulnerabilityFilters: Filter[] = [
+    {
+      id: "severity",
+      label: "Severity",
+      type: "checkbox",
+      options: [
+        { label: "Critical", value: "CRITICAL" },
+        { label: "High", value: "HIGH" },
+        { label: "Medium", value: "MEDIUM" },
+        { label: "Low", value: "LOW" },
+      ],
+      value: vulnerabilitySeverityFilter,
+      onChange: (value) => setVulnerabilitySeverityFilter(value as string[]),
+    },
+  ];
+
+  // Loading state
+  if (!selectedAgent && activeAgents.length === 0 && !isLoading) {
     return (
-      <span className={cn("px-2 py-0.5 text-xs font-medium rounded-full", className)}>
-        {label}
-      </span>
+      <div className="space-y-6">
+        <PageHeader
+          title="Deployments"
+          description="Manage and monitor deployments with security scanning"
+          breadcrumbs={<Breadcrumb items={[{ label: "Deploy", href: "/deploy" }, { label: "Deployments" }]} />}
+        />
+        <EmptyState
+          icon={Package}
+          title="No active agents"
+          description="Connect your first agent to start monitoring deployments"
+          action={
+            <button className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors">
+              Connect Agent
+            </button>
+          }
+        />
+      </div>
     );
-  };
-
-  const getSeverityColor = (severity: Vulnerability["severity"]) => {
-    switch (severity) {
-      case "critical":
-        return "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400";
-      case "high":
-        return "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400";
-      case "medium":
-        return "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400";
-      case "low":
-        return "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400";
-      default:
-        return "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400";
-    }
-  };
+  }
 
   return (
-    <PageLayout
-      title="Deployments"
-      description="Manage and monitor deployments with security scanning"
-      actions={
-        <div className="flex gap-2">
-          {activeAgents.length > 1 && (
-            <select
-              value={selectedAgent || ""}
-              onChange={(e) => {
-                setSelectedAgent(e.target.value);
-                setSelectedDeployment(null);
-              }}
-              className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm"
-            >
-              {activeAgents.map((agent) => (
-                <option key={agent.id} value={agent.id}>
-                  {agent.name}
-                </option>
-              ))}
-            </select>
-          )}
-          <Button
-            variant="secondary"
-            onClick={() =>
-              queryClient.invalidateQueries({ queryKey: ["deployments", selectedAgent] })
-            }
-          >
-            <RefreshCw className="w-4 h-4" />
-            Refresh
-          </Button>
-        </div>
-      }
-      panel={
-        <DetailPanel
-          open={!!selectedDeployment}
-          onClose={() => setSelectedDeployment(null)}
-          title={selectedDeployment?.service_name}
-          subtitle={selectedDeployment?.environment}
-        >
-          {selectedDeployment && (
-            <>
-            <Tabs
-              tabs={[
-                { id: "overview", label: "Overview" },
-                { id: "scan", label: "Scan Results", count: scanResult?.total_count },
-                { id: "vulnerabilities", label: "Vulnerabilities", count: vulnerabilities?.length },
-                { id: "sbom", label: "SBOM" },
-              ]}
-              activeTab={panelTab}
-              onChange={(id) => setPanelTab(id as PanelTab)}
+    <>
+      <div className="space-y-6">
+        {/* Page Header */}
+        <PageHeader
+          title="Deployments"
+          description="Manage and monitor deployments with security scanning across all environments"
+          breadcrumbs={<Breadcrumb items={[{ label: "Deploy", href: "/deploy" }, { label: "Deployments" }]} />}
+          action={
+            <div className="flex items-center gap-3">
+              {activeAgents.length > 1 && (
+                <select
+                  value={selectedAgent || ""}
+                  onChange={(e) => {
+                    setSelectedAgent(e.target.value);
+                    setSelectedDeployment(null);
+                  }}
+                  className="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-2 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                >
+                  {activeAgents.map((agent) => (
+                    <option key={agent.id} value={agent.id}>
+                      {agent.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <button
+                onClick={() =>
+                  queryClient.invalidateQueries({ queryKey: ["deployments", selectedAgent] })
+                }
+                className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-900 dark:text-white rounded-lg transition-colors text-sm font-medium"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Refresh
+              </button>
+            </div>
+          }
+        />
+
+        {/* Metrics Section */}
+        {metrics && (
+          <MetricsGrid columns={4}>
+            <StatCard
+              label="Total Deployments"
+              value={metrics.total}
+              description={`${metrics.running} running`}
+              icon={Package}
+              iconColor="text-blue-600 dark:text-blue-400"
+              trend={metrics.running === metrics.total ? "up" : undefined}
+              trendValue={metrics.running === metrics.total ? "All running" : undefined}
             />
 
-            <div className="mt-4 space-y-6">
-              {panelTab === "overview" && (
-                <>
-                  {/* Quick Actions */}
-                  {selectedDeployment.sbom_id && (
-                    <DetailSection title="Quick Actions">
-                      <div className="grid grid-cols-1 gap-2">
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => api.downloadSBOM(selectedDeployment.sbom_id!)}
-                        >
-                          <Download className="w-4 h-4 mr-2" />
-                          Download SBOM
-                        </Button>
-                        {selectedDeployment.scan_result_id && (
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => setPanelTab("scan")}
-                          >
-                            <Shield className="w-4 h-4 mr-2" />
-                            View Scan Results
-                          </Button>
+            <StatCard
+              label="Failed Deployments"
+              value={metrics.failed}
+              description={metrics.failed === 0 ? "No failures" : "Needs attention"}
+              icon={AlertTriangle}
+              iconColor={metrics.failed > 0 ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"}
+              valueColor={metrics.failed > 0 ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"}
+            />
+
+            <StatCard
+              label="In Progress"
+              value={metrics.scanning}
+              description={metrics.scanning > 0 ? "Active deployments" : "No active deployments"}
+              icon={Activity}
+              iconColor="text-yellow-600 dark:text-yellow-400"
+            />
+
+            <StatCard
+              label="Policy Blocked"
+              value={metrics.blocked}
+              description={metrics.warned > 0 ? `${metrics.warned} warnings` : metrics.blocked === 0 ? "No blocks" : "Review policies"}
+              icon={Shield}
+              iconColor={metrics.blocked > 0 ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"}
+              valueColor={metrics.blocked > 0 ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"}
+            />
+          </MetricsGrid>
+        )}
+
+        {/* Filters */}
+        {deployments && deployments.length > 0 && (
+          <FilterPanel
+            filters={deploymentFilters}
+            onReset={() => {
+              setStatusFilter([]);
+              setEnvironmentFilter([]);
+            }}
+          />
+        )}
+
+        {/* Deployments Table */}
+        <Card>
+          <Card.Body className="p-0">
+            {isLoading ? (
+              <div className="p-12">
+                <Spinner.Page label="Loading deployments..." />
+              </div>
+            ) : (
+              <Table
+                columns={columns}
+                data={filteredDeployments}
+                keyExtractor={(deployment) => deployment.id}
+                onRowClick={(deployment) => setSelectedDeployment(deployment)}
+                loading={isLoading}
+                emptyState={
+                  <EmptyState
+                    icon={Package}
+                    title="No deployments"
+                    description={
+                      statusFilter.length > 0 || environmentFilter.length > 0
+                        ? "No deployments match your filters. Try adjusting your filter criteria."
+                        : "No deployments found for this agent"
+                    }
+                    size="sm"
+                  />
+                }
+                hoverable
+              />
+            )}
+          </Card.Body>
+        </Card>
+      </div>
+
+      {/* Detail SlideOver */}
+      <SlideOver
+        isOpen={!!selectedDeployment}
+        onClose={() => setSelectedDeployment(null)}
+        size="lg"
+      >
+        {selectedDeployment && (
+          <>
+            <SlideOver.Header
+              title={selectedDeployment.service_name}
+              subtitle={selectedDeployment.environment}
+              onClose={() => setSelectedDeployment(null)}
+            />
+
+            <SlideOver.Body>
+              {/* Tabs */}
+              <div className="flex items-center gap-1 p-1 bg-gray-100 dark:bg-gray-800 rounded-lg mb-6">
+                {[
+                  { id: "overview", label: "Overview" },
+                  { id: "scan", label: "Scan Results", count: scanResult?.total_count },
+                  { id: "vulnerabilities", label: "Vulnerabilities", count: vulnerabilities?.length },
+                  { id: "sbom", label: "SBOM" },
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setPanelTab(tab.id as PanelTab)}
+                    className={cn(
+                      "flex-1 px-3 py-2 text-sm font-medium rounded-md transition-colors",
+                      panelTab === tab.id
+                        ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
+                        : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+                    )}
+                  >
+                    {tab.label}
+                    {tab.count !== undefined && (
+                      <span
+                        className={cn(
+                          "ml-2 px-1.5 py-0.5 text-xs rounded-full",
+                          panelTab === tab.id
+                            ? "bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400"
+                            : "bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400"
                         )}
-                      </div>
-                    </DetailSection>
-                  )}
+                      >
+                        {tab.count}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
 
-                  <DetailSection title="Deployment Info">
-                    <DetailRow label="Service" value={selectedDeployment.service_name} />
-                    <DetailRow label="Environment" value={selectedDeployment.environment} />
-                    <DetailRow
-                      label="Status"
-                      value={
-                        <span className={cn(
-                          "px-2 py-0.5 text-xs font-medium rounded-full capitalize",
-                          getStatusBadgeClass(selectedDeployment.status)
-                        )}>
-                          {selectedDeployment.status}
-                        </span>
-                      }
-                    />
-                    {selectedDeployment.status_message && (
-                      <DetailRow label="Message" value={selectedDeployment.status_message} />
+              {/* Tab Content */}
+              <div className="space-y-6">
+                {/* Overview Tab */}
+                {panelTab === "overview" && (
+                  <>
+                    {/* Quick Actions */}
+                    {selectedDeployment.sbom_id && (
+                      <Card>
+                        <Card.Header>
+                          <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Quick Actions</h3>
+                        </Card.Header>
+                        <Card.Body className="space-y-2">
+                          <button
+                            onClick={() => api.downloadSBOM(selectedDeployment.sbom_id!)}
+                            className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-900 dark:text-white rounded-lg transition-colors text-sm font-medium"
+                          >
+                            <Download className="w-4 h-4" />
+                            Download SBOM
+                          </button>
+                          {selectedDeployment.scan_result_id && (
+                            <button
+                              onClick={() => setPanelTab("scan")}
+                              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-900 dark:text-white rounded-lg transition-colors text-sm font-medium"
+                            >
+                              <Shield className="w-4 h-4" />
+                              View Scan Results
+                            </button>
+                          )}
+                        </Card.Body>
+                      </Card>
                     )}
-                    {selectedDeployment.policy_decision && (
-                      <DetailRow
-                        label="Policy"
-                        value={getPolicyDecisionBadge(selectedDeployment.policy_decision)}
-                      />
-                    )}
-                    {selectedDeployment.policy_reason && (
-                      <DetailRow label="Policy Reason" value={selectedDeployment.policy_reason} />
-                    )}
-                  </DetailSection>
 
-                  <DetailSection title="Image">
-                    <DetailRow
-                      label="Repository"
-                      value={selectedDeployment.image_repository}
-                      mono
-                    />
-                    {selectedDeployment.image_tag && (
-                      <DetailRow label="Tag" value={selectedDeployment.image_tag} mono />
-                    )}
-                    {selectedDeployment.image_digest && (
-                      <DetailRow
-                        label="Digest"
-                        value={selectedDeployment.image_digest.substring(0, 20) + "..."}
-                        mono
-                      />
-                    )}
-                  </DetailSection>
+                    {/* Deployment Info */}
+                    <Card>
+                      <Card.Header>
+                        <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Deployment Info</h3>
+                      </Card.Header>
+                      <Card.Body className="space-y-3">
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                          <div>
+                            <p className="text-gray-500 dark:text-gray-400 mb-1">Service</p>
+                            <p className="font-medium text-gray-900 dark:text-white">{selectedDeployment.service_name}</p>
+                          </div>
+                          <div>
+                            <p className="text-gray-500 dark:text-gray-400 mb-1">Environment</p>
+                            <Badge variant="default">{selectedDeployment.environment}</Badge>
+                          </div>
+                        </div>
+                        <div>
+                          <p className="text-gray-500 dark:text-gray-400 text-sm mb-1">Status</p>
+                          <StatusIndicator
+                            status={getDeploymentStatus(selectedDeployment.status)}
+                            label={selectedDeployment.status}
+                            pulse={selectedDeployment.status === "running"}
+                          />
+                        </div>
+                        {selectedDeployment.status_message && (
+                          <div>
+                            <p className="text-gray-500 dark:text-gray-400 text-sm mb-1">Message</p>
+                            <p className="text-sm text-gray-900 dark:text-white">{selectedDeployment.status_message}</p>
+                          </div>
+                        )}
+                        {selectedDeployment.policy_decision && (
+                          <div>
+                            <p className="text-gray-500 dark:text-gray-400 text-sm mb-1">Policy</p>
+                            <StatusIndicator
+                              status={getPolicyDecisionStatus(selectedDeployment.policy_decision)!}
+                              label={selectedDeployment.policy_decision === "allow" ? "Allowed" : selectedDeployment.policy_decision === "warn" ? "Warning" : "Blocked"}
+                            />
+                          </div>
+                        )}
+                        {selectedDeployment.policy_reason && (
+                          <div>
+                            <p className="text-gray-500 dark:text-gray-400 text-sm mb-1">Policy Reason</p>
+                            <p className="text-sm text-gray-900 dark:text-white">{selectedDeployment.policy_reason}</p>
+                          </div>
+                        )}
+                      </Card.Body>
+                    </Card>
 
-                  {(selectedDeployment.git_repo || selectedDeployment.git_commit) && (
-                    <DetailSection title="Git Info">
-                      {selectedDeployment.git_repo && (
-                        <DetailRow label="Repository" value={selectedDeployment.git_repo} mono />
-                      )}
-                      {selectedDeployment.git_branch && (
-                        <DetailRow label="Branch" value={selectedDeployment.git_branch} mono />
-                      )}
-                      {selectedDeployment.git_commit && (
-                        <DetailRow
-                          label="Commit"
-                          value={selectedDeployment.git_commit.substring(0, 8)}
-                          mono
-                        />
-                      )}
-                    </DetailSection>
-                  )}
+                    {/* Image Info */}
+                    <Card>
+                      <Card.Header>
+                        <h3 className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                          <Container className="w-4 h-4" />
+                          Image
+                        </h3>
+                      </Card.Header>
+                      <Card.Body className="space-y-3">
+                        <div>
+                          <p className="text-gray-500 dark:text-gray-400 text-sm mb-1">Repository</p>
+                          <p className="text-sm font-mono text-gray-900 dark:text-white break-all">
+                            {selectedDeployment.image_repository}
+                          </p>
+                        </div>
+                        {selectedDeployment.image_tag && (
+                          <div>
+                            <p className="text-gray-500 dark:text-gray-400 text-sm mb-1">Tag</p>
+                            <p className="text-sm font-mono text-gray-900 dark:text-white">{selectedDeployment.image_tag}</p>
+                          </div>
+                        )}
+                        {selectedDeployment.image_digest && (
+                          <div>
+                            <p className="text-gray-500 dark:text-gray-400 text-sm mb-1">Digest</p>
+                            <p className="text-xs font-mono text-gray-900 dark:text-white break-all">
+                              {selectedDeployment.image_digest.substring(0, 20)}...
+                            </p>
+                          </div>
+                        )}
+                      </Card.Body>
+                    </Card>
 
-                  {(selectedDeployment.ci_provider || selectedDeployment.ci_pipeline_id) && (
-                    <DetailSection title="CI/CD">
-                      {selectedDeployment.ci_provider && (
-                        <DetailRow label="Provider" value={selectedDeployment.ci_provider} />
-                      )}
-                      {selectedDeployment.ci_pipeline_id && (
-                        <DetailRow
-                          label="Pipeline ID"
-                          value={selectedDeployment.ci_pipeline_id}
-                          mono
-                        />
-                      )}
-                      {selectedDeployment.ci_build_url && (
-                        <DetailRow
-                          label="Build URL"
-                          value={
+                    {/* Git Info */}
+                    {(selectedDeployment.git_repo || selectedDeployment.git_commit) && (
+                      <Card>
+                        <Card.Header>
+                          <h3 className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                            <GitBranch className="w-4 h-4" />
+                            Git Info
+                          </h3>
+                        </Card.Header>
+                        <Card.Body className="space-y-3">
+                          {selectedDeployment.git_repo && (
+                            <div>
+                              <p className="text-gray-500 dark:text-gray-400 text-sm mb-1">Repository</p>
+                              <p className="text-sm font-mono text-gray-900 dark:text-white break-all">
+                                {selectedDeployment.git_repo}
+                              </p>
+                            </div>
+                          )}
+                          <div className="grid grid-cols-2 gap-4">
+                            {selectedDeployment.git_branch && (
+                              <div>
+                                <p className="text-gray-500 dark:text-gray-400 text-sm mb-1">Branch</p>
+                                <p className="text-sm font-mono text-gray-900 dark:text-white">
+                                  {selectedDeployment.git_branch}
+                                </p>
+                              </div>
+                            )}
+                            {selectedDeployment.git_commit && (
+                              <div>
+                                <p className="text-gray-500 dark:text-gray-400 text-sm mb-1">Commit</p>
+                                <p className="text-sm font-mono text-gray-900 dark:text-white">
+                                  {selectedDeployment.git_commit.substring(0, 8)}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        </Card.Body>
+                      </Card>
+                    )}
+
+                    {/* CI/CD Info */}
+                    {(selectedDeployment.ci_provider || selectedDeployment.ci_pipeline_id) && (
+                      <Card>
+                        <Card.Header>
+                          <h3 className="text-sm font-semibold text-gray-900 dark:text-white">CI/CD</h3>
+                        </Card.Header>
+                        <Card.Body className="space-y-3">
+                          {selectedDeployment.ci_provider && (
+                            <div>
+                              <p className="text-gray-500 dark:text-gray-400 text-sm mb-1">Provider</p>
+                              <p className="text-sm text-gray-900 dark:text-white">{selectedDeployment.ci_provider}</p>
+                            </div>
+                          )}
+                          {selectedDeployment.ci_pipeline_id && (
+                            <div>
+                              <p className="text-gray-500 dark:text-gray-400 text-sm mb-1">Pipeline ID</p>
+                              <p className="text-sm font-mono text-gray-900 dark:text-white">
+                                {selectedDeployment.ci_pipeline_id}
+                              </p>
+                            </div>
+                          )}
+                          {selectedDeployment.ci_build_url && (
                             <a
                               href={selectedDeployment.ci_build_url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-primary-600 hover:text-primary-700 flex items-center gap-1"
+                              className="inline-flex items-center gap-2 text-sm text-primary-600 hover:text-primary-700 dark:text-primary-400"
                             >
                               View Build
                               <ExternalLink className="w-3 h-3" />
                             </a>
-                          }
-                        />
-                      )}
-                    </DetailSection>
-                  )}
-
-                  <DetailSection title="Metadata">
-                    <DetailRow
-                      label="Created"
-                      value={new Date(selectedDeployment.created_at).toLocaleString()}
-                    />
-                    {selectedDeployment.deployed_at && (
-                      <DetailRow
-                        label="Deployed"
-                        value={new Date(selectedDeployment.deployed_at).toLocaleString()}
-                      />
-                    )}
-                  </DetailSection>
-                </>
-              )}
-
-              {panelTab === "scan" && scanResult && (
-                <>
-                  <DetailSection title="Scan Summary">
-                    <DetailRow label="Scanner" value={scanResult.scanner_name} />
-                    {scanResult.scanner_version && (
-                      <DetailRow label="Version" value={scanResult.scanner_version} />
-                    )}
-                    <DetailRow
-                      label="Scanned"
-                      value={new Date(scanResult.scanned_at).toLocaleString()}
-                    />
-                    {scanResult.scan_duration_ms && (
-                      <DetailRow
-                        label="Duration"
-                        value={`${(scanResult.scan_duration_ms / 1000).toFixed(2)}s`}
-                      />
-                    )}
-                  </DetailSection>
-
-                  <DetailSection title="Vulnerability Distribution">
-                    <div className="space-y-3">
-                      {/* Visual bars */}
-                      <div className="space-y-2">
-                        {scanResult.critical_count > 0 && (
-                          <div>
-                            <div className="flex items-center justify-between text-sm mb-1">
-                              <span className="text-gray-700 dark:text-gray-300">Critical</span>
-                              <span className="font-semibold text-red-600 dark:text-red-400">
-                                {scanResult.critical_count}
-                              </span>
-                            </div>
-                            <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-red-500"
-                                style={{
-                                  width: `${Math.max(5, (scanResult.critical_count / scanResult.total_count) * 100)}%`,
-                                }}
-                              />
-                            </div>
-                          </div>
-                        )}
-                        {scanResult.high_count > 0 && (
-                          <div>
-                            <div className="flex items-center justify-between text-sm mb-1">
-                              <span className="text-gray-700 dark:text-gray-300">High</span>
-                              <span className="font-semibold text-orange-600 dark:text-orange-400">
-                                {scanResult.high_count}
-                              </span>
-                            </div>
-                            <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-orange-500"
-                                style={{
-                                  width: `${Math.max(5, (scanResult.high_count / scanResult.total_count) * 100)}%`,
-                                }}
-                              />
-                            </div>
-                          </div>
-                        )}
-                        {scanResult.medium_count > 0 && (
-                          <div>
-                            <div className="flex items-center justify-between text-sm mb-1">
-                              <span className="text-gray-700 dark:text-gray-300">Medium</span>
-                              <span className="font-semibold text-yellow-600 dark:text-yellow-400">
-                                {scanResult.medium_count}
-                              </span>
-                            </div>
-                            <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-yellow-500"
-                                style={{
-                                  width: `${Math.max(5, (scanResult.medium_count / scanResult.total_count) * 100)}%`,
-                                }}
-                              />
-                            </div>
-                          </div>
-                        )}
-                        {scanResult.low_count > 0 && (
-                          <div>
-                            <div className="flex items-center justify-between text-sm mb-1">
-                              <span className="text-gray-700 dark:text-gray-300">Low</span>
-                              <span className="font-semibold text-blue-600 dark:text-blue-400">
-                                {scanResult.low_count}
-                              </span>
-                            </div>
-                            <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-blue-500"
-                                style={{
-                                  width: `${Math.max(5, (scanResult.low_count / scanResult.total_count) * 100)}%`,
-                                }}
-                              />
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Summary stats */}
-                      <div className="pt-3 border-t border-gray-200 dark:border-gray-700 grid grid-cols-2 gap-4">
-                        <div>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">Total</p>
-                          <p className="text-lg font-semibold text-gray-900 dark:text-white">
-                            {scanResult.total_count}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">Fixable</p>
-                          <p className="text-lg font-semibold text-green-600 dark:text-green-400">
-                            {scanResult.fixable_count}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </DetailSection>
-
-                  {scanResult.total_count === 0 && (
-                    <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
-                      <div className="flex items-center gap-3">
-                        <CheckCircle className="w-6 h-6 text-green-600 dark:text-green-400" />
-                        <div>
-                          <p className="text-sm font-medium text-green-900 dark:text-green-100">
-                            No Vulnerabilities Found
-                          </p>
-                          <p className="text-xs text-green-700 dark:text-green-300 mt-0.5">
-                            This image has passed security scanning with zero vulnerabilities.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
-
-              {panelTab === "scan" && !scanResult && (
-                <EmptyState
-                  icon={Shield}
-                  title="No Scan Results"
-                  description="This deployment hasn't been scanned yet."
-                />
-              )}
-
-              {panelTab === "vulnerabilities" && (
-                <>
-                  <div className="flex gap-2 flex-wrap">
-                    <Button
-                      variant={vulnerabilitySeverityFilter === undefined ? "primary" : "secondary"}
-                      size="sm"
-                      onClick={() => setVulnerabilitySeverityFilter(undefined)}
-                    >
-                      All
-                    </Button>
-                    <Button
-                      variant={vulnerabilitySeverityFilter === "CRITICAL" ? "primary" : "secondary"}
-                      size="sm"
-                      onClick={() => setVulnerabilitySeverityFilter("CRITICAL")}
-                    >
-                      Critical
-                    </Button>
-                    <Button
-                      variant={vulnerabilitySeverityFilter === "HIGH" ? "primary" : "secondary"}
-                      size="sm"
-                      onClick={() => setVulnerabilitySeverityFilter("HIGH")}
-                    >
-                      High
-                    </Button>
-                    <Button
-                      variant={vulnerabilitySeverityFilter === "MEDIUM" ? "primary" : "secondary"}
-                      size="sm"
-                      onClick={() => setVulnerabilitySeverityFilter("MEDIUM")}
-                    >
-                      Medium
-                    </Button>
-                    <Button
-                      variant={vulnerabilitySeverityFilter === "LOW" ? "primary" : "secondary"}
-                      size="sm"
-                      onClick={() => setVulnerabilitySeverityFilter("LOW")}
-                    >
-                      Low
-                    </Button>
-                  </div>
-
-                  {vulnerabilities && vulnerabilities.length > 0 ? (
-                    <div className="space-y-3">
-                      {vulnerabilities.map((vuln) => (
-                        <div
-                          key={vuln.id}
-                          className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg"
-                        >
-                          <div className="flex items-start justify-between mb-2">
-                            <div className="flex items-center gap-2">
-                              <span className="font-mono text-sm font-semibold">
-                                {vuln.cve_id}
-                              </span>
-                              <span
-                                className={cn(
-                                  "px-2 py-0.5 rounded text-xs font-medium uppercase",
-                                  getSeverityColor(vuln.severity)
-                                )}
-                              >
-                                {vuln.severity}
-                              </span>
-                              {vuln.cvss_score && (
-                                <span className="text-xs text-gray-600 dark:text-gray-400">
-                                  CVSS: {vuln.cvss_score.toFixed(1)}
-                                </span>
-                              )}
-                            </div>
-                            {vuln.fix_available && (
-                              <span className="text-xs px-2 py-1 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 rounded">
-                                Fix Available
-                              </span>
-                            )}
-                          </div>
-
-                          {vuln.title && (
-                            <p className="text-sm font-medium mb-1">{vuln.title}</p>
                           )}
+                        </Card.Body>
+                      </Card>
+                    )}
 
-                          <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">
-                            <span className="font-semibold">{vuln.package_name}</span>
-                            {vuln.package_version && <span> @ {vuln.package_version}</span>}
-                            {vuln.fixed_version && (
-                              <span className="text-green-600 dark:text-green-400">
-                                {" "}
-                                → {vuln.fixed_version}
-                              </span>
-                            )}
-                          </div>
-
-                          {vuln.description && (
-                            <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2">
-                              {vuln.description}
+                    {/* Metadata */}
+                    <Card>
+                      <Card.Header>
+                        <h3 className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                          <Clock className="w-4 h-4" />
+                          Metadata
+                        </h3>
+                      </Card.Header>
+                      <Card.Body className="space-y-3">
+                        <div>
+                          <p className="text-gray-500 dark:text-gray-400 text-sm mb-1">Created</p>
+                          <p className="text-sm text-gray-900 dark:text-white">
+                            {new Date(selectedDeployment.created_at).toLocaleString()}
+                          </p>
+                        </div>
+                        {selectedDeployment.deployed_at && (
+                          <div>
+                            <p className="text-gray-500 dark:text-gray-400 text-sm mb-1">Deployed</p>
+                            <p className="text-sm text-gray-900 dark:text-white">
+                              {new Date(selectedDeployment.deployed_at).toLocaleString()}
                             </p>
+                          </div>
+                        )}
+                      </Card.Body>
+                    </Card>
+                  </>
+                )}
+
+                {/* Scan Tab */}
+                {panelTab === "scan" && scanResult && (
+                  <>
+                    <Card>
+                      <Card.Header>
+                        <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Scan Summary</h3>
+                      </Card.Header>
+                      <Card.Body className="space-y-3">
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                          <div>
+                            <p className="text-gray-500 dark:text-gray-400 mb-1">Scanner</p>
+                            <p className="text-gray-900 dark:text-white">{scanResult.scanner_name}</p>
+                          </div>
+                          {scanResult.scanner_version && (
+                            <div>
+                              <p className="text-gray-500 dark:text-gray-400 mb-1">Version</p>
+                              <p className="text-gray-900 dark:text-white">{scanResult.scanner_version}</p>
+                            </div>
                           )}
+                        </div>
+                        <div>
+                          <p className="text-gray-500 dark:text-gray-400 text-sm mb-1">Scanned</p>
+                          <p className="text-sm text-gray-900 dark:text-white">
+                            {new Date(scanResult.scanned_at).toLocaleString()}
+                          </p>
+                        </div>
+                        {scanResult.scan_duration_ms && (
+                          <div>
+                            <p className="text-gray-500 dark:text-gray-400 text-sm mb-1">Duration</p>
+                            <p className="text-sm text-gray-900 dark:text-white">
+                              {(scanResult.scan_duration_ms / 1000).toFixed(2)}s
+                            </p>
+                          </div>
+                        )}
+                      </Card.Body>
+                    </Card>
+
+                    <Card>
+                      <Card.Header>
+                        <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Vulnerability Distribution</h3>
+                      </Card.Header>
+                      <Card.Body className="space-y-4">
+                        {/* Severity Bars */}
+                        <div className="space-y-3">
+                          {scanResult.critical_count > 0 && (
+                            <div>
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-sm text-gray-700 dark:text-gray-300">Critical</span>
+                                <span className="text-sm font-semibold text-red-600 dark:text-red-400">
+                                  {scanResult.critical_count}
+                                </span>
+                              </div>
+                              <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-red-500"
+                                  style={{
+                                    width: `${Math.max(5, (scanResult.critical_count / scanResult.total_count) * 100)}%`,
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          )}
+                          {scanResult.high_count > 0 && (
+                            <div>
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-sm text-gray-700 dark:text-gray-300">High</span>
+                                <span className="text-sm font-semibold text-orange-600 dark:text-orange-400">
+                                  {scanResult.high_count}
+                                </span>
+                              </div>
+                              <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-orange-500"
+                                  style={{
+                                    width: `${Math.max(5, (scanResult.high_count / scanResult.total_count) * 100)}%`,
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          )}
+                          {scanResult.medium_count > 0 && (
+                            <div>
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-sm text-gray-700 dark:text-gray-300">Medium</span>
+                                <span className="text-sm font-semibold text-yellow-600 dark:text-yellow-400">
+                                  {scanResult.medium_count}
+                                </span>
+                              </div>
+                              <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-yellow-500"
+                                  style={{
+                                    width: `${Math.max(5, (scanResult.medium_count / scanResult.total_count) * 100)}%`,
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          )}
+                          {scanResult.low_count > 0 && (
+                            <div>
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-sm text-gray-700 dark:text-gray-300">Low</span>
+                                <span className="text-sm font-semibold text-blue-600 dark:text-blue-400">
+                                  {scanResult.low_count}
+                                </span>
+                              </div>
+                              <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-blue-500"
+                                  style={{
+                                    width: `${Math.max(5, (scanResult.low_count / scanResult.total_count) * 100)}%`,
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Summary Stats */}
+                        <div className="grid grid-cols-2 gap-4 pt-3 border-t border-gray-200 dark:border-gray-700">
+                          <div>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">Total</p>
+                            <p className="text-lg font-semibold text-gray-900 dark:text-white">
+                              {scanResult.total_count}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">Fixable</p>
+                            <p className="text-lg font-semibold text-green-600 dark:text-green-400">
+                              {scanResult.fixable_count}
+                            </p>
+                          </div>
+                        </div>
+                      </Card.Body>
+                    </Card>
+
+                    {scanResult.total_count === 0 && (
+                      <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
+                        <div className="flex items-center gap-3">
+                          <CheckCircle className="w-6 h-6 text-green-600 dark:text-green-400 flex-shrink-0" />
+                          <div>
+                            <p className="text-sm font-medium text-green-900 dark:text-green-100">
+                              No Vulnerabilities Found
+                            </p>
+                            <p className="text-xs text-green-700 dark:text-green-300 mt-0.5">
+                              This image has passed security scanning with zero vulnerabilities.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {panelTab === "scan" && !scanResult && (
+                  <EmptyState
+                    icon={Shield}
+                    title="No Scan Results"
+                    description="This deployment hasn't been scanned yet."
+                    size="sm"
+                  />
+                )}
+
+                {/* Vulnerabilities Tab */}
+                {panelTab === "vulnerabilities" && (
+                  <>
+                    <FilterPanel
+                      filters={vulnerabilityFilters}
+                      onReset={() => setVulnerabilitySeverityFilter([])}
+                    />
+
+                    {vulnerabilities && vulnerabilities.length > 0 ? (
+                      <div className="space-y-3">
+                        {vulnerabilities.map((vuln) => (
+                          <Card key={vuln.id}>
+                            <Card.Body>
+                              <div className="flex items-start justify-between mb-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-mono text-sm font-semibold text-gray-900 dark:text-white">
+                                    {vuln.cve_id}
+                                  </span>
+                                  <SeverityBadge
+                                    severity={vuln.severity.toLowerCase() as "critical" | "high" | "medium" | "low"}
+                                    size="sm"
+                                  />
+                                  {vuln.cvss_score && (
+                                    <span className="text-xs text-gray-600 dark:text-gray-400">
+                                      CVSS: {vuln.cvss_score.toFixed(1)}
+                                    </span>
+                                  )}
+                                </div>
+                                {vuln.fix_available && (
+                                  <Badge variant="status" status="healthy" size="sm">
+                                    Fix Available
+                                  </Badge>
+                                )}
+                              </div>
+
+                              {vuln.title && (
+                                <p className="text-sm font-medium text-gray-900 dark:text-white mb-2">
+                                  {vuln.title}
+                                </p>
+                              )}
+
+                              <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                                <span className="font-semibold">{vuln.package_name}</span>
+                                {vuln.package_version && <span> @ {vuln.package_version}</span>}
+                                {vuln.fixed_version && (
+                                  <span className="text-green-600 dark:text-green-400">
+                                    {" "}→ {vuln.fixed_version}
+                                  </span>
+                                )}
+                              </div>
+
+                              {vuln.description && (
+                                <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2">
+                                  {vuln.description}
+                                </p>
+                              )}
+                            </Card.Body>
+                          </Card>
+                        ))}
+                      </div>
+                    ) : (
+                      <EmptyState
+                        icon={CheckCircle}
+                        title="No Vulnerabilities"
+                        description={
+                          vulnerabilitySeverityFilter.length > 0
+                            ? "No vulnerabilities found for this filter."
+                            : "No vulnerabilities found in this deployment."
+                        }
+                        size="sm"
+                      />
+                    )}
+                  </>
+                )}
+
+                {/* SBOM Tab */}
+                {panelTab === "sbom" && selectedDeployment.sbom_id && sboms && sboms.length > 0 && (
+                  <>
+                    {sboms
+                      .filter((s) => s.id === selectedDeployment.sbom_id)
+                      .map((sbom) => (
+                        <div key={sbom.id} className="space-y-4">
+                          <Card>
+                            <Card.Header>
+                              <h3 className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                                <FileCode className="w-4 h-4" />
+                                SBOM Info
+                              </h3>
+                            </Card.Header>
+                            <Card.Body className="space-y-3">
+                              <div className="grid grid-cols-2 gap-4 text-sm">
+                                <div>
+                                  <p className="text-gray-500 dark:text-gray-400 mb-1">Format</p>
+                                  <p className="text-gray-900 dark:text-white">{sbom.format.toUpperCase()}</p>
+                                </div>
+                                <div>
+                                  <p className="text-gray-500 dark:text-gray-400 mb-1">Spec Version</p>
+                                  <p className="text-gray-900 dark:text-white">{sbom.spec_version}</p>
+                                </div>
+                              </div>
+                              <div>
+                                <p className="text-gray-500 dark:text-gray-400 text-sm mb-1">Generator</p>
+                                <p className="text-sm text-gray-900 dark:text-white">
+                                  {sbom.generator_name}
+                                  {sbom.generator_version && ` ${sbom.generator_version}`}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-gray-500 dark:text-gray-400 text-sm mb-1">Generated</p>
+                                <p className="text-sm text-gray-900 dark:text-white">
+                                  {new Date(sbom.created_at).toLocaleString()}
+                                </p>
+                              </div>
+                            </Card.Body>
+                          </Card>
+
+                          <Card>
+                            <Card.Header>
+                              <h3 className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                                <Package className="w-4 h-4" />
+                                Package Summary
+                              </h3>
+                            </Card.Header>
+                            <Card.Body className="space-y-3">
+                              <div className="flex items-center justify-between">
+                                <span className="text-sm text-gray-500 dark:text-gray-400">Total Packages</span>
+                                <span className="text-lg font-semibold text-gray-900 dark:text-white">
+                                  {sbom.total_packages}
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-sm text-gray-500 dark:text-gray-400">OS Packages</span>
+                                <span className="text-sm text-gray-900 dark:text-white">{sbom.os_packages}</span>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-sm text-gray-500 dark:text-gray-400">Library Packages</span>
+                                <span className="text-sm text-gray-900 dark:text-white">
+                                  {sbom.library_packages}
+                                </span>
+                              </div>
+                            </Card.Body>
+                          </Card>
+
+                          <button
+                            onClick={() => api.downloadSBOM(sbom.id)}
+                            className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors font-medium"
+                          >
+                            <Download className="w-4 h-4" />
+                            Download SBOM
+                          </button>
                         </div>
                       ))}
-                    </div>
-                  ) : (
-                    <EmptyState
-                      icon={CheckCircle}
-                      title="No Vulnerabilities"
-                      description="No vulnerabilities found for this filter."
-                    />
-                  )}
-                </>
-              )}
+                  </>
+                )}
 
-              {panelTab === "sbom" && selectedDeployment.sbom_id && sboms && sboms.length > 0 && (
-                <>
-                  {sboms
-                    .filter((s) => s.id === selectedDeployment.sbom_id)
-                    .map((sbom) => (
-                      <div key={sbom.id}>
-                        <DetailSection title="SBOM Info">
-                          <DetailRow label="Format" value={sbom.format.toUpperCase()} />
-                          <DetailRow label="Spec Version" value={sbom.spec_version} />
-                          <DetailRow label="Generator" value={sbom.generator_name} />
-                          {sbom.generator_version && (
-                            <DetailRow label="Version" value={sbom.generator_version} />
-                          )}
-                          <DetailRow
-                            label="Generated"
-                            value={new Date(sbom.created_at).toLocaleString()}
-                          />
-                        </DetailSection>
-
-                        <DetailSection title="Package Summary">
-                          <DetailRow
-                            label="Total Packages"
-                            value={<span className="font-semibold">{sbom.total_packages}</span>}
-                          />
-                          <DetailRow label="OS Packages" value={sbom.os_packages} />
-                          <DetailRow label="Library Packages" value={sbom.library_packages} />
-                        </DetailSection>
-
-                        <div className="mt-4">
-                          <Button
-                            variant="primary"
-                            onClick={() => api.downloadSBOM(sbom.id)}
-                            className="w-full"
-                          >
-                            <Download className="w-4 h-4 mr-2" />
-                            Download SBOM
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                </>
-              )}
-
-              {panelTab === "sbom" && !selectedDeployment.sbom_id && (
-                <EmptyState
-                  icon={FileCode}
-                  title="No SBOM"
-                  description="No SBOM has been generated for this deployment."
-                />
-              )}
-            </div>
-            </>
-          )}
-        </DetailPanel>
-      }
-      panelOpen={!!selectedDeployment}
-    >
-      <div className="space-y-4">
-        {isLoading && (
-          <div className="text-center py-12 text-gray-500">Loading deployments...</div>
-        )}
-
-        {!isLoading && (!deployments || deployments.length === 0) && (
-          <EmptyState
-            icon={Package}
-            title="No Deployments"
-            description="No deployments found for this agent."
-          />
-        )}
-
-        {deployments && deployments.length > 0 && (
-          <>
-            {deployments.map((deployment) => (
-              <ListCard
-                key={deployment.id}
-                selected={selectedDeployment?.id === deployment.id}
-                onClick={() => setSelectedDeployment(deployment)}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <Shield className="w-5 h-5 text-gray-400 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <h3 className="text-sm font-medium truncate">
-                          {deployment.service_name}
-                        </h3>
-                        <span className="text-xs px-2 py-0.5 bg-gray-100 dark:bg-gray-800 rounded">
-                          {deployment.environment}
-                        </span>
-                      </div>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 font-mono truncate">
-                        {deployment.image_repository}
-                        {deployment.image_tag && `:${deployment.image_tag}`}
-                      </p>
-                      {deployment.git_commit && (
-                        <div className="flex items-center gap-1 mt-1">
-                          <GitBranch className="w-3 h-3 text-gray-400" />
-                          <span className="text-xs text-gray-500 font-mono">
-                            {deployment.git_commit.substring(0, 8)}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-3 ml-4">
-                    <div className="text-right">
-                      <span className={cn(
-                        "px-2 py-0.5 text-xs font-medium rounded-full capitalize",
-                        getStatusBadgeClass(deployment.status)
-                      )}>
-                        {deployment.status}
-                      </span>
-                      {deployment.policy_decision && (
-                        <div className="mt-1">{getPolicyDecisionBadge(deployment.policy_decision)}</div>
-                      )}
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-gray-400" />
-                  </div>
-                </div>
-              </ListCard>
-            ))}
+                {panelTab === "sbom" && !selectedDeployment.sbom_id && (
+                  <EmptyState
+                    icon={FileCode}
+                    title="No SBOM"
+                    description="No SBOM has been generated for this deployment."
+                    size="sm"
+                  />
+                )}
+              </div>
+            </SlideOver.Body>
           </>
         )}
-      </div>
-    </PageLayout>
+      </SlideOver>
+    </>
   );
 }

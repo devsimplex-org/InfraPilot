@@ -12,21 +12,20 @@ import {
   Server,
   X,
   Tag,
+  Layers,
+  Shield,
 } from "lucide-react";
 import { api, DockerImage } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import {
-  PageLayout,
-  ListCard,
-  EmptyState,
-  Button,
-  Input,
-} from "@/components/ui/page-layout";
-import {
-  DetailPanel,
-  DetailSection,
-  DetailRow,
-} from "@/components/ui/detail-panel";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Breadcrumb } from "@/components/ui/Breadcrumb";
+import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
+import { Table } from "@/components/ui/Table";
+import { Badge } from "@/components/ui/Badge";
+import { SlideOver } from "@/components/ui/SlideOver";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { Spinner } from "@/components/ui/Spinner";
+import { Button, Input } from "@/components/ui/page-layout";
 
 export default function ImagesPage() {
   const queryClient = useQueryClient();
@@ -121,139 +120,129 @@ export default function ImagesPage() {
     return image.id.slice(0, 12);
   };
 
-  return (
-    <PageLayout
-      title="Docker Images"
-      description="Manage Docker images on your server"
-      actions={
+  // Calculate metrics
+  const totalImages = images?.length || 0;
+  const totalSize = images?.reduce((sum, img) => sum + img.size, 0) || 0;
+  const totalTags = images?.reduce((sum, img) => sum + img.tags.length, 0) || 0;
+  const vulnerabilities = 0; // Would require vulnerability scanning data
+
+  // Table columns
+  const columns = [
+    {
+      key: "name",
+      header: "Image Name",
+      sortable: true,
+      render: (_: any, row: DockerImage) => (
         <div className="flex items-center gap-3">
-          {activeAgents.length > 1 && (
-            <select
-              value={selectedAgent || ""}
-              onChange={(e) => {
-                setSelectedAgent(e.target.value);
-                setSelectedImage(null);
-              }}
-              className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900"
-            >
-              {activeAgents.map((agent) => (
-                <option key={agent.id} value={agent.id}>
-                  {agent.name || agent.hostname}
-                </option>
-              ))}
-            </select>
-          )}
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => setShowPullModal(true)}
-            disabled={!selectedAgent}
-          >
-            <Download className="h-4 w-4 mr-1" />
-            Pull Image
-          </Button>
+          <div className="p-2 rounded-lg bg-gray-100 dark:bg-gray-800">
+            <ImageIcon className="h-5 w-5 text-gray-500" />
+          </div>
+          <div>
+            <p className="font-medium text-gray-900 dark:text-white">{getImageName(row)}</p>
+            <p className="text-xs text-gray-500 font-mono">{row.id.slice(0, 12)}</p>
+          </div>
         </div>
-      }
-      panelOpen={!!selectedImage}
-      panel={
-        selectedImage && (
-          <DetailPanel
-            open={!!selectedImage}
-            onClose={() => setSelectedImage(null)}
-            title={getImageName(selectedImage)}
-            subtitle={formatSize(selectedImage.size)}
-            defaultWidth={480}
-          >
-            <DetailSection title="Image Info">
-              <DetailRow
-                label="ID"
-                mono
-                value={
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs">{selectedImage.id}</span>
-                    <button
-                      onClick={() => handleCopy(selectedImage.id)}
-                      className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-                    >
-                      {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                    </button>
-                  </div>
-                }
-              />
-              <DetailRow label="Size" value={formatSize(selectedImage.size)} />
-              <DetailRow
-                label="Created"
-                value={new Date(selectedImage.created).toLocaleString()}
-              />
-            </DetailSection>
+      ),
+    },
+    {
+      key: "tags",
+      header: "Tags",
+      render: (value: string[]) => {
+        if (value.length === 0) {
+          return (
+            <Badge className="px-2 py-1 text-xs bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 rounded border-0">
+              No tags
+            </Badge>
+          );
+        }
+        const tag = getImageTag({ tags: value } as DockerImage);
+        return (
+          <Badge className="px-2 py-1 text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 rounded border-0">
+            <Tag className="h-3 w-3 mr-1" />
+            {tag}
+            {value.length > 1 && ` +${value.length - 1}`}
+          </Badge>
+        );
+      },
+    },
+    {
+      key: "size",
+      header: "Size",
+      sortable: true,
+      align: "right" as const,
+      render: (value: number) => (
+        <span className="text-sm text-gray-900 dark:text-white">{formatSize(value)}</span>
+      ),
+    },
+    {
+      key: "created",
+      header: "Created",
+      sortable: true,
+      render: (value: string) => (
+        <span className="text-sm text-gray-500">
+          {new Date(value).toLocaleDateString()}
+        </span>
+      ),
+    },
+    {
+      key: "used_by",
+      header: "In Use",
+      align: "center" as const,
+      render: (value: string[]) => {
+        const inUse = value.length > 0;
+        return inUse ? (
+          <Badge className="px-2 py-1 text-xs bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 rounded border-0">
+            {value.length} container{value.length !== 1 ? "s" : ""}
+          </Badge>
+        ) : null;
+      },
+    },
+  ];
 
-            <DetailSection title="Tags">
-              {selectedImage.tags.length > 0 ? (
-                <div className="flex flex-wrap gap-2">
-                  {selectedImage.tags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 rounded-full"
-                    >
-                      <Tag className="h-3 w-3" />
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-gray-500">No tags</p>
-              )}
-            </DetailSection>
-
-            <DetailSection title="Used By">
-              {selectedImage.used_by.length > 0 ? (
-                <div className="space-y-2">
-                  {selectedImage.used_by.map((container) => (
-                    <div
-                      key={container}
-                      className="flex items-center gap-2 p-2 bg-gray-50 dark:bg-gray-800 rounded-lg"
-                    >
-                      <Server className="h-4 w-4 text-gray-400" />
-                      <span className="text-sm">{container}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-gray-500">Not used by any containers</p>
-              )}
-            </DetailSection>
-
-            {selectedImage.repo_digests.length > 0 && (
-              <DetailSection title="Digests">
-                <div className="space-y-1">
-                  {selectedImage.repo_digests.map((digest, idx) => (
-                    <p key={idx} className="text-xs font-mono text-gray-500 break-all">
-                      {digest}
-                    </p>
-                  ))}
-                </div>
-              </DetailSection>
-            )}
-
-            <DetailSection title="Actions">
-              <Button
-                variant="danger"
-                size="sm"
-                onClick={() => setShowDeleteModal(true)}
+  return (
+    <div className="p-6">
+      <PageHeader
+        title="Docker Images"
+        description="Manage Docker images on your server"
+        breadcrumbs={
+          <Breadcrumb
+            items={[
+              { label: "Deploy", href: "/dashboard" },
+              { label: "Images", current: true },
+            ]}
+          />
+        }
+        action={
+          <div className="flex items-center gap-3">
+            {activeAgents.length > 1 && (
+              <select
+                value={selectedAgent || ""}
+                onChange={(e) => {
+                  setSelectedAgent(e.target.value);
+                  setSelectedImage(null);
+                }}
+                className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900"
               >
-                <Trash2 className="h-4 w-4 mr-1" />
-                Delete Image
-              </Button>
-              {selectedImage.used_by.length > 0 && (
-                <p className="text-xs text-yellow-600 dark:text-yellow-400 mt-2">
-                  Warning: Image is in use. Deletion may require force.
-                </p>
-              )}
-            </DetailSection>
-          </DetailPanel>
-        )
-      }
-    >
+                {activeAgents.map((agent) => (
+                  <option key={agent.id} value={agent.id}>
+                    {agent.name || agent.hostname}
+                  </option>
+                ))}
+              </select>
+            )}
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => setShowPullModal(true)}
+              disabled={!selectedAgent}
+            >
+              <Download className="h-4 w-4 mr-1" />
+              Pull Image
+            </Button>
+          </div>
+        }
+      />
+
       {!selectedAgent ? (
         <EmptyState
           icon={Server}
@@ -262,77 +251,236 @@ export default function ImagesPage() {
         />
       ) : isLoading ? (
         <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500" />
-        </div>
-      ) : images && images.length > 0 ? (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {images.map((image) => {
-            const isSelected = selectedImage?.id === image.id;
-            const inUse = image.used_by.length > 0;
-
-            return (
-              <ListCard
-                key={image.id}
-                selected={isSelected}
-                onClick={() => setSelectedImage(image)}
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <div
-                      className={cn(
-                        "p-2 rounded-lg",
-                        isSelected
-                          ? "bg-primary-100 dark:bg-primary-900/30"
-                          : "bg-gray-100 dark:bg-gray-800"
-                      )}
-                    >
-                      <ImageIcon
-                        className={cn(
-                          "h-5 w-5",
-                          isSelected
-                            ? "text-primary-600 dark:text-primary-400"
-                            : "text-gray-500"
-                        )}
-                      />
-                    </div>
-                    <div>
-                      <h3 className="font-medium text-gray-900 dark:text-white">
-                        {getImageName(image)}
-                      </h3>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="px-1.5 py-0.5 text-xs bg-gray-100 dark:bg-gray-800 rounded">
-                          {getImageTag(image)}
-                        </span>
-                        <span className="text-xs text-gray-500">{formatSize(image.size)}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    {inUse && (
-                      <span className="text-xs text-green-600 dark:text-green-400">In use</span>
-                    )}
-                    <p className="text-xs text-gray-500 mt-1">
-                      {image.used_by.length} container{image.used_by.length !== 1 ? "s" : ""}
-                    </p>
-                  </div>
-                </div>
-              </ListCard>
-            );
-          })}
+          <Spinner size="lg" />
         </div>
       ) : (
-        <EmptyState
-          icon={ImageIcon}
-          title="No images found"
-          description="Pull a Docker image to get started"
-          action={
-            <Button variant="primary" onClick={() => setShowPullModal(true)}>
-              <Download className="h-4 w-4 mr-1" />
-              Pull Image
-            </Button>
-          }
-        />
+        <>
+          {/* Metrics */}
+          <MetricsGrid columns={4} className="mb-6">
+            <StatCard
+              label="Total Images"
+              value={totalImages}
+              icon={ImageIcon}
+              iconColor="text-blue-600 dark:text-blue-400"
+            />
+            <StatCard
+              label="Total Size"
+              value={formatSize(totalSize)}
+              icon={Layers}
+              iconColor="text-purple-600 dark:text-purple-400"
+            />
+            <StatCard
+              label="Total Tags"
+              value={totalTags}
+              icon={Tag}
+              iconColor="text-green-600 dark:text-green-400"
+            />
+            <StatCard
+              label="Vulnerabilities"
+              value={vulnerabilities}
+              icon={Shield}
+              iconColor="text-orange-600 dark:text-orange-400"
+            />
+          </MetricsGrid>
+
+          {/* Table */}
+          {images && images.length > 0 ? (
+            <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
+              <Table
+                columns={columns}
+                data={images}
+                keyExtractor={(row) => row.id}
+                onRowClick={(row) => setSelectedImage(row)}
+                hoverable
+                rowClassName={(row) =>
+                  selectedImage?.id === row.id
+                    ? "bg-primary-50 dark:bg-primary-900/20"
+                    : ""
+                }
+              />
+            </div>
+          ) : (
+            <EmptyState
+              icon={ImageIcon}
+              title="No images found"
+              description="Pull a Docker image to get started"
+              action={
+                <Button variant="primary" onClick={() => setShowPullModal(true)}>
+                  <Download className="h-4 w-4 mr-1" />
+                  Pull Image
+                </Button>
+              }
+            />
+          )}
+        </>
       )}
+
+      {/* SlideOver for Image Details */}
+      <SlideOver
+        isOpen={!!selectedImage}
+        onClose={() => setSelectedImage(null)}
+        size="md"
+      >
+        {selectedImage && (
+          <>
+            <SlideOver.Header onClose={() => setSelectedImage(null)}>
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                  {getImageName(selectedImage)}
+                </h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  {formatSize(selectedImage.size)}
+                </p>
+              </div>
+            </SlideOver.Header>
+
+            <SlideOver.Body>
+              <div className="space-y-6">
+                {/* Image Info */}
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
+                    Image Info
+                  </h3>
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-gray-500 dark:text-gray-400">ID</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-mono text-gray-900 dark:text-white">
+                          {selectedImage.id.slice(0, 12)}
+                        </span>
+                        <button
+                          onClick={() => handleCopy(selectedImage.id)}
+                          className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                        >
+                          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-sm text-gray-500 dark:text-gray-400">Size</span>
+                      <span className="text-sm text-gray-900 dark:text-white">
+                        {formatSize(selectedImage.size)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-sm text-gray-500 dark:text-gray-400">Created</span>
+                      <span className="text-sm text-gray-900 dark:text-white">
+                        {new Date(selectedImage.created).toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Tags */}
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
+                    Tags
+                  </h3>
+                  {selectedImage.tags.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {selectedImage.tags.map((tag) => (
+                        <Badge
+                          key={tag}
+                          className="px-2 py-1 text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 rounded border-0"
+                        >
+                          <Tag className="h-3 w-3 mr-1" />
+                          {tag}
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500">No tags</p>
+                  )}
+                </div>
+
+                {/* Used By */}
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
+                    Used By
+                  </h3>
+                  {selectedImage.used_by.length > 0 ? (
+                    <div className="space-y-2">
+                      {selectedImage.used_by.map((container) => (
+                        <div
+                          key={container}
+                          className="flex items-center gap-2 p-2 bg-gray-50 dark:bg-gray-800 rounded-lg"
+                        >
+                          <Server className="h-4 w-4 text-gray-400" />
+                          <span className="text-sm text-gray-900 dark:text-white">{container}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500">Not used by any containers</p>
+                  )}
+                </div>
+
+                {/* Layers (Placeholder) */}
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
+                    Layers
+                  </h3>
+                  <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                    <div className="flex items-center gap-2 text-gray-500">
+                      <Layers className="h-4 w-4" />
+                      <span className="text-sm">Layer information not available</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Vulnerabilities (Placeholder) */}
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
+                    Vulnerabilities
+                  </h3>
+                  <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                    <div className="flex items-center gap-2 text-gray-500">
+                      <Shield className="h-4 w-4" />
+                      <span className="text-sm">Vulnerability scanning not configured</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Digests */}
+                {selectedImage.repo_digests.length > 0 && (
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
+                      Digests
+                    </h3>
+                    <div className="space-y-1">
+                      {selectedImage.repo_digests.map((digest, idx) => (
+                        <p key={idx} className="text-xs font-mono text-gray-500 break-all">
+                          {digest}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
+                    Actions
+                  </h3>
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={() => setShowDeleteModal(true)}
+                  >
+                    <Trash2 className="h-4 w-4 mr-1" />
+                    Delete Image
+                  </Button>
+                  {selectedImage.used_by.length > 0 && (
+                    <p className="text-xs text-yellow-600 dark:text-yellow-400 mt-2">
+                      Warning: Image is in use. Deletion may require force.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </SlideOver.Body>
+          </>
+        )}
+      </SlideOver>
 
       {/* Pull Image Modal */}
       {showPullModal && (
@@ -433,6 +581,6 @@ export default function ImagesPage() {
           </div>
         </div>
       )}
-    </PageLayout>
+    </div>
   );
 }

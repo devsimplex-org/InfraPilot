@@ -17,22 +17,17 @@ import {
   Code,
   Activity,
   ExternalLink,
-  RefreshCw,
 } from "lucide-react";
 import { api, Feedback, VCSConfiguration } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import {
-  PageLayout,
-  ListCard,
-  EmptyState,
-  Button,
-  Tabs,
-} from "@/components/ui/page-layout";
-import {
-  DetailPanel,
-  DetailSection,
-  DetailRow,
-} from "@/components/ui/detail-panel";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Breadcrumb } from "@/components/ui/Breadcrumb";
+import { Card, CardHeader, CardBody } from "@/components/ui/Card";
+import { Table } from "@/components/ui/Table";
+import { Badge, SeverityBadge } from "@/components/ui/Badge";
+import { Timeline } from "@/components/ui/Timeline";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { Spinner } from "@/components/ui/Spinner";
 
 type PageTab = "feedback" | "configuration";
 
@@ -153,444 +148,596 @@ export default function FeedbackPage() {
   const getSourceTypeIcon = (sourceType: Feedback["source_type"]) => {
     switch (sourceType) {
       case "vulnerability":
-        return <Shield className="h-4 w-4 text-red-600" />;
+        return <Shield className="h-4 w-4" />;
       case "policy_violation":
-        return <AlertTriangle className="h-4 w-4 text-orange-600" />;
+        return <AlertTriangle className="h-4 w-4" />;
       case "sbom":
-        return <Package className="h-4 w-4 text-blue-600" />;
+        return <Package className="h-4 w-4" />;
       case "code_quality":
-        return <Code className="h-4 w-4 text-purple-600" />;
+        return <Code className="h-4 w-4" />;
       case "drift":
-        return <Activity className="h-4 w-4 text-yellow-600" />;
+        return <Activity className="h-4 w-4" />;
     }
   };
 
   const getSourceTypeLabel = (sourceType: Feedback["source_type"]) => {
     switch (sourceType) {
       case "vulnerability":
-        return "Vulnerability";
+        return "Security";
       case "policy_violation":
-        return "Policy Violation";
+        return "Policy";
       case "sbom":
         return "SBOM";
       case "code_quality":
-        return "Code Quality";
+        return "Quality";
       case "drift":
         return "Drift";
     }
   };
 
+  const getFeedbackTypeBadgeColor = (sourceType: Feedback["source_type"]) => {
+    switch (sourceType) {
+      case "vulnerability":
+        return "bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800";
+      case "policy_violation":
+        return "bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-900/30 dark:text-orange-400 dark:border-orange-800";
+      case "code_quality":
+        return "bg-purple-100 text-purple-700 border-purple-200 dark:bg-purple-900/30 dark:text-purple-400 dark:border-purple-800";
+      default:
+        return "bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-800";
+    }
+  };
+
+  const getSeverityLevel = (severity?: string): "critical" | "high" | "medium" | "low" | "info" => {
+    if (!severity) return "info";
+    const normalized = severity.toLowerCase();
+    if (normalized === "critical") return "critical";
+    if (normalized === "high") return "high";
+    if (normalized === "medium") return "medium";
+    if (normalized === "low") return "low";
+    return "info";
+  };
+
+  // Table columns for feedback history
+  const feedbackColumns = [
+    {
+      key: "source_type",
+      header: "Type",
+      width: "120px",
+      render: (value: Feedback["source_type"]) => (
+        <Badge className={getFeedbackTypeBadgeColor(value)} size="sm">
+          {getSourceTypeLabel(value)}
+        </Badge>
+      ),
+    },
+    {
+      key: "title",
+      header: "Title",
+      sortable: true,
+      render: (value: string, row: Feedback) => (
+        <div className="flex items-start gap-2">
+          {getSourceTypeIcon(row.source_type)}
+          <div className="min-w-0 flex-1">
+            <div className="font-medium text-sm truncate">{value}</div>
+            <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 mt-1">
+              <Github className="h-3 w-3" />
+              <span className="truncate">{row.repo_full_name}</span>
+              {row.pull_request_number && (
+                <>
+                  <span>•</span>
+                  <span>PR #{row.pull_request_number}</span>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "severity",
+      header: "Severity",
+      width: "100px",
+      align: "center" as const,
+      render: (value: string | undefined) =>
+        value ? <SeverityBadge severity={getSeverityLevel(value)} size="sm" /> : null,
+    },
+    {
+      key: "delivery_status",
+      header: "Status",
+      width: "120px",
+      sortable: true,
+      render: (value: Feedback["delivery_status"]) => (
+        <div className="flex items-center gap-2">
+          {getStatusIcon(value)}
+          <span className={cn("text-xs font-medium capitalize", getStatusBadgeClass(value))}>
+            {value}
+          </span>
+        </div>
+      ),
+    },
+    {
+      key: "created_at",
+      header: "Created",
+      width: "100px",
+      sortable: true,
+      render: (value: string) => (
+        <span className="text-xs text-gray-500">
+          {new Date(value).toLocaleDateString()}
+        </span>
+      ),
+    },
+  ];
+
+  // Recent feedback timeline items (last 5)
+  const recentFeedback = feedbacks.slice(0, 5);
+
   return (
-    <PageLayout
-      title="Developer Feedback"
-      subtitle="Shift-left security feedback delivered to PRs and commits"
-      icon={<MessageSquare className="h-8 w-8" />}
-    >
-      <Tabs
-        tabs={[
-          { id: "feedback", label: "Feedback History", icon: MessageSquare },
-          { id: "configuration", label: "VCS Configuration", icon: Settings },
-        ]}
-        activeTab={pageTab}
-        onChange={(tab) => setPageTab(tab as PageTab)}
+    <div className="space-y-6">
+      <PageHeader
+        title="Developer Feedback"
+        description="Shift-left security feedback delivered to PRs and commits"
+        breadcrumbs={
+          <Breadcrumb
+            items={[
+              { label: "Build", href: "/" },
+              { label: "Developer Feedback", current: true },
+            ]}
+          />
+        }
       />
 
-      {pageTab === "feedback" && (
-        <div className="flex flex-col lg:flex-row gap-6 h-full">
-          {/* Feedback List */}
-          <div className="lg:w-1/2">
-            <div className="mb-4 flex gap-2">
-              <select
-                value={sourceTypeFilter || ""}
-                onChange={(e) => setSourceTypeFilter(e.target.value || undefined)}
-                className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm"
-              >
-                <option value="">All Types</option>
-                <option value="vulnerability">Vulnerability</option>
-                <option value="policy_violation">Policy Violation</option>
-                <option value="sbom">SBOM</option>
-                <option value="code_quality">Code Quality</option>
-                <option value="drift">Drift</option>
-              </select>
-
-              <select
-                value={statusFilter || ""}
-                onChange={(e) => setStatusFilter(e.target.value || undefined)}
-                className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm"
-              >
-                <option value="">All Status</option>
-                <option value="pending">Pending</option>
-                <option value="delivered">Delivered</option>
-                <option value="failed">Failed</option>
-                <option value="skipped">Skipped</option>
-              </select>
+      {/* Tabs */}
+      <div className="border-b border-gray-200 dark:border-gray-700">
+        <nav className="-mb-px flex space-x-8">
+          <button
+            onClick={() => setPageTab("feedback")}
+            className={cn(
+              "py-2 px-1 border-b-2 font-medium text-sm",
+              pageTab === "feedback"
+                ? "border-primary-600 text-primary-600 dark:border-primary-400 dark:text-primary-400"
+                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300"
+            )}
+          >
+            <div className="flex items-center gap-2">
+              <MessageSquare className="h-4 w-4" />
+              <span>Feedback History</span>
             </div>
+          </button>
+          <button
+            onClick={() => setPageTab("configuration")}
+            className={cn(
+              "py-2 px-1 border-b-2 font-medium text-sm",
+              pageTab === "configuration"
+                ? "border-primary-600 text-primary-600 dark:border-primary-400 dark:text-primary-400"
+                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300"
+            )}
+          >
+            <div className="flex items-center gap-2">
+              <Settings className="h-4 w-4" />
+              <span>VCS Configuration</span>
+            </div>
+          </button>
+        </nav>
+      </div>
 
-            {loadingFeedback ? (
-              <div className="flex items-center justify-center h-64">
-                <RefreshCw className="h-8 w-8 animate-spin text-gray-400" />
-              </div>
-            ) : feedbacks.length === 0 ? (
-              <EmptyState
-                icon={MessageSquare}
-                title="No feedback yet"
-                description="Feedback will appear here when security findings are sent to developers"
-              />
-            ) : (
-              <div className="space-y-2">
-                {feedbacks.map((feedback) => (
-                  <ListCard
-                    key={feedback.id}
-                    selected={selectedFeedback?.id === feedback.id}
-                    onClick={() => setSelectedFeedback(feedback)}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          {getSourceTypeIcon(feedback.source_type)}
-                          <span className="font-medium text-sm truncate">
-                            {feedback.title}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
-                          <Github className="h-3 w-3" />
-                          <span className="truncate">{feedback.repo_full_name}</span>
-                          {feedback.pull_request_number && (
-                            <>
-                              <span>•</span>
-                              <span>PR #{feedback.pull_request_number}</span>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex flex-col items-end gap-1 ml-4">
-                        <div className="flex items-center gap-1">
-                          {getStatusIcon(feedback.delivery_status)}
-                          <span
-                            className={cn(
-                              "px-2 py-0.5 text-xs font-medium rounded-full",
-                              getStatusBadgeClass(feedback.delivery_status)
+      {/* Feedback Tab */}
+      {pageTab === "feedback" && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Recent Feedback Card */}
+          <Card>
+            <CardHeader>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                Recent Feedback
+              </h3>
+            </CardHeader>
+            <CardBody>
+              {loadingFeedback ? (
+                <div className="flex items-center justify-center py-12">
+                  <Spinner size="lg" label="Loading feedback..." />
+                </div>
+              ) : recentFeedback.length === 0 ? (
+                <EmptyState
+                  icon={MessageSquare}
+                  title="No feedback yet"
+                  description="Feedback will appear here when security findings are sent to developers"
+                  size="sm"
+                />
+              ) : (
+                <Timeline>
+                  {recentFeedback.map((feedback, index) => (
+                    <Timeline.Item
+                      key={feedback.id}
+                      icon={getSourceTypeIcon(feedback.source_type)}
+                      title={feedback.title}
+                      description={
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <Badge
+                              className={getFeedbackTypeBadgeColor(feedback.source_type)}
+                              size="sm"
+                            >
+                              {getSourceTypeLabel(feedback.source_type)}
+                            </Badge>
+                            {feedback.severity && (
+                              <SeverityBadge severity={getSeverityLevel(feedback.severity)} size="sm" />
                             )}
-                          >
-                            {feedback.delivery_status}
-                          </span>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                            <Github className="h-3 w-3" />
+                            <span>{feedback.repo_full_name}</span>
+                            {feedback.pull_request_number && (
+                              <>
+                                <span>•</span>
+                                <span>PR #{feedback.pull_request_number}</span>
+                              </>
+                            )}
+                          </div>
                         </div>
-                        <span className="text-xs text-gray-500">
-                          {new Date(feedback.created_at).toLocaleDateString()}
+                      }
+                      timestamp={new Date(feedback.created_at).toLocaleDateString()}
+                      isLast={index === recentFeedback.length - 1}
+                    />
+                  ))}
+                </Timeline>
+              )}
+            </CardBody>
+          </Card>
+
+          {/* Feedback Details Card */}
+          <Card>
+            <CardHeader>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                Feedback Details
+              </h3>
+            </CardHeader>
+            <CardBody>
+              {selectedFeedback ? (
+                <div className="space-y-4">
+                  <div>
+                    <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      {selectedFeedback.title}
+                    </h4>
+                    <div className="flex items-center gap-2 mb-4">
+                      <Badge
+                        className={getFeedbackTypeBadgeColor(selectedFeedback.source_type)}
+                        size="sm"
+                      >
+                        {getSourceTypeLabel(selectedFeedback.source_type)}
+                      </Badge>
+                      {selectedFeedback.severity && (
+                        <SeverityBadge severity={getSeverityLevel(selectedFeedback.severity)} size="sm" />
+                      )}
+                      <div className="flex items-center gap-1">
+                        {getStatusIcon(selectedFeedback.delivery_status)}
+                        <span
+                          className={cn(
+                            "text-xs font-medium capitalize",
+                            getStatusBadgeClass(selectedFeedback.delivery_status)
+                          )}
+                        >
+                          {selectedFeedback.delivery_status}
                         </span>
                       </div>
                     </div>
-                  </ListCard>
-                ))}
-              </div>
-            )}
-          </div>
+                  </div>
 
-          {/* Feedback Detail */}
-          <div className="lg:w-1/2">
-            {selectedFeedback ? (
-              <DetailPanel
-                title={selectedFeedback.title}
-                onClose={() => setSelectedFeedback(null)}
-              >
-                <DetailSection title="Status">
-                  <DetailRow label="Delivery Status">
-                    <div className="flex items-center gap-2">
-                      {getStatusIcon(selectedFeedback.delivery_status)}
-                      <span
-                        className={cn(
-                          "px-2 py-0.5 text-xs font-medium rounded-full",
-                          getStatusBadgeClass(selectedFeedback.delivery_status)
-                        )}
-                      >
-                        {selectedFeedback.delivery_status}
-                      </span>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-gray-500 dark:text-gray-400">Repository</span>
+                      <span className="font-medium">{selectedFeedback.repo_full_name}</span>
                     </div>
-                  </DetailRow>
-                  {selectedFeedback.delivered_at && (
-                    <DetailRow label="Delivered At">
-                      {new Date(selectedFeedback.delivered_at).toLocaleString()}
-                    </DetailRow>
-                  )}
-                  {selectedFeedback.delivery_error && (
-                    <DetailRow label="Error">
-                      <span className="text-red-600 text-sm">
-                        {selectedFeedback.delivery_error}
-                      </span>
-                    </DetailRow>
-                  )}
-                </DetailSection>
-
-                <DetailSection title="Target">
-                  <DetailRow label="Provider">
-                    <div className="flex items-center gap-2">
-                      {selectedFeedback.provider === "github" && (
-                        <Github className="h-4 w-4" />
-                      )}
-                      <span className="capitalize">{selectedFeedback.provider}</span>
-                    </div>
-                  </DetailRow>
-                  <DetailRow label="Repository">
-                    {selectedFeedback.repo_full_name}
-                  </DetailRow>
-                  {selectedFeedback.pull_request_number && (
-                    <DetailRow label="Pull Request">
-                      <a
-                        href={`https://github.com/${selectedFeedback.repo_full_name}/pull/${selectedFeedback.pull_request_number}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-blue-600 hover:underline"
-                      >
-                        #{selectedFeedback.pull_request_number}
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
-                    </DetailRow>
-                  )}
-                  {selectedFeedback.commit_sha && (
-                    <DetailRow label="Commit">
-                      <code className="text-xs bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">
-                        {selectedFeedback.commit_sha.substring(0, 7)}
-                      </code>
-                    </DetailRow>
-                  )}
-                  {selectedFeedback.branch_name && (
-                    <DetailRow label="Branch">
-                      <div className="flex items-center gap-1">
-                        <GitBranch className="h-3 w-3" />
-                        <span className="text-sm">{selectedFeedback.branch_name}</span>
+                    {selectedFeedback.pull_request_number && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-500 dark:text-gray-400">Pull Request</span>
+                        <a
+                          href={`https://github.com/${selectedFeedback.repo_full_name}/pull/${selectedFeedback.pull_request_number}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 text-blue-600 hover:underline font-medium"
+                        >
+                          #{selectedFeedback.pull_request_number}
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
                       </div>
-                    </DetailRow>
-                  )}
-                </DetailSection>
-
-                <DetailSection title="Content">
-                  <DetailRow label="Source Type">
-                    <div className="flex items-center gap-2">
-                      {getSourceTypeIcon(selectedFeedback.source_type)}
-                      <span>{getSourceTypeLabel(selectedFeedback.source_type)}</span>
-                    </div>
-                  </DetailRow>
-                  {selectedFeedback.severity && (
-                    <DetailRow label="Severity">
-                      <span className="uppercase text-xs font-semibold">
-                        {selectedFeedback.severity}
-                      </span>
-                    </DetailRow>
-                  )}
-                  <div className="border-t border-gray-200 dark:border-gray-700 my-4" />
-                  <div className="space-y-4">
-                    <div>
-                      <h4 className="font-medium text-sm mb-2">Message</h4>
-                      <div className="prose prose-sm dark:prose-invert max-w-none bg-gray-50 dark:bg-gray-900 p-3 rounded-md">
-                        <pre className="whitespace-pre-wrap text-xs">
-                          {selectedFeedback.message}
-                        </pre>
-                      </div>
-                    </div>
-                    {selectedFeedback.remediation && (
-                      <div>
-                        <h4 className="font-medium text-sm mb-2">Remediation</h4>
-                        <div className="prose prose-sm dark:prose-invert max-w-none bg-blue-50 dark:bg-blue-900/20 p-3 rounded-md">
-                          <pre className="whitespace-pre-wrap text-xs">
-                            {selectedFeedback.remediation}
-                          </pre>
+                    )}
+                    {selectedFeedback.branch_name && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-500 dark:text-gray-400">Branch</span>
+                        <div className="flex items-center gap-1">
+                          <GitBranch className="h-3 w-3" />
+                          <span className="font-medium">{selectedFeedback.branch_name}</span>
                         </div>
                       </div>
                     )}
                   </div>
-                </DetailSection>
 
-                <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
-                  <Button
+                  <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+                    <h5 className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400 mb-2">
+                      Message
+                    </h5>
+                    <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-md text-xs">
+                      <pre className="whitespace-pre-wrap">{selectedFeedback.message}</pre>
+                    </div>
+                  </div>
+
+                  {selectedFeedback.remediation && (
+                    <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+                      <h5 className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400 mb-2">
+                        Remediation
+                      </h5>
+                      <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-md text-xs">
+                        <pre className="whitespace-pre-wrap">{selectedFeedback.remediation}</pre>
+                      </div>
+                    </div>
+                  )}
+
+                  <button
                     onClick={() => handleDeliverFeedback(selectedFeedback.id)}
                     disabled={
                       deliverFeedbackMutation.isPending ||
                       selectedFeedback.delivery_status === "delivered"
                     }
-                    className="w-full"
+                    className={cn(
+                      "w-full flex items-center justify-center gap-2 px-4 py-2 rounded-md font-medium text-sm",
+                      "bg-primary-600 text-white hover:bg-primary-700",
+                      "disabled:opacity-50 disabled:cursor-not-allowed",
+                      "transition-colors"
+                    )}
                   >
-                    <Send className="h-4 w-4 mr-2" />
-                    {deliverFeedbackMutation.isPending
-                      ? "Delivering..."
-                      : "Deliver Feedback"}
-                  </Button>
+                    <Send className="h-4 w-4" />
+                    {deliverFeedbackMutation.isPending ? "Delivering..." : "Deliver Feedback"}
+                  </button>
                 </div>
-              </DetailPanel>
-            ) : (
-              <EmptyState
-                icon={MessageSquare}
-                title="Select a feedback"
-                description="Click on a feedback entry to view details"
-              />
-            )}
+              ) : (
+                <EmptyState
+                  icon={MessageSquare}
+                  title="Select a feedback"
+                  description="Click on a feedback entry in the table below to view details"
+                  size="sm"
+                />
+              )}
+            </CardBody>
+          </Card>
+
+          {/* Feedback History Table */}
+          <div className="lg:col-span-2">
+            <Card>
+              <CardHeader
+                action={
+                  <div className="flex gap-2">
+                    <select
+                      value={sourceTypeFilter || ""}
+                      onChange={(e) => setSourceTypeFilter(e.target.value || undefined)}
+                      className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm"
+                    >
+                      <option value="">All Types</option>
+                      <option value="vulnerability">Security</option>
+                      <option value="policy_violation">Policy</option>
+                      <option value="sbom">SBOM</option>
+                      <option value="code_quality">Quality</option>
+                      <option value="drift">Drift</option>
+                    </select>
+
+                    <select
+                      value={statusFilter || ""}
+                      onChange={(e) => setStatusFilter(e.target.value || undefined)}
+                      className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm"
+                    >
+                      <option value="">All Status</option>
+                      <option value="pending">Pending</option>
+                      <option value="delivered">Delivered</option>
+                      <option value="failed">Failed</option>
+                      <option value="skipped">Skipped</option>
+                    </select>
+                  </div>
+                }
+              >
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                  Feedback History
+                </h3>
+              </CardHeader>
+              <div className="overflow-hidden">
+                <Table
+                  columns={feedbackColumns}
+                  data={feedbacks}
+                  keyExtractor={(row) => row.id}
+                  onRowClick={(row) => setSelectedFeedback(row)}
+                  loading={loadingFeedback}
+                  emptyState={
+                    <EmptyState
+                      icon={MessageSquare}
+                      title="No feedback yet"
+                      description="Feedback will appear here when security findings are sent to developers"
+                    />
+                  }
+                  rowClassName={(row) =>
+                    selectedFeedback?.id === row.id
+                      ? "bg-primary-50 dark:bg-primary-900/20"
+                      : ""
+                  }
+                />
+              </div>
+            </Card>
           </div>
         </div>
       )}
 
+      {/* Configuration Tab */}
       {pageTab === "configuration" && (
         <div className="max-w-2xl mx-auto">
-          <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
-            <h3 className="text-lg font-semibold mb-4">VCS Provider Configuration</h3>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
-              Configure how InfraPilot delivers security feedback to your version control system.
-            </p>
+          <Card>
+            <CardHeader>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                VCS Provider Configuration
+              </h3>
+            </CardHeader>
+            <CardBody>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
+                Configure how InfraPilot delivers security feedback to your version control system.
+              </p>
 
-            <div className="space-y-6">
-              {/* Provider Selection */}
-              <div>
-                <label className="block text-sm font-medium mb-2">Provider</label>
-                <select
-                  value={vcsProvider}
-                  onChange={(e) => setVcsProvider(e.target.value as "github" | "gitlab")}
-                  className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2"
-                >
-                  <option value="github">GitHub</option>
-                  <option value="gitlab">GitLab</option>
-                </select>
-              </div>
+              <div className="space-y-6">
+                {/* Provider Selection */}
+                <div>
+                  <label className="block text-sm font-medium mb-2">Provider</label>
+                  <select
+                    value={vcsProvider}
+                    onChange={(e) => setVcsProvider(e.target.value as "github" | "gitlab")}
+                    className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2"
+                  >
+                    <option value="github">GitHub</option>
+                    <option value="gitlab">GitLab</option>
+                  </select>
+                </div>
 
-              {/* Enabled Toggle */}
-              <div className="flex items-center gap-3">
-                <input
-                  type="checkbox"
-                  id="vcs-enabled"
-                  checked={vcsEnabled}
-                  onChange={(e) => setVcsEnabled(e.target.checked)}
-                  className="rounded"
-                />
-                <label htmlFor="vcs-enabled" className="text-sm font-medium">
-                  Enable {vcsProvider.charAt(0).toUpperCase() + vcsProvider.slice(1)} integration
-                </label>
-              </div>
-
-              {/* Access Token */}
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  Access Token {vcsConfig && "(leave empty to keep existing)"}
-                </label>
-                <input
-                  type="password"
-                  value={vcsToken}
-                  onChange={(e) => setVcsToken(e.target.value)}
-                  placeholder={vcsProvider === "github" ? "ghp_xxxxxxxxxxxx" : "glpat-xxxxxxxxxxxx"}
-                  className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2"
-                />
-                <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
-                  {vcsProvider === "github"
-                    ? "Personal access token with repo and pull_request scopes"
-                    : "Personal access token with api scope"}
-                </p>
-              </div>
-
-              {/* Default Repository */}
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  Default Repository (optional)
-                </label>
-                <input
-                  type="text"
-                  value={vcsDefaultRepo}
-                  onChange={(e) => setVcsDefaultRepo(e.target.value)}
-                  placeholder="owner/repository"
-                  className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2"
-                />
-              </div>
-
-              {/* Auto-comment Options */}
-              <div className="space-y-3">
+                {/* Enabled Toggle */}
                 <div className="flex items-center gap-3">
                   <input
                     type="checkbox"
-                    id="auto-comment-pr"
-                    checked={vcsAutoCommentPR}
-                    onChange={(e) => setVcsAutoCommentPR(e.target.checked)}
+                    id="vcs-enabled"
+                    checked={vcsEnabled}
+                    onChange={(e) => setVcsEnabled(e.target.checked)}
                     className="rounded"
                   />
-                  <label htmlFor="auto-comment-pr" className="text-sm">
-                    Automatically comment on pull requests
+                  <label htmlFor="vcs-enabled" className="text-sm font-medium">
+                    Enable {vcsProvider.charAt(0).toUpperCase() + vcsProvider.slice(1)}{" "}
+                    integration
                   </label>
                 </div>
 
-                <div className="flex items-center gap-3">
+                {/* Access Token */}
+                <div>
+                  <label className="block text-sm font-medium mb-2">
+                    Access Token {vcsConfig && "(leave empty to keep existing)"}
+                  </label>
                   <input
-                    type="checkbox"
-                    id="auto-comment-commit"
-                    checked={vcsAutoCommentCommit}
-                    onChange={(e) => setVcsAutoCommentCommit(e.target.checked)}
-                    className="rounded"
+                    type="password"
+                    value={vcsToken}
+                    onChange={(e) => setVcsToken(e.target.value)}
+                    placeholder={
+                      vcsProvider === "github" ? "ghp_xxxxxxxxxxxx" : "glpat-xxxxxxxxxxxx"
+                    }
+                    className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2"
                   />
-                  <label htmlFor="auto-comment-commit" className="text-sm">
-                    Automatically comment on commits
+                  <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
+                    {vcsProvider === "github"
+                      ? "Personal access token with repo and pull_request scopes"
+                      : "Personal access token with api scope"}
+                  </p>
+                </div>
+
+                {/* Default Repository */}
+                <div>
+                  <label className="block text-sm font-medium mb-2">
+                    Default Repository (optional)
                   </label>
+                  <input
+                    type="text"
+                    value={vcsDefaultRepo}
+                    onChange={(e) => setVcsDefaultRepo(e.target.value)}
+                    placeholder="owner/repository"
+                    className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2"
+                  />
                 </div>
+
+                {/* Auto-comment Options */}
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      id="auto-comment-pr"
+                      checked={vcsAutoCommentPR}
+                      onChange={(e) => setVcsAutoCommentPR(e.target.checked)}
+                      className="rounded"
+                    />
+                    <label htmlFor="auto-comment-pr" className="text-sm">
+                      Automatically comment on pull requests
+                    </label>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      id="auto-comment-commit"
+                      checked={vcsAutoCommentCommit}
+                      onChange={(e) => setVcsAutoCommentCommit(e.target.checked)}
+                      className="rounded"
+                    />
+                    <label htmlFor="auto-comment-commit" className="text-sm">
+                      Automatically comment on commits
+                    </label>
+                  </div>
+                </div>
+
+                {/* Save Button */}
+                <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+                  <button
+                    onClick={handleSaveVcsConfig}
+                    disabled={saveVcsConfigMutation.isPending}
+                    className={cn(
+                      "w-full px-4 py-2 rounded-md font-medium text-sm",
+                      "bg-primary-600 text-white hover:bg-primary-700",
+                      "disabled:opacity-50 disabled:cursor-not-allowed",
+                      "transition-colors"
+                    )}
+                  >
+                    {saveVcsConfigMutation.isPending ? "Saving..." : "Save Configuration"}
+                  </button>
+                </div>
+
+                {saveVcsConfigMutation.isSuccess && (
+                  <div className="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md">
+                    <p className="text-sm text-green-800 dark:text-green-200">
+                      Configuration saved successfully!
+                    </p>
+                  </div>
+                )}
+
+                {saveVcsConfigMutation.isError && (
+                  <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md">
+                    <p className="text-sm text-red-800 dark:text-red-200">
+                      Failed to save configuration. Please try again.
+                    </p>
+                  </div>
+                )}
               </div>
-
-              {/* Save Button */}
-              <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
-                <Button
-                  onClick={handleSaveVcsConfig}
-                  disabled={saveVcsConfigMutation.isPending}
-                  className="w-full"
-                >
-                  {saveVcsConfigMutation.isPending
-                    ? "Saving..."
-                    : "Save Configuration"}
-                </Button>
-              </div>
-
-              {saveVcsConfigMutation.isSuccess && (
-                <div className="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md">
-                  <p className="text-sm text-green-800 dark:text-green-200">
-                    Configuration saved successfully!
-                  </p>
-                </div>
-              )}
-
-              {saveVcsConfigMutation.isError && (
-                <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md">
-                  <p className="text-sm text-red-800 dark:text-red-200">
-                    Failed to save configuration. Please try again.
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
+            </CardBody>
+          </Card>
 
           {/* Information Panel */}
-          <div className="mt-6 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800 p-6">
-            <h4 className="font-semibold text-blue-900 dark:text-blue-200 mb-2">
-              How it works
-            </h4>
-            <ul className="space-y-2 text-sm text-blue-800 dark:text-blue-300">
-              <li className="flex items-start gap-2">
-                <CheckCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
-                <span>
-                  When a deployment is scanned, vulnerabilities and policy violations are
-                  detected
-                </span>
-              </li>
-              <li className="flex items-start gap-2">
-                <CheckCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
-                <span>
-                  InfraPilot automatically generates developer-friendly feedback messages
-                </span>
-              </li>
-              <li className="flex items-start gap-2">
-                <CheckCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
-                <span>
-                  Feedback is delivered as comments on pull requests or commits
-                </span>
-              </li>
-              <li className="flex items-start gap-2">
-                <CheckCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
-                <span>
-                  Developers see actionable security guidance directly in their workflow
-                </span>
-              </li>
-            </ul>
-          </div>
+          <Card className="mt-6 bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800">
+            <CardBody>
+              <h4 className="font-semibold text-blue-900 dark:text-blue-200 mb-3">
+                How it works
+              </h4>
+              <ul className="space-y-2 text-sm text-blue-800 dark:text-blue-300">
+                <li className="flex items-start gap-2">
+                  <CheckCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                  <span>
+                    When a deployment is scanned, vulnerabilities and policy violations are detected
+                  </span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                  <span>
+                    InfraPilot automatically generates developer-friendly feedback messages
+                  </span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                  <span>Feedback is delivered as comments on pull requests or commits</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                  <span>
+                    Developers see actionable security guidance directly in their workflow
+                  </span>
+                </li>
+              </ul>
+            </CardBody>
+          </Card>
         </div>
       )}
-    </PageLayout>
+    </div>
   );
 }
