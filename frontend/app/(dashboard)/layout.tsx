@@ -21,6 +21,8 @@ import {
   ShieldCheck,
   Package,
   AlertTriangle,
+  MessageSquare,
+  ShieldAlert,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuthStore } from "@/lib/auth";
@@ -38,6 +40,8 @@ const navigation = [
   { name: "Policies", href: "/policies", icon: FileText },
   { name: "Vulnerabilities", href: "/vulnerabilities", icon: AlertTriangle },
   { name: "SBOMs", href: "/sboms", icon: Package },
+  { name: "Developer Feedback", href: "/feedback", icon: MessageSquare },
+  { name: "Risk Exceptions", href: "/exceptions", icon: ShieldAlert },
   { name: "Networks", href: "/docker/networks", icon: Network },
   { name: "Volumes", href: "/docker/volumes", icon: HardDrive },
   { name: "Images", href: "/docker/images", icon: Image },

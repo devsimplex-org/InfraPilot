@@ -242,6 +242,18 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				vcs.DELETE("/:provider", h.RequireManageAlerts(), h.deleteVCSConfig)
 			}
 
+			// Risk Exceptions (Epic 9: Risk Acceptance & Exception Management)
+			exceptions := protected.Group("/exceptions")
+			{
+				exceptions.GET("", h.listExceptions)
+				exceptions.POST("", h.RequireModifyContainers(), h.createException)
+				exceptions.GET("/:eid", h.getException)
+				exceptions.POST("/:eid/approve", h.RequireManageAlerts(), h.approveException)
+				exceptions.POST("/:eid/deny", h.RequireManageAlerts(), h.denyException)
+				exceptions.POST("/:eid/revoke", h.RequireManageAlerts(), h.revokeException)
+				exceptions.GET("/:eid/history", h.getExceptionHistory)
+			}
+
 			// Alerts
 			alerts := protected.Group("/alerts")
 			{
