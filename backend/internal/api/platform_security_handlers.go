@@ -87,7 +87,7 @@ type PlatformSecurityCheck struct {
 	CreatedAt        time.Time   `json:"created_at"`
 }
 
-type SecurityPosture struct {
+type PlatformSecurityPosture struct {
 	OrgID            uuid.UUID `json:"org_id"`
 	TotalChecks      int       `json:"total_checks"`
 	PassedChecks     int       `json:"passed_checks"`
@@ -332,7 +332,7 @@ func (h *Handler) runSecuritySelfCheck(c *gin.Context) {
 }
 
 // Get security posture (from view)
-func (h *Handler) getSecurityPosture(c *gin.Context) {
+func (h *Handler) getPlatformSecurityPosture(c *gin.Context) {
 	orgID := c.MustGet("org_id").(uuid.UUID)
 
 	query := `
@@ -343,7 +343,7 @@ func (h *Handler) getSecurityPosture(c *gin.Context) {
 		WHERE org_id = $1
 	`
 
-	var posture SecurityPosture
+	var posture PlatformSecurityPosture
 	err := h.db.QueryRow(c.Request.Context(), query, orgID).Scan(
 		&posture.OrgID, &posture.TotalChecks, &posture.PassedChecks, &posture.FailedChecks, &posture.WarningChecks,
 		&posture.CriticalFailures, &posture.HighFailures, &posture.LastCheckAt, &posture.OverallStatus,

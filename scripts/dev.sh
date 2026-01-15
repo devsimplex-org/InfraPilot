@@ -87,29 +87,163 @@ case "$1" in
     echo "Air installed! Run 'cd backend && air' to start with hot reload"
     ;;
 
+  "storybook")
+    echo "Starting Storybook..."
+    cd "$PROJECT_ROOT/frontend"
+    pnpm storybook
+    ;;
+
+  "dev")
+    echo "Starting full local development environment..."
+    echo ""
+    echo "Starting database services..."
+    cd "$PROJECT_ROOT"
+    $COMPOSE -f docker-compose.dev.yml up -d postgres redis
+    echo "Waiting for database..."
+    sleep 3
+
+    echo ""
+    echo "Starting services in background..."
+    echo ""
+
+    # Create a temporary directory for log files
+    mkdir -p "$PROJECT_ROOT/.dev-logs"
+
+    # Start backend
+    echo "  [1/3] Starting backend (Go)..."
+    cd "$PROJECT_ROOT/backend"
+    go run ./cmd/server > "$PROJECT_ROOT/.dev-logs/backend.log" 2>&1 &
+    BACKEND_PID=$!
+    echo "        Backend PID: $BACKEND_PID"
+
+    # Start frontend
+    echo "  [2/3] Starting frontend (Next.js)..."
+    cd "$PROJECT_ROOT/frontend"
+    pnpm dev > "$PROJECT_ROOT/.dev-logs/frontend.log" 2>&1 &
+    FRONTEND_PID=$!
+    echo "        Frontend PID: $FRONTEND_PID"
+
+    # Start Storybook
+    echo "  [3/3] Starting Storybook..."
+    pnpm storybook > "$PROJECT_ROOT/.dev-logs/storybook.log" 2>&1 &
+    STORYBOOK_PID=$!
+    echo "        Storybook PID: $STORYBOOK_PID"
+
+    # Save PIDs for cleanup
+    echo "$BACKEND_PID" > "$PROJECT_ROOT/.dev-logs/backend.pid"
+    echo "$FRONTEND_PID" > "$PROJECT_ROOT/.dev-logs/frontend.pid"
+    echo "$STORYBOOK_PID" > "$PROJECT_ROOT/.dev-logs/storybook.pid"
+
+    echo ""
+    echo "✅ Development environment started!"
+    echo ""
+    echo "Services:"
+    echo "  📊 Dashboard:   http://localhost:3000"
+    echo "  🔌 API:         http://localhost:8080/api/v1"
+    echo "  📖 Storybook:   http://localhost:6006"
+    echo ""
+    echo "Logs:"
+    echo "  Backend:    tail -f $PROJECT_ROOT/.dev-logs/backend.log"
+    echo "  Frontend:   tail -f $PROJECT_ROOT/.dev-logs/frontend.log"
+    echo "  Storybook:  tail -f $PROJECT_ROOT/.dev-logs/storybook.log"
+    echo ""
+    echo "To stop all services: ./scripts/dev.sh dev:stop"
+    echo ""
+    ;;
+
+  "dev:stop")
+    echo "Stopping local development environment..."
+    cd "$PROJECT_ROOT"
+
+    if [ -f ".dev-logs/backend.pid" ]; then
+      BACKEND_PID=$(cat .dev-logs/backend.pid)
+      echo "  Stopping backend (PID: $BACKEND_PID)..."
+      kill $BACKEND_PID 2>/dev/null || true
+      rm -f .dev-logs/backend.pid
+    fi
+
+    if [ -f ".dev-logs/frontend.pid" ]; then
+      FRONTEND_PID=$(cat .dev-logs/frontend.pid)
+      echo "  Stopping frontend (PID: $FRONTEND_PID)..."
+      kill $FRONTEND_PID 2>/dev/null || true
+      rm -f .dev-logs/frontend.pid
+    fi
+
+    if [ -f ".dev-logs/storybook.pid" ]; then
+      STORYBOOK_PID=$(cat .dev-logs/storybook.pid)
+      echo "  Stopping Storybook (PID: $STORYBOOK_PID)..."
+      kill $STORYBOOK_PID 2>/dev/null || true
+      rm -f .dev-logs/storybook.pid
+    fi
+
+    echo "  Stopping database services..."
+    $COMPOSE -f docker-compose.dev.yml down
+
+    echo ""
+    echo "✅ All services stopped"
+    ;;
+
+  "dev:logs")
+    echo "Development Logs"
+    echo ""
+    echo "Choose a service to view logs:"
+    echo "  1. Backend"
+    echo "  2. Frontend"
+    echo "  3. Storybook"
+    echo "  4. All (combined)"
+    echo ""
+    read -p "Enter choice (1-4): " choice
+
+    case $choice in
+      1)
+        tail -f "$PROJECT_ROOT/.dev-logs/backend.log"
+        ;;
+      2)
+        tail -f "$PROJECT_ROOT/.dev-logs/frontend.log"
+        ;;
+      3)
+        tail -f "$PROJECT_ROOT/.dev-logs/storybook.log"
+        ;;
+      4)
+        tail -f "$PROJECT_ROOT/.dev-logs/"*.log
+        ;;
+      *)
+        echo "Invalid choice"
+        ;;
+    esac
+    ;;
+
   *)
     echo "InfraPilot Development Commands"
     echo ""
     echo "Usage: ./scripts/dev.sh <command>"
     echo ""
     echo "Commands:"
-    echo "  up      Start full dev stack (all services with hot reload)"
-    echo "  up:db   Start only postgres and redis (for local backend/frontend)"
-    echo "  down    Stop all development services"
-    echo "  reset   Reset database (destroys all data)"
-    echo "  logs    View service logs (e.g., logs backend)"
-    echo "  proto   Generate protobuf code"
-    echo "  migrate Run database migrations"
-    echo "  seed    Apply seed data (org, agent - no users)"
-    echo "  air     Install Air for hot reload"
+    echo "  up          Start full dev stack (Docker - all services)"
+    echo "  up:db       Start only postgres and redis (for local development)"
+    echo "  down        Stop all Docker services"
+    echo "  reset       Reset database (destroys all data)"
+    echo "  logs        View Docker service logs (e.g., logs backend)"
+    echo ""
+    echo "Local Development (Recommended):"
+    echo "  dev         Start everything: DB + Backend + Frontend + Storybook"
+    echo "  dev:stop    Stop all local development services"
+    echo "  dev:logs    View logs for local services"
+    echo "  storybook   Start only Storybook (standalone)"
+    echo ""
+    echo "Code Generation:"
+    echo "  proto       Generate protobuf code"
+    echo "  migrate     Run database migrations"
+    echo "  seed        Apply seed data (org, agent - no users)"
+    echo "  air         Install Air for hot reload"
+    echo ""
+    echo "Quick Start (Local Development):"
+    echo "  ./scripts/dev.sh dev"
+    echo "  Open http://localhost:3000 (Dashboard)"
+    echo "  Open http://localhost:6006 (Storybook)"
     echo ""
     echo "Quick Start (Docker):"
     echo "  ./scripts/dev.sh up"
     echo "  Open http://localhost"
-    echo ""
-    echo "Quick Start (Local):"
-    echo "  1. ./scripts/dev.sh up:db"
-    echo "  2. cd backend && go run ./cmd/server"
-    echo "  3. cd frontend && pnpm dev"
     ;;
 esac

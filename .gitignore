@@ -52,3 +52,5 @@ agent/tmp
 backend/tmp
 
 # docsx
+*storybook.log
+storybook-static
