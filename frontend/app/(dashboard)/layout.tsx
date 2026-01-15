@@ -23,6 +23,8 @@ import {
   AlertTriangle,
   MessageSquare,
   ShieldAlert,
+  Trophy,
+  Code2,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuthStore } from "@/lib/auth";
@@ -34,6 +36,8 @@ import { api } from "@/lib/api";
 const navigation = [
   { name: "Overview", href: "/", icon: LayoutDashboard },
   { name: "Security", href: "/security", icon: Shield },
+  { name: "Security Maturity", href: "/maturity", icon: Trophy },
+  { name: "Code Quality", href: "/code-quality", icon: Code2 },
   { name: "Containers", href: "/containers", icon: Container },
   { name: "Deployments", href: "/deployments", icon: ShieldCheck },
   { name: "Webhooks", href: "/webhooks", icon: Activity },
@@ -42,6 +46,7 @@ const navigation = [
   { name: "SBOMs", href: "/sboms", icon: Package },
   { name: "Developer Feedback", href: "/feedback", icon: MessageSquare },
   { name: "Risk Exceptions", href: "/exceptions", icon: ShieldAlert },
+  { name: "Ownership & Teams", href: "/ownership", icon: Users },
   { name: "Networks", href: "/docker/networks", icon: Network },
   { name: "Volumes", href: "/docker/volumes", icon: HardDrive },
   { name: "Images", href: "/docker/images", icon: Image },

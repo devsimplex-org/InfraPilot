@@ -1089,6 +1089,327 @@ export interface RevokeExceptionRequest {
   reason: string;
 }
 
+// Service Ownership (Epic 10)
+export interface ServiceOwnership {
+  id: string;
+  org_id: string;
+  service_name: string;
+  team_name: string;
+  team_email?: string;
+  team_slack_channel?: string;
+  team_slack_webhook?: string;
+  primary_contact_id?: string;
+  secondary_contact_id?: string;
+  primary_contact_email?: string;
+  secondary_contact_email?: string;
+  description?: string;
+  repository_url?: string;
+  documentation_url?: string;
+  oncall_url?: string;
+  tags?: string[];
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Team {
+  id: string;
+  org_id: string;
+  name: string;
+  display_name?: string;
+  email?: string;
+  slack_channel?: string;
+  slack_webhook?: string;
+  pagerduty_integration_key?: string;
+  description?: string;
+  manager_id?: string;
+  tags?: string[];
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateServiceOwnershipRequest {
+  service_name: string;
+  team_name: string;
+  team_email?: string;
+  team_slack_channel?: string;
+  team_slack_webhook?: string;
+  primary_contact_email?: string;
+  secondary_contact_email?: string;
+  description?: string;
+  repository_url?: string;
+  documentation_url?: string;
+  oncall_url?: string;
+  tags?: string[];
+  status?: string;
+}
+
+export interface CreateTeamRequest {
+  name: string;
+  display_name?: string;
+  email?: string;
+  slack_channel?: string;
+  slack_webhook?: string;
+  pagerduty_integration_key?: string;
+  description?: string;
+  tags?: string[];
+}
+
+// Security Maturity (Epic 11)
+export interface SecurityScore {
+  id: string;
+  org_id: string;
+  scope_type: string;
+  scope_reference: string;
+  overall_score: number;
+  vulnerability_score?: number;
+  policy_score?: number;
+  deployment_score?: number;
+  exception_score?: number;
+  response_score?: number;
+  total_deployments: number;
+  vulnerable_deployments: number;
+  critical_vulnerabilities: number;
+  high_vulnerabilities: number;
+  policy_violations: number;
+  active_exceptions: number;
+  mean_time_to_fix_hours?: number;
+  calculated_at: string;
+  period_start: string;
+  period_end: string;
+  created_at: string;
+}
+
+export interface TeamScore {
+  org_id: string;
+  team_name: string;
+  overall_score: number;
+  vulnerability_score?: number;
+  policy_score?: number;
+  deployment_score?: number;
+  exception_score?: number;
+  response_score?: number;
+  total_deployments: number;
+  vulnerable_deployments: number;
+  critical_vulnerabilities: number;
+  high_vulnerabilities: number;
+  mean_time_to_fix_hours?: number;
+  calculated_at: string;
+}
+
+export interface TeamLeaderboard {
+  org_id: string;
+  team_name: string;
+  overall_score: number;
+  rank: number;
+  vulnerability_score?: number;
+  policy_score?: number;
+  response_score?: number;
+  calculated_at: string;
+}
+
+export interface ScoreTrendPoint {
+  id: string;
+  overall_score: number;
+  vulnerability_score?: number;
+  policy_score?: number;
+  response_score?: number;
+  calculated_at: string;
+  period_start: string;
+  period_end: string;
+}
+
+export interface CalculateScoreRequest {
+  scope_type: string;
+  scope_reference: string;
+  period_days?: number;
+}
+
+// Code Quality (Epic 12)
+export interface CodeQualityResult {
+  id: string;
+  org_id: string;
+  deployment_id?: string;
+  tool: string;
+  tool_version?: string;
+  project_key: string;
+  project_name?: string;
+  git_repo?: string;
+  git_branch?: string;
+  commit_sha?: string;
+  commit_author?: string;
+  bugs: number;
+  vulnerabilities: number;
+  code_smells: number;
+  security_hotspots: number;
+  critical_issues: number;
+  high_issues: number;
+  medium_issues: number;
+  low_issues: number;
+  info_issues: number;
+  coverage?: number;
+  complexity?: number;
+  duplication?: number;
+  technical_debt_minutes?: number;
+  quality_gate?: string;
+  quality_gate_details?: string;
+  scan_duration_ms?: number;
+  lines_of_code?: number;
+  files_analyzed?: number;
+  raw_report?: any;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CodeQualityIssue {
+  id: string;
+  code_quality_result_id: string;
+  issue_key?: string;
+  rule_id: string;
+  rule_name?: string;
+  severity: string;
+  issue_type: string;
+  file_path: string;
+  start_line?: number;
+  end_line?: number;
+  start_column?: number;
+  end_column?: number;
+  message: string;
+  description?: string;
+  cwe_ids?: string[];
+  owasp_category?: string;
+  confidence?: string;
+  fix_available: boolean;
+  fix_suggestion?: string;
+  metadata?: any;
+  created_at: string;
+}
+
+export interface CodeQualityPolicy {
+  id: string;
+  org_id: string;
+  name: string;
+  description?: string;
+  environments: string[];
+  projects: string[];
+  tools: string[];
+  max_critical?: number;
+  max_high?: number;
+  max_medium?: number;
+  max_vulnerabilities?: number;
+  max_bugs?: number;
+  max_code_smells?: number;
+  min_coverage?: number;
+  max_complexity?: number;
+  max_duplication?: number;
+  enforcement: string;
+  block_deployment: boolean;
+  version: number;
+  enabled: boolean;
+  created_by?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PolicyEvaluation {
+  id: string;
+  code_quality_result_id: string;
+  policy_id?: string;
+  decision: string;
+  reason?: string;
+  violations?: any;
+  evaluation_time_ms?: number;
+  created_at: string;
+}
+
+export interface ProjectQualitySummary {
+  org_id: string;
+  project_key: string;
+  project_name?: string;
+  tool: string;
+  total_scans: number;
+  avg_coverage?: number;
+  avg_complexity?: number;
+  avg_duplication?: number;
+  total_bugs: number;
+  total_vulnerabilities: number;
+  total_code_smells: number;
+  total_critical: number;
+  total_high: number;
+  failed_gates: number;
+  passed_gates: number;
+  last_scan_at: string;
+}
+
+export interface QualityLeaderboard {
+  org_id: string;
+  project_key: string;
+  project_name?: string;
+  tool: string;
+  coverage?: number;
+  complexity?: number;
+  total_issues: number;
+  critical_issues: number;
+  high_issues: number;
+  quality_gate?: string;
+  last_scan_at: string;
+  quality_score: number;
+}
+
+export interface CreateCodeQualityResultRequest {
+  deployment_id?: string;
+  tool: string;
+  tool_version?: string;
+  project_key: string;
+  project_name?: string;
+  git_repo?: string;
+  git_branch?: string;
+  commit_sha?: string;
+  commit_author?: string;
+  bugs: number;
+  vulnerabilities: number;
+  code_smells: number;
+  security_hotspots: number;
+  critical_issues: number;
+  high_issues: number;
+  medium_issues: number;
+  low_issues: number;
+  info_issues: number;
+  coverage?: number;
+  complexity?: number;
+  duplication?: number;
+  technical_debt_minutes?: number;
+  quality_gate?: string;
+  quality_gate_details?: string;
+  scan_duration_ms?: number;
+  lines_of_code?: number;
+  files_analyzed?: number;
+  raw_report?: any;
+  issues?: CreateCodeQualityIssueRequest[];
+}
+
+export interface CreateCodeQualityIssueRequest {
+  issue_key?: string;
+  rule_id: string;
+  rule_name?: string;
+  severity: string;
+  issue_type: string;
+  file_path: string;
+  start_line?: number;
+  end_line?: number;
+  start_column?: number;
+  end_column?: number;
+  message: string;
+  description?: string;
+  cwe_ids?: string[];
+  owasp_category?: string;
+  confidence?: string;
+  fix_available: boolean;
+  fix_suggestion?: string;
+  metadata?: any;
+}
+
 // API methods
 export const api = {
   // Setup (first-run)
@@ -2136,4 +2457,182 @@ export const api = {
 
   getExceptionHistory: (exceptionId: string) =>
     fetchAPI<{ history: any[]; count: number }>(`/exceptions/${exceptionId}/history`),
+
+  // Service Ownership (Epic 10)
+  listServiceOwnerships: (params?: { service_name?: string; team_name?: string; status?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.service_name) searchParams.set("service_name", params.service_name);
+    if (params?.team_name) searchParams.set("team_name", params.team_name);
+    if (params?.status) searchParams.set("status", params.status);
+    const query = searchParams.toString();
+    return fetchAPI<{ ownerships: ServiceOwnership[]; count: number }>(`/ownership/services${query ? `?${query}` : ""}`);
+  },
+
+  getServiceOwnership: (ownershipId: string) =>
+    fetchAPI<ServiceOwnership>(`/ownership/services/${ownershipId}`),
+
+  createServiceOwnership: (request: CreateServiceOwnershipRequest) =>
+    fetchAPI<{ id: string; message: string }>(`/ownership/services`, {
+      method: "POST",
+      body: JSON.stringify(request),
+    }),
+
+  updateServiceOwnership: (ownershipId: string, request: CreateServiceOwnershipRequest) =>
+    fetchAPI<{ message: string }>(`/ownership/services/${ownershipId}`, {
+      method: "PUT",
+      body: JSON.stringify(request),
+    }),
+
+  deleteServiceOwnership: (ownershipId: string) =>
+    fetchAPI<{ message: string }>(`/ownership/services/${ownershipId}`, {
+      method: "DELETE",
+    }),
+
+  // Teams
+  listTeams: (params?: { active?: boolean }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.active !== undefined) searchParams.set("active", params.active.toString());
+    const query = searchParams.toString();
+    return fetchAPI<{ teams: Team[]; count: number }>(`/ownership/teams${query ? `?${query}` : ""}`);
+  },
+
+  createTeam: (request: CreateTeamRequest) =>
+    fetchAPI<{ id: string; message: string }>(`/ownership/teams`, {
+      method: "POST",
+      body: JSON.stringify(request),
+    }),
+
+  updateTeam: (teamId: string, request: CreateTeamRequest) =>
+    fetchAPI<{ message: string }>(`/ownership/teams/${teamId}`, {
+      method: "PUT",
+      body: JSON.stringify(request),
+    }),
+
+  deleteTeam: (teamId: string) =>
+    fetchAPI<{ message: string }>(`/ownership/teams/${teamId}`, {
+      method: "DELETE",
+    }),
+
+  // Security Maturity (Epic 11)
+  listSecurityScores: (params?: { scope_type?: string; scope_reference?: string; limit?: number }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.scope_type) searchParams.set("scope_type", params.scope_type);
+    if (params?.scope_reference) searchParams.set("scope_reference", params.scope_reference);
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    const query = searchParams.toString();
+    return fetchAPI<{ scores: SecurityScore[]; count: number }>(`/maturity/scores${query ? `?${query}` : ""}`);
+  },
+
+  getLatestTeamScores: () =>
+    fetchAPI<{ team_scores: TeamScore[]; count: number }>(`/maturity/scores/teams`),
+
+  getTeamLeaderboard: () =>
+    fetchAPI<{ leaderboard: TeamLeaderboard[]; count: number }>(`/maturity/scores/leaderboard`),
+
+  calculateSecurityScore: (request: CalculateScoreRequest) =>
+    fetchAPI<SecurityScore>(`/maturity/scores/calculate`, {
+      method: "POST",
+      body: JSON.stringify(request),
+    }),
+
+  calculateAllTeamScores: () =>
+    fetchAPI<{ message: string; total_teams: number; calculated: number }>(`/maturity/scores/calculate-all`, {
+      method: "POST",
+    }),
+
+  getScoreTrend: (params: { scope_type: string; scope_reference: string }) => {
+    const searchParams = new URLSearchParams();
+    searchParams.set("scope_type", params.scope_type);
+    searchParams.set("scope_reference", params.scope_reference);
+    return fetchAPI<{
+      scope_type: string;
+      scope_reference: string;
+      trend: ScoreTrendPoint[];
+      trend_direction: string;
+      data_points: number;
+    }>(`/maturity/scores/trend?${searchParams.toString()}`);
+  },
+
+  // Code Quality (Epic 12)
+  listCodeQualityResults: (params?: {
+    tool?: string;
+    project_key?: string;
+    commit_sha?: string;
+    quality_gate?: string;
+    limit?: number;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.tool) searchParams.set("tool", params.tool);
+    if (params?.project_key) searchParams.set("project_key", params.project_key);
+    if (params?.commit_sha) searchParams.set("commit_sha", params.commit_sha);
+    if (params?.quality_gate) searchParams.set("quality_gate", params.quality_gate);
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    const query = searchParams.toString();
+    return fetchAPI<{ results: CodeQualityResult[]; count: number; total: number }>(
+      `/code-quality/results${query ? `?${query}` : ""}`
+    );
+  },
+
+  getCodeQualityResult: (resultId: string) =>
+    fetchAPI<CodeQualityResult>(`/code-quality/results/${resultId}`),
+
+  createCodeQualityResult: (request: CreateCodeQualityResultRequest) =>
+    fetchAPI<{ id: string; message: string }>(`/code-quality/results`, {
+      method: "POST",
+      body: JSON.stringify(request),
+    }),
+
+  getCodeQualityIssues: (resultId: string, params?: { severity?: string; issue_type?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.severity) searchParams.set("severity", params.severity);
+    if (params?.issue_type) searchParams.set("issue_type", params.issue_type);
+    const query = searchParams.toString();
+    return fetchAPI<{ issues: CodeQualityIssue[]; count: number }>(
+      `/code-quality/results/${resultId}/issues${query ? `?${query}` : ""}`
+    );
+  },
+
+  getProjectQualitySummary: () =>
+    fetchAPI<{ summaries: ProjectQualitySummary[]; count: number }>(
+      `/code-quality/summary`
+    ),
+
+  getCodeQualityLeaderboard: () =>
+    fetchAPI<{ leaderboard: QualityLeaderboard[]; count: number }>(
+      `/code-quality/leaderboard`
+    ),
+
+  // Code Quality Policies
+  listCodeQualityPolicies: () =>
+    fetchAPI<{ policies: CodeQualityPolicy[]; count: number }>(
+      `/code-quality/policies`
+    ),
+
+  createCodeQualityPolicy: (policy: Partial<CodeQualityPolicy>) =>
+    fetchAPI<CodeQualityPolicy>(`/code-quality/policies`, {
+      method: "POST",
+      body: JSON.stringify(policy),
+    }),
+
+  updateCodeQualityPolicy: (policyId: string, policy: Partial<CodeQualityPolicy>) =>
+    fetchAPI<{ message: string }>(`/code-quality/policies/${policyId}`, {
+      method: "PUT",
+      body: JSON.stringify(policy),
+    }),
+
+  deleteCodeQualityPolicy: (policyId: string) =>
+    fetchAPI<{ message: string }>(`/code-quality/policies/${policyId}`, {
+      method: "DELETE",
+    }),
+
+  getCodeQualityPolicyEvaluations: (resultId: string) =>
+    fetchAPI<{ evaluations: PolicyEvaluation[]; count: number }>(
+      `/code-quality/results/${resultId}/evaluations`
+    ),
+
+  evaluateCodeQualityPolicies: (resultId: string) =>
+    fetchAPI<{ results: any[]; count: number }>(
+      `/code-quality/results/${resultId}/evaluate`,
+      { method: "POST" }
+    ),
 };

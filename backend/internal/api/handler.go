@@ -254,6 +254,55 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				exceptions.GET("/:eid/history", h.getExceptionHistory)
 			}
 
+			// Service Ownership (Epic 10: Ownership & Accountability)
+			ownership := protected.Group("/ownership")
+			{
+				ownership.GET("/services", h.listServiceOwnerships)
+				ownership.POST("/services", h.RequireManageAlerts(), h.createServiceOwnership)
+				ownership.GET("/services/:oid", h.getServiceOwnership)
+				ownership.PUT("/services/:oid", h.RequireManageAlerts(), h.updateServiceOwnership)
+				ownership.DELETE("/services/:oid", h.RequireManageAlerts(), h.deleteServiceOwnership)
+
+				ownership.GET("/teams", h.listTeams)
+				ownership.POST("/teams", h.RequireManageAlerts(), h.createTeam)
+				ownership.PUT("/teams/:tid", h.RequireManageAlerts(), h.updateTeam)
+				ownership.DELETE("/teams/:tid", h.RequireManageAlerts(), h.deleteTeam)
+			}
+
+			// Security Maturity (Epic 11: Security Maturity Scoring)
+			maturity := protected.Group("/maturity")
+			{
+				maturity.GET("/scores", h.listSecurityScores)
+				maturity.POST("/scores/calculate", h.RequireManageAlerts(), h.calculateSecurityScore)
+				maturity.POST("/scores/calculate-all", h.RequireManageAlerts(), h.calculateAllTeamScores)
+				maturity.GET("/scores/teams", h.getLatestTeamScores)
+				maturity.GET("/scores/leaderboard", h.getTeamLeaderboard)
+				maturity.GET("/scores/trend", h.getScoreTrend)
+				maturity.GET("/metrics", h.listSecurityMetrics)
+			}
+
+			// Code Quality (Epic 12: Code Quality Integration)
+			codeQuality := protected.Group("/code-quality")
+			{
+				// Results
+				codeQuality.GET("/results", h.listCodeQualityResults)
+				codeQuality.GET("/results/:id", h.getCodeQualityResult)
+				codeQuality.POST("/results", h.RequireModifyContainers(), h.createCodeQualityResult)
+				codeQuality.GET("/results/:id/issues", h.getCodeQualityIssues)
+				codeQuality.GET("/results/:id/evaluations", h.getCodeQualityPolicyEvaluations)
+				codeQuality.POST("/results/:id/evaluate", h.RequireManageAlerts(), h.evaluateCodeQualityPolicies)
+
+				// Summaries & Leaderboard
+				codeQuality.GET("/summary", h.getProjectQualitySummary)
+				codeQuality.GET("/leaderboard", h.getCodeQualityLeaderboard)
+
+				// Policies
+				codeQuality.GET("/policies", h.listCodeQualityPolicies)
+				codeQuality.POST("/policies", h.RequireManageAlerts(), h.createCodeQualityPolicy)
+				codeQuality.PUT("/policies/:id", h.RequireManageAlerts(), h.updateCodeQualityPolicy)
+				codeQuality.DELETE("/policies/:id", h.RequireManageAlerts(), h.deleteCodeQualityPolicy)
+			}
+
 			// Alerts
 			alerts := protected.Group("/alerts")
 			{
