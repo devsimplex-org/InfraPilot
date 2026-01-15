@@ -312,7 +312,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 
 				// Self-Check & Posture
 				security.POST("/self-check", h.runSecuritySelfCheck)
-				security.GET("/posture", h.getSecurityPosture)
+				security.GET("/platform-posture", h.getPlatformSecurityPosture)
 
 				// Policy Violations
 				security.GET("/violations", h.listPolicyViolations)

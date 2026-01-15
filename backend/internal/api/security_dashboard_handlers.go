@@ -135,7 +135,7 @@ func (h *Handler) getSecurityPosture(c *gin.Context) {
 	}
 
 	// Calculate overall security score
-	score, riskLevel := h.calculateSecurityScore(vulnStats, policyStats, deploymentStats)
+	score, riskLevel := h.computeOverallScore(vulnStats, policyStats, deploymentStats)
 
 	posture := SecurityPosture{
 		OverallScore:       score,
@@ -472,7 +472,7 @@ func (h *Handler) getSecurityTrends(c *gin.Context, orgID uuid.UUID) (SecurityTr
 	}, nil
 }
 
-func (h *Handler) calculateSecurityScore(vulnStats VulnerabilityStats, policyStats PolicyComplianceStats, deployStats DeploymentStats) (int, string) {
+func (h *Handler) computeOverallScore(vulnStats VulnerabilityStats, policyStats PolicyComplianceStats, deployStats DeploymentStats) (int, string) {
 	score := 100
 
 	// Deduct for critical vulnerabilities (5 points each, max 30)
