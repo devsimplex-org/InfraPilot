@@ -36,6 +36,8 @@ import { api } from "@/lib/api";
 const navigation = [
   { name: "Overview", href: "/", icon: LayoutDashboard },
   { name: "Security", href: "/security", icon: Shield },
+  { name: "Runtime Security", href: "/runtime-security", icon: Activity },
+  { name: "Platform Security", href: "/platform-security", icon: ShieldCheck },
   { name: "Security Maturity", href: "/maturity", icon: Trophy },
   { name: "Code Quality", href: "/code-quality", icon: Code2 },
   { name: "Containers", href: "/containers", icon: Container },

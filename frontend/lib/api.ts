@@ -1410,6 +1410,177 @@ export interface CreateCodeQualityIssueRequest {
   metadata?: any;
 }
 
+// Platform Security (Epic 6)
+export interface PlatformSecurityConfig {
+  id: string;
+  org_id: string;
+  mfa_required_for_admins: boolean;
+  docker_socket_read_only: boolean;
+  tls_only: boolean;
+  min_password_length: number;
+  password_require_uppercase: boolean;
+  password_require_lowercase: boolean;
+  password_require_numbers: boolean;
+  password_require_special: boolean;
+  session_timeout_minutes: number;
+  audit_logging_enabled: boolean;
+  audit_logging_immutable: boolean;
+  block_privileged_containers: boolean;
+  block_docker_socket_mounts: boolean;
+  block_docker_api_exposure: boolean;
+  block_root_containers: boolean;
+  block_host_network: boolean;
+  block_host_pid: boolean;
+  block_host_ipc: boolean;
+  block_capability_additions: boolean;
+  track_violation_attempts: boolean;
+  alert_on_violations: boolean;
+  max_violations_before_lockout?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PolicyViolation {
+  id: string;
+  org_id: string;
+  violation_type: string;
+  severity: string;
+  user_id?: string;
+  user_email?: string;
+  ip_address?: string;
+  user_agent?: string;
+  attempted_action: string;
+  blocked: boolean;
+  policy_rule?: string;
+  description: string;
+  request_payload?: any;
+  acknowledged: boolean;
+  acknowledged_by?: string;
+  acknowledged_at?: string;
+  notes?: string;
+  created_at: string;
+}
+
+export interface SecurityCheck {
+  check_name: string;
+  status: string;
+  severity: string;
+  message: string;
+  recommendation?: string;
+}
+
+export interface SecurityPosture {
+  org_id: string;
+  total_checks: number;
+  passed_checks: number;
+  failed_checks: number;
+  warning_checks: number;
+  critical_failures: number;
+  high_failures: number;
+  last_check_at: string;
+  overall_status: string;
+}
+
+export interface ViolationSummary {
+  org_id: string;
+  violation_type: string;
+  violation_count: number;
+  blocked_count: number;
+  allowed_count: number;
+  max_severity: string;
+  last_violation_at: string;
+  unique_users: number;
+}
+
+// Runtime Security (Epic 3)
+export interface DriftEvent {
+  id: string;
+  org_id: string;
+  agent_id: string;
+  deployment_id: string;
+  container_id: string;
+  container_name: string;
+  drift_type: string;
+  severity: string;
+  description: string;
+  expected_state: any;
+  actual_state: any;
+  diff?: any;
+  resolved: boolean;
+  resolved_at?: string;
+  resolved_by?: string;
+  resolution_notes?: string;
+  detected_at: string;
+  created_at: string;
+}
+
+export interface BehavioralAnomaly {
+  id: string;
+  org_id: string;
+  agent_id: string;
+  deployment_id?: string;
+  container_id?: string;
+  container_name?: string;
+  anomaly_type: string;
+  severity: string;
+  description: string;
+  metrics: any;
+  threshold: any;
+  resolved: boolean;
+  resolved_at?: string;
+  resolved_by?: string;
+  resolution_notes?: string;
+  detected_at: string;
+  first_seen_at: string;
+  occurrence_count: number;
+  created_at: string;
+}
+
+export interface RuntimeSecurityConfig {
+  id: string;
+  org_id: string;
+  drift_detection_enabled: boolean;
+  behavioral_monitoring_enabled: boolean;
+  auto_resolve_info_drift: boolean;
+  auto_resolve_after_hours: number;
+  alert_on_critical_drift: boolean;
+  alert_on_high_drift: boolean;
+  alert_on_critical_anomaly: boolean;
+  alert_on_high_anomaly: boolean;
+  crash_loop_threshold: number;
+  crash_loop_window_minutes: number;
+  log_volume_spike_multiplier: number;
+  error_rate_spike_multiplier: number;
+  cpu_exhaustion_threshold_percent: number;
+  mem_exhaustion_threshold_percent: number;
+  network_spike_multiplier: number;
+  process_spawn_threshold: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ContainerDriftSummary {
+  container_name: string;
+  deployment_id: string;
+  total_drift: number;
+  unresolved_drift: number;
+  last_drift_at: string;
+}
+
+export interface RuntimeSecurityPosture {
+  overall_status: string;
+  drift_events_last_24h: number;
+  anomalies_last_24h: number;
+  unresolved_drift: number;
+  unresolved_anomalies: number;
+  critical_drift: number;
+  critical_anomalies: number;
+  drift_by_type: Record<string, number>;
+  anomaly_by_type: Record<string, number>;
+  top_affected_containers: ContainerDriftSummary[];
+  recent_events: any[];
+}
+
 // API methods
 export const api = {
   // Setup (first-run)
@@ -2635,4 +2806,123 @@ export const api = {
       `/code-quality/results/${resultId}/evaluate`,
       { method: "POST" }
     ),
+
+  // Platform Security (Epic 6)
+  getPlatformSecurityConfig: () =>
+    fetchAPI<PlatformSecurityConfig>(`/security/config`),
+
+  updatePlatformSecurityConfig: (config: Partial<PlatformSecurityConfig>) =>
+    fetchAPI<{ message: string }>(`/security/config`, {
+      method: "PUT",
+      body: JSON.stringify(config),
+    }),
+
+  runSecuritySelfCheck: () =>
+    fetchAPI<{ checks: SecurityCheck[]; summary: any }>(`/security/self-check`, {
+      method: "POST",
+    }),
+
+  getSecurityPosture: () =>
+    fetchAPI<SecurityPosture>(`/security/posture`),
+
+  listPolicyViolations: (params?: {
+    violation_type?: string;
+    severity?: string;
+    blocked?: boolean;
+    acknowledged?: boolean;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.violation_type) searchParams.set("violation_type", params.violation_type);
+    if (params?.severity) searchParams.set("severity", params.severity);
+    if (params?.blocked !== undefined) searchParams.set("blocked", params.blocked.toString());
+    if (params?.acknowledged !== undefined) searchParams.set("acknowledged", params.acknowledged.toString());
+    const query = searchParams.toString();
+    return fetchAPI<{ violations: PolicyViolation[]; count: number }>(
+      `/security/violations${query ? `?${query}` : ""}`
+    );
+  },
+
+  getViolationSummary: () =>
+    fetchAPI<{ summaries: ViolationSummary[]; count: number }>(
+      `/security/violations/summary`
+    ),
+
+  acknowledgeViolation: (violationId: string, notes: string) =>
+    fetchAPI<{ message: string }>(`/security/violations/${violationId}/acknowledge`, {
+      method: "POST",
+      body: JSON.stringify({ notes }),
+    }),
+
+  // Runtime Security (Epic 3)
+  listDriftEvents: (params?: {
+    severity?: string;
+    drift_type?: string;
+    resolved?: boolean;
+    container_name?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.severity) searchParams.set("severity", params.severity);
+    if (params?.drift_type) searchParams.set("drift_type", params.drift_type);
+    if (params?.resolved !== undefined) searchParams.set("resolved", params.resolved.toString());
+    if (params?.container_name) searchParams.set("container_name", params.container_name);
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    if (params?.offset) searchParams.set("offset", params.offset.toString());
+    const query = searchParams.toString();
+    return fetchAPI<{ drift_events: DriftEvent[]; total: number }>(
+      `/runtime/drift-events${query ? `?${query}` : ""}`
+    );
+  },
+
+  getDriftEvent: (eventId: string) =>
+    fetchAPI<DriftEvent>(`/runtime/drift-events/${eventId}`),
+
+  resolveDriftEvent: (eventId: string, notes: string) =>
+    fetchAPI<{ message: string }>(`/runtime/drift-events/${eventId}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ notes }),
+    }),
+
+  listBehavioralAnomalies: (params?: {
+    severity?: string;
+    anomaly_type?: string;
+    resolved?: boolean;
+    container_name?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.severity) searchParams.set("severity", params.severity);
+    if (params?.anomaly_type) searchParams.set("anomaly_type", params.anomaly_type);
+    if (params?.resolved !== undefined) searchParams.set("resolved", params.resolved.toString());
+    if (params?.container_name) searchParams.set("container_name", params.container_name);
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    if (params?.offset) searchParams.set("offset", params.offset.toString());
+    const query = searchParams.toString();
+    return fetchAPI<{ anomalies: BehavioralAnomaly[]; total: number }>(
+      `/runtime/anomalies${query ? `?${query}` : ""}`
+    );
+  },
+
+  getBehavioralAnomaly: (anomalyId: string) =>
+    fetchAPI<BehavioralAnomaly>(`/runtime/anomalies/${anomalyId}`),
+
+  resolveBehavioralAnomaly: (anomalyId: string, notes: string) =>
+    fetchAPI<{ message: string }>(`/runtime/anomalies/${anomalyId}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ notes }),
+    }),
+
+  getRuntimeSecurityConfig: () =>
+    fetchAPI<RuntimeSecurityConfig>(`/runtime/config`),
+
+  updateRuntimeSecurityConfig: (config: Partial<RuntimeSecurityConfig>) =>
+    fetchAPI<{ message: string }>(`/runtime/config`, {
+      method: "PUT",
+      body: JSON.stringify(config),
+    }),
+
+  getRuntimeSecurityPosture: () =>
+    fetchAPI<RuntimeSecurityPosture>(`/runtime/posture`),
 };
