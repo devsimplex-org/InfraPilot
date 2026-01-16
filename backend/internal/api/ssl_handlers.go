@@ -411,6 +411,66 @@ func (h *Handler) requestSSLCertificate(c *gin.Context) {
 		return
 	}
 
+	// Verify DNS records before attempting SSL request
+	// For apex domains, both @ and www must be configured
+	parts := strings.Split(req.Domain, ".")
+	isApexDomain := len(parts) == 2 && !strings.HasPrefix(req.Domain, "www.") && !strings.HasPrefix(req.Domain, "*.")
+	expectedIP := getPublicIP()
+
+	if expectedIP != "" && isApexDomain {
+		// Check apex domain
+		apexIPs, err := net.LookupIP(req.Domain)
+		apexConfigured := false
+		if err == nil {
+			for _, ip := range apexIPs {
+				if ip.String() == expectedIP {
+					apexConfigured = true
+					break
+				}
+			}
+		}
+
+		// Check www subdomain
+		wwwDomain := "www." + req.Domain
+		wwwIPs, err := net.LookupIP(wwwDomain)
+		wwwConfigured := false
+		if err == nil {
+			for _, ip := range wwwIPs {
+				if ip.String() == expectedIP {
+					wwwConfigured = true
+					break
+				}
+			}
+		}
+
+		// Both must be configured for apex domains
+		if !apexConfigured || !wwwConfigured {
+			missingRecords := []string{}
+			if !apexConfigured {
+				missingRecords = append(missingRecords, req.Domain+" (@)")
+			}
+			if !wwwConfigured {
+				missingRecords = append(missingRecords, "www."+req.Domain)
+			}
+
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"error":   fmt.Sprintf("DNS not properly configured. Missing or incorrect A records for: %s. Both @ and www A records must point to %s before requesting SSL certificate.", strings.Join(missingRecords, ", "), expectedIP),
+				"domain":  req.Domain,
+				"apex_configured": apexConfigured,
+				"www_configured": wwwConfigured,
+				"expected_ip": expectedIP,
+			})
+			return
+		}
+
+		h.logger.Info("DNS verification passed for apex domain",
+			zap.String("domain", req.Domain),
+			zap.String("www_domain", wwwDomain),
+			zap.String("expected_ip", expectedIP),
+		)
+	}
+
 	// Send SSL request to agent and wait for response (up to 2 minutes for ACME challenge)
 	cmd := agentgrpc.NewSSLRequestCommand(req.Domain, req.Email, req.DNSProvider, req.Staging)
 
@@ -570,18 +630,65 @@ func (h *Handler) getDNSInstructions(c *gin.Context) {
 		serverIP = "YOUR_SERVER_IP"
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"domain":    domain,
-		"server_ip": serverIP,
-		"records": []gin.H{
-			{
-				"type":  "A",
-				"name":  domain,
-				"value": serverIP,
-				"ttl":   300,
-			},
-		},
-		"instructions": fmt.Sprintf(`
+	// Check if this is an apex domain
+	parts := strings.Split(domain, ".")
+	isApexDomain := len(parts) == 2 && !strings.HasPrefix(domain, "www.") && !strings.HasPrefix(domain, "*.")
+
+	records := []gin.H{}
+	var instructions string
+
+	if isApexDomain {
+		// Apex domain needs both @ and www records
+		records = append(records, gin.H{
+			"type":  "A",
+			"name":  "@",
+			"value": serverIP,
+			"ttl":   300,
+		})
+		records = append(records, gin.H{
+			"type":  "A",
+			"name":  "www",
+			"value": serverIP,
+			"ttl":   300,
+		})
+
+		instructions = fmt.Sprintf(`
+To configure SSL for %s:
+
+IMPORTANT: SSL certificate will include BOTH %s and www.%s
+
+1. Add TWO A records pointing to your server:
+
+   Record 1 (Apex domain):
+   - Type: A
+   - Name: @ (or leave blank for apex)
+   - Value: %s
+   - TTL: 300 (or Auto)
+
+   Record 2 (WWW subdomain):
+   - Type: A
+   - Name: www
+   - Value: %s
+   - TTL: 300 (or Auto)
+
+2. Wait for DNS propagation (usually 1-5 minutes, can take up to 48 hours)
+
+3. Verify both records are properly configured using the "Verify DNS" button
+
+4. Click "Request Certificate" to obtain SSL from Let's Encrypt
+
+5. Let's Encrypt will verify BOTH domains via HTTP-01 challenge
+`, domain, domain, domain, serverIP, serverIP)
+	} else {
+		// Subdomain or www - only one record needed
+		records = append(records, gin.H{
+			"type":  "A",
+			"name":  domain,
+			"value": serverIP,
+			"ttl":   300,
+		})
+
+		instructions = fmt.Sprintf(`
 To configure SSL for %s:
 
 1. Add an A record pointing to your server:
@@ -595,7 +702,15 @@ To configure SSL for %s:
 3. Click "Request Certificate" to obtain SSL from Let's Encrypt
 
 4. Let's Encrypt will verify domain ownership via HTTP-01 challenge
-`, domain, domain, serverIP),
+`, domain, domain, serverIP)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"domain":      domain,
+		"server_ip":   serverIP,
+		"is_apex":     isApexDomain,
+		"records":     records,
+		"instructions": instructions,
 	})
 }
 
@@ -608,38 +723,71 @@ func (h *Handler) verifyDNS(c *gin.Context) {
 		return
 	}
 
-	// Lookup A records
-	ips, err := net.LookupIP(domain)
-	if err != nil {
+	// Get expected IP
+	expectedIP := getPublicIP()
+
+	// Helper function to check a single domain
+	checkDomain := func(checkDomain string) map[string]interface{} {
+		ips, err := net.LookupIP(checkDomain)
+		if err != nil {
+			return map[string]interface{}{
+				"domain":     checkDomain,
+				"configured": false,
+				"error":      fmt.Sprintf("DNS lookup failed: %v", err),
+			}
+		}
+
+		// Check if any IP matches
+		ipStrings := []string{}
+		matches := false
+		for _, ip := range ips {
+			ipStr := ip.String()
+			ipStrings = append(ipStrings, ipStr)
+			if ipStr == expectedIP {
+				matches = true
+			}
+		}
+
+		return map[string]interface{}{
+			"domain":       checkDomain,
+			"configured":   len(ips) > 0,
+			"resolved_ips": ipStrings,
+			"expected_ip":  expectedIP,
+			"matches":      matches,
+		}
+	}
+
+	// Check the requested domain
+	mainResult := checkDomain(domain)
+
+	// For apex domains (like example.com), also check www subdomain
+	// since SSL certificates will include both
+	var wwwResult map[string]interface{}
+	parts := strings.Split(domain, ".")
+	isApexDomain := len(parts) == 2 && !strings.HasPrefix(domain, "www.") && !strings.HasPrefix(domain, "*.")
+
+	if isApexDomain {
+		wwwDomain := "www." + domain
+		wwwResult = checkDomain(wwwDomain)
+
+		// Both must match for apex domains
+		bothMatch := mainResult["matches"].(bool) && wwwResult["matches"].(bool)
+
 		c.JSON(http.StatusOK, gin.H{
-			"domain":     domain,
-			"configured": false,
-			"error":      fmt.Sprintf("DNS lookup failed: %v", err),
+			"domain":        domain,
+			"is_apex":       true,
+			"requires_www":  true,
+			"apex_record":   mainResult,
+			"www_record":    wwwResult,
+			"all_configured": bothMatch,
+			"expected_ip":   expectedIP,
+			"message":       "Apex domain requires both @ and www A records pointing to server IP",
 		})
 		return
 	}
 
-	// Get expected IP
-	expectedIP := getPublicIP()
-
-	// Check if any IP matches
-	ipStrings := []string{}
-	matches := false
-	for _, ip := range ips {
-		ipStr := ip.String()
-		ipStrings = append(ipStrings, ipStr)
-		if ipStr == expectedIP {
-			matches = true
-		}
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"domain":       domain,
-		"configured":   len(ips) > 0,
-		"resolved_ips": ipStrings,
-		"expected_ip":  expectedIP,
-		"matches":      matches,
-	})
+	// For non-apex domains (subdomains or www), only check the single domain
+	c.JSON(http.StatusOK, mainResult)
 }
 
 // listSSLCertificates returns all registered SSL certificates
