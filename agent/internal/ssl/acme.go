@@ -166,8 +166,24 @@ func (m *CertManager) RequestCertificate(domain string) error {
 	}
 
 	// Request certificate
+	// For apex domains (like example.com), automatically include www subdomain
+	domains := []string{domain}
+	if !strings.HasPrefix(domain, "*.") && !strings.HasPrefix(domain, "www.") {
+		// Check if this is an apex domain (not a subdomain like api.example.com)
+		parts := strings.Split(domain, ".")
+		if len(parts) == 2 {
+			// It's an apex domain - add www variant
+			wwwDomain := "www." + domain
+			domains = append(domains, wwwDomain)
+			m.logger.Info("Including www subdomain in certificate request",
+				zap.String("domain", domain),
+				zap.String("www_domain", wwwDomain),
+			)
+		}
+	}
+
 	request := certificate.ObtainRequest{
-		Domains: []string{domain},
+		Domains: domains,
 		Bundle:  true,
 	}
 
