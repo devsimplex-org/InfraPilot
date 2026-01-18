@@ -390,7 +390,7 @@ export default function HealthPage() {
           <Card.Header>
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Certificate Details</h2>
           </Card.Header>
-          <Card.Body noPadding>
+          <Card.Body className="p-0">
             <Table
               columns={certificateColumns}
               data={tlsHealth.certificates}
