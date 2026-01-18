@@ -344,7 +344,7 @@ export default function OwnershipPage() {
       header: "Status",
       sortable: true,
       render: (value: boolean) => (
-        <StatusBadge status={value ? "success" : "error"} size="sm">
+        <StatusBadge status={value ? "healthy" : "critical"} size="sm">
           {value ? "Active" : "Inactive"}
         </StatusBadge>
       ),

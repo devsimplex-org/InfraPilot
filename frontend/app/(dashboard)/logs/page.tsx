@@ -388,7 +388,7 @@ export default function LogsPage() {
         </Card.Header>
 
         {/* Log entries */}
-        <Card.Body noPadding>
+        <Card.Body className="p-0">
           <div className="h-[calc(100vh-380px)] min-h-[400px] overflow-auto font-mono text-xs">
             {isLoading ? (
               <div className="flex items-center justify-center h-32">
