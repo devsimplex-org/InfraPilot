@@ -25,7 +25,7 @@ services:
     #   - "5432:5432"  # Uncomment if you need direct host access (e.g., database GUI)
     volumes:
       - postgres_dev_data:/var/lib/postgresql/data
-      - ./backend/internal/db/migrations:/docker-entrypoint-initdb.d:ro
+      # Migrations are run by the backend app, not initdb
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U infrapilot"]
       interval: 5s
