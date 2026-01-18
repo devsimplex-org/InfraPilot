@@ -66,7 +66,7 @@ services:
       DATABASE_URL: postgres://infrapilot:infrapilot@postgres:5432/infrapilot?sslmode=disable
       REDIS_URL: redis://redis:6379
       JWT_SECRET: dev-secret-key-for-development-only-32chars
-      ALLOWED_ORIGINS: http://localhost
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost}
     volumes:
       - ./backend:/app
       - go_mod_cache:/go/pkg/mod
@@ -88,7 +88,7 @@ services:
       dockerfile: Dockerfile.dev
     container_name: infrapilot-dev-frontend
     environment:
-      NEXT_PUBLIC_API_URL: http://backend:8080/api/v1
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api/v1}
       WATCHPACK_POLLING: "true"
     volumes:
       - ./frontend:/app
