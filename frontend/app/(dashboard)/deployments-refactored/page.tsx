@@ -25,7 +25,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Spinner } from "@/components/ui/Spinner";
 import { StatusIndicator } from "@/components/ui/StatusIndicator";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
-import { FilterPanel, type Filter } from "@/components/ui/FilterPanel";
+import { FilterPanel, type FilterGroup } from "@/components/ui/FilterPanel";
 import { cn } from "@/lib/utils";
 
 type PanelTab = "overview" | "scan" | "vulnerabilities" | "sbom";
@@ -198,7 +198,7 @@ export default function DeploymentsPage() {
   ];
 
   // Vulnerability filters
-  const vulnerabilityFilters: Filter[] = [
+  const vulnerabilityFilters: FilterGroup[] = [
     {
       id: "severity",
       label: "Severity",
@@ -307,11 +307,12 @@ export default function DeploymentsPage() {
       >
         {selectedDeployment && (
           <>
-            <SlideOver.Header
-              title={selectedDeployment.service_name}
-              subtitle={selectedDeployment.environment}
-              onClose={() => setSelectedDeployment(null)}
-            />
+            <SlideOver.Header onClose={() => setSelectedDeployment(null)} showCloseButton>
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{selectedDeployment.service_name}</h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400">{selectedDeployment.environment}</p>
+              </div>
+            </SlideOver.Header>
 
             <SlideOver.Body>
               {/* Tabs */}

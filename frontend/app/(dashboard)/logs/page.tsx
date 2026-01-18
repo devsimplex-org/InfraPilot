@@ -22,7 +22,7 @@ import { api, LogEntry, Agent } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
-import { FilterPanel } from "@/components/ui/FilterPanel";
+import { FilterPanel, type FilterGroup } from "@/components/ui/FilterPanel";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -181,11 +181,11 @@ export default function LogsPage() {
   const isLoading = activeTab === "unified" ? unifiedLoading : nginxLoading;
 
   // Filter configuration
-  const filters = [
+  const filters: FilterGroup[] = [
     {
       id: "search",
       label: "Search",
-      type: "search" as const,
+      type: "search",
       value: search,
       onChange: (value: string | string[]) => setSearch(value as string),
     },
@@ -195,7 +195,7 @@ export default function LogsPage() {
     filters.push({
       id: "level",
       label: "Log Level",
-      type: "radio" as const,
+      type: "radio",
       value: level,
       onChange: (value: string | string[]) => setLevel(value as LogLevel),
       options: [

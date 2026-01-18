@@ -354,7 +354,7 @@ export default function ExceptionsPage() {
       icon: FileText,
       iconColor: "text-blue-600 dark:text-blue-400",
       title: "Exception Requested",
-      description: `Requested by ${ex.created_by || "Unknown"}`,
+      description: `Requested by ${ex.requested_by || "Unknown"}`,
       timestamp: new Date(ex.created_at).toLocaleString(),
     });
 

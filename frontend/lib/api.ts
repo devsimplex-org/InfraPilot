@@ -2925,4 +2925,7 @@ export const api = {
 
   getRuntimeSecurityPosture: () =>
     fetchAPI<RuntimeSecurityPosture>(`/runtime/posture`),
+
+  // Generic fetch for custom endpoints
+  fetchAPI: <T>(endpoint: string, options?: RequestInit) => fetchAPI<T>(endpoint, options),
 };
