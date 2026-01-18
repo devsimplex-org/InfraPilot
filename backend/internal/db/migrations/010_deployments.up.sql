@@ -5,27 +5,35 @@
 -- ============ Enums ============
 
 -- Deployment status lifecycle
-CREATE TYPE deployment_status AS ENUM (
-    'pending',      -- Deployment created, waiting to start
-    'scanning',     -- Image is being scanned for vulnerabilities
-    'policy_check', -- Evaluating security policies
-    'deploying',    -- Starting container
-    'running',      -- Container is running
-    'failed',       -- Deployment failed
-    'rolled_back',  -- Deployment was rolled back
-    'stopped'       -- Deployment was stopped
-);
+DO $$ BEGIN
+    CREATE TYPE deployment_status AS ENUM (
+        'pending',      -- Deployment created, waiting to start
+        'scanning',     -- Image is being scanned for vulnerabilities
+        'policy_check', -- Evaluating security policies
+        'deploying',    -- Starting container
+        'running',      -- Container is running
+        'failed',       -- Deployment failed
+        'rolled_back',  -- Deployment was rolled back
+        'stopped'       -- Deployment was stopped
+    );
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 -- Policy decision result
-CREATE TYPE policy_decision AS ENUM (
-    'allow',  -- Deployment allowed
-    'warn',   -- Deployment allowed with warnings
-    'deny'    -- Deployment blocked
-);
+DO $$ BEGIN
+    CREATE TYPE policy_decision AS ENUM (
+        'allow',  -- Deployment allowed
+        'warn',   -- Deployment allowed with warnings
+        'deny'    -- Deployment blocked
+    );
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 -- ============ Deployments Table ============
 
-CREATE TABLE deployments (
+CREATE TABLE IF NOT EXISTS deployments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
@@ -76,14 +84,14 @@ CREATE TABLE deployments (
 
 -- ============ Indexes ============
 
-CREATE INDEX idx_deployments_org ON deployments(org_id);
-CREATE INDEX idx_deployments_agent ON deployments(agent_id);
-CREATE INDEX idx_deployments_service ON deployments(service_name, environment);
-CREATE INDEX idx_deployments_image ON deployments(image_digest);
-CREATE INDEX idx_deployments_git ON deployments(git_repo, git_commit);
-CREATE INDEX idx_deployments_status ON deployments(status);
-CREATE INDEX idx_deployments_created ON deployments(created_at DESC);
-CREATE INDEX idx_deployments_container ON deployments(container_id);
+CREATE INDEX IF NOT EXISTS idx_deployments_org ON deployments(org_id);
+CREATE INDEX IF NOT EXISTS idx_deployments_agent ON deployments(agent_id);
+CREATE INDEX IF NOT EXISTS idx_deployments_service ON deployments(service_name, environment);
+CREATE INDEX IF NOT EXISTS idx_deployments_image ON deployments(image_digest);
+CREATE INDEX IF NOT EXISTS idx_deployments_git ON deployments(git_repo, git_commit);
+CREATE INDEX IF NOT EXISTS idx_deployments_status ON deployments(status);
+CREATE INDEX IF NOT EXISTS idx_deployments_created ON deployments(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_deployments_container ON deployments(container_id);
 
 -- ============ Link Containers to Deployments ============
 
@@ -93,6 +101,7 @@ CREATE INDEX IF NOT EXISTS idx_containers_deployment ON containers(deployment_id
 
 -- ============ Trigger for updated_at ============
 
+DROP TRIGGER IF EXISTS update_deployments_updated_at ON deployments;
 CREATE TRIGGER update_deployments_updated_at
     BEFORE UPDATE ON deployments
     FOR EACH ROW
