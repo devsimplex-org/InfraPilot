@@ -69,7 +69,20 @@ export default function CodeQualityPage() {
   const criticalIssues = selectedResultData?.critical_issues || 0;
   const codeCoverage = selectedResultData?.coverage || 0;
   const technicalDebt = selectedResultData?.code_smells || 0;
-  const qualityScore = selectedResultData?.quality_score || 0;
+  // Calculate quality score from available metrics
+  const qualityScore = selectedResultData ? (() => {
+    // Base score starts at 100 and reduces based on issues
+    let score = 100;
+    score -= (selectedResultData.critical_issues || 0) * 10;
+    score -= (selectedResultData.high_issues || 0) * 5;
+    score -= (selectedResultData.medium_issues || 0) * 2;
+    score -= (selectedResultData.low_issues || 0) * 1;
+    // Factor in coverage if available
+    if (selectedResultData.coverage !== undefined) {
+      score = Math.round((score + selectedResultData.coverage) / 2);
+    }
+    return Math.max(0, Math.min(100, score));
+  })() : 0;
 
   // Filter issues
   const filteredIssues = issues.filter((issue) => {
@@ -183,6 +196,23 @@ export default function CodeQualityPage() {
     if (score >= 60) return "text-yellow-600 dark:text-yellow-400";
     if (score >= 40) return "text-orange-600 dark:text-orange-400";
     return "text-red-600 dark:text-red-400";
+  };
+
+  const calculateQualityScore = (result: CodeQualityResult) => {
+    let score = 100;
+    score -= (result.critical_issues || 0) * 10;
+    score -= (result.high_issues || 0) * 5;
+    score -= (result.medium_issues || 0) * 2;
+    score -= (result.low_issues || 0) * 1;
+    if (result.coverage !== undefined) {
+      score = Math.round((score + result.coverage) / 2);
+    }
+    return Math.max(0, Math.min(100, score));
+  };
+
+  const getTotalIssues = (result: CodeQualityResult) => {
+    return (result.critical_issues || 0) + (result.high_issues || 0) +
+           (result.medium_issues || 0) + (result.low_issues || 0) + (result.info_issues || 0);
   };
 
   return (
@@ -396,25 +426,27 @@ export default function CodeQualityPage() {
                       </span>
                     </td>
                     <td className="px-6 py-4">
-                      <span className={`text-2xl font-bold ${getQualityScoreColor(result.quality_score)}`}>
-                        {result.quality_score}
+                      <span className={`text-2xl font-bold ${getQualityScoreColor(calculateQualityScore(result))}`}>
+                        {calculateQualityScore(result)}
                       </span>
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2 flex-wrap">
                         {result.critical_issues > 0 && (
-                          <SeverityBadge severity="critical" size="sm">
-                            {result.critical_issues} Critical
-                          </SeverityBadge>
+                          <div className="flex items-center gap-1">
+                            <SeverityBadge severity="critical" size="sm" />
+                            <span className="text-xs text-gray-600 dark:text-gray-300">{result.critical_issues}</span>
+                          </div>
                         )}
                         {result.high_issues > 0 && (
-                          <SeverityBadge severity="high" size="sm">
-                            {result.high_issues} High
-                          </SeverityBadge>
+                          <div className="flex items-center gap-1">
+                            <SeverityBadge severity="high" size="sm" />
+                            <span className="text-xs text-gray-600 dark:text-gray-300">{result.high_issues}</span>
+                          </div>
                         )}
                         {result.critical_issues === 0 && result.high_issues === 0 && (
                           <span className="text-sm text-gray-500 dark:text-gray-400">
-                            {result.total_issues} total
+                            {getTotalIssues(result)} total
                           </span>
                         )}
                       </div>
@@ -528,27 +560,15 @@ export default function CodeQualityPage() {
                 </div>
               </div>
 
-              {/* Code Snippet */}
-              {selectedIssue.code_snippet && (
-                <div>
-                  <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                    Code Snippet
-                  </h4>
-                  <pre className="bg-gray-900 dark:bg-gray-950 text-gray-100 rounded-lg p-4 overflow-x-auto text-xs font-mono">
-                    {selectedIssue.code_snippet}
-                  </pre>
-                </div>
-              )}
-
               {/* Suggested Fix */}
-              {selectedIssue.suggested_fix && (
+              {selectedIssue.fix_suggestion && (
                 <div>
                   <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                     Suggested Fix
                   </h4>
                   <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
                     <p className="text-sm text-gray-900 dark:text-white">
-                      {selectedIssue.suggested_fix}
+                      {selectedIssue.fix_suggestion}
                     </p>
                   </div>
                 </div>

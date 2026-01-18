@@ -17,6 +17,7 @@ import {
   Code,
   Activity,
   ExternalLink,
+  type LucideIcon,
 } from "lucide-react";
 import { api, Feedback, VCSConfiguration } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -145,18 +146,20 @@ export default function FeedbackPage() {
     }
   };
 
-  const getSourceTypeIcon = (sourceType: Feedback["source_type"]) => {
+  const getSourceTypeIcon = (sourceType: Feedback["source_type"]): LucideIcon => {
     switch (sourceType) {
       case "vulnerability":
-        return <Shield className="h-4 w-4" />;
+        return Shield;
       case "policy_violation":
-        return <AlertTriangle className="h-4 w-4" />;
+        return AlertTriangle;
       case "sbom":
-        return <Package className="h-4 w-4" />;
+        return Package;
       case "code_quality":
-        return <Code className="h-4 w-4" />;
+        return Code;
       case "drift":
-        return <Activity className="h-4 w-4" />;
+        return Activity;
+      default:
+        return MessageSquare;
     }
   };
 
@@ -214,9 +217,11 @@ export default function FeedbackPage() {
       key: "title",
       header: "Title",
       sortable: true,
-      render: (value: string, row: Feedback) => (
+      render: (value: string, row: Feedback) => {
+        const SourceIcon = getSourceTypeIcon(row.source_type);
+        return (
         <div className="flex items-start gap-2">
-          {getSourceTypeIcon(row.source_type)}
+          <SourceIcon className="h-4 w-4" />
           <div className="min-w-0 flex-1">
             <div className="font-medium text-sm truncate">{value}</div>
             <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 mt-1">
@@ -231,7 +236,8 @@ export default function FeedbackPage() {
             </div>
           </div>
         </div>
-      ),
+        );
+      },
     },
     {
       key: "severity",

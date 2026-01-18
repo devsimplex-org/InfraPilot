@@ -34,7 +34,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-IMAGE_PREFIX="devsimplex/infrapilot"
+IMAGE_PREFIX="ghcr.io/tybali/infrapilot"
 
 # Colors
 RED='\033[0;31m'
@@ -238,7 +238,7 @@ fi
 echo ""
 
 if [ "$PUSH" = true ]; then
-    echo -e "${GREEN}Images pushed to Docker Hub${NC}"
+    echo -e "${GREEN}Images pushed to GitHub Container Registry${NC}"
     echo ""
     echo "To pull images:"
     if [ "$BUILD_BACKEND" = true ]; then

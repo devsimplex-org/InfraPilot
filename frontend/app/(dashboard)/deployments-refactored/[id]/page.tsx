@@ -133,7 +133,7 @@ export default function DeploymentDetailPage({ params }: { params: Promise<{ id:
   // Fetch default agent
   const { data: agents } = useQuery({
     queryKey: ["agents"],
-    queryFn: () => api.fetchAPI<any[]>("/agents"),
+    queryFn: () => api.getAgents(),
   });
 
   const defaultAgent = agents?.[0];
@@ -161,7 +161,7 @@ export default function DeploymentDetailPage({ params }: { params: Promise<{ id:
     }
   };
 
-  const getPolicyDecisionStatus = (decision: string): "healthy" | "warning" | "critical" => {
+  const getPolicyDecisionStatus = (decision: string): "healthy" | "warning" | "degraded" | "critical" => {
     switch (decision) {
       case "allow":
         return "healthy";
