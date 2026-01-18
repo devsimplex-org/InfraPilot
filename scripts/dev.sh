@@ -19,10 +19,10 @@ case "$1" in
     cd "$PROJECT_ROOT"
     $COMPOSE -f docker-compose.dev.yml up -d
     echo ""
-    echo "Services starting..."
-    echo "  Dashboard: http://localhost"
-    echo "  API:       http://localhost/api/v1"
+    echo "Services starting (internal Docker network only)..."
+    echo "No ports exposed to host."
     echo ""
+    echo "For local dev with host access, use: ./scripts/dev.sh dev"
     echo "View logs: ./scripts/dev.sh logs"
     ;;
 
@@ -246,7 +246,7 @@ case "$1" in
     echo "Usage: ./scripts/dev.sh <command>"
     echo ""
     echo "Commands:"
-    echo "  up          Start full dev stack (Docker - all services)"
+    echo "  up          Start full dev stack (Docker - no host ports)"
     echo "  up:db       Start only postgres and redis (for local development)"
     echo "  down        Stop all Docker services"
     echo "  reset       Reset database (destroys all data)"
@@ -270,8 +270,8 @@ case "$1" in
     echo "  Open http://localhost:6006 (Storybook)"
     echo "  (Runs locally with hot reload, DB in Docker)"
     echo ""
-    echo "Quick Start (Docker):"
+    echo "Quick Start (Docker - no host ports):"
     echo "  ./scripts/dev.sh up"
-    echo "  Open http://localhost"
+    echo "  (Services run in Docker network only, no host access)"
     ;;
 esac
