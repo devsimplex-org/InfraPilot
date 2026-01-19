@@ -71,6 +71,7 @@ const navigationSections: NavigationSection[] = [
     items: [
       { name: "Deployments", href: "/deployments", icon: Package },
       { name: "Registries", href: "/registries", icon: Box },
+      { name: "Scans", href: "/scans", icon: Shield },
       { name: "Vulnerabilities", href: "/vulnerabilities", icon: AlertTriangle },
       { name: "SBOMs", href: "/sboms", icon: Package },
       { name: "Images", href: "/docker/images", icon: Image },
