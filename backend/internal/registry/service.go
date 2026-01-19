@@ -51,6 +51,42 @@ func (s *Service) CreateRegistry(ctx context.Context, orgID uuid.UUID, req *Crea
 		creds.Username = *req.Username
 		creds.Password = *req.Password
 
+	case ProviderECR:
+		if req.AWSAccessKeyID == nil || *req.AWSAccessKeyID == "" ||
+			req.AWSSecretAccessKey == nil || *req.AWSSecretAccessKey == "" ||
+			req.AWSRegion == nil || *req.AWSRegion == "" {
+			return nil, fmt.Errorf("aws_access_key_id, aws_secret_access_key, and aws_region are required for ECR")
+		}
+		authType = AuthTypeToken // ECR uses IAM credentials
+		creds.AWSAccessKeyID = *req.AWSAccessKeyID
+		creds.AWSSecretAccessKey = *req.AWSSecretAccessKey
+		creds.AWSRegion = *req.AWSRegion
+		if req.AWSAccountID != nil {
+			creds.AWSAccountID = *req.AWSAccountID
+		}
+
+	case ProviderGCR:
+		if req.GCPServiceAccountJSON == nil || *req.GCPServiceAccountJSON == "" ||
+			req.GCPProjectID == nil || *req.GCPProjectID == "" {
+			return nil, fmt.Errorf("gcp_service_account_json and gcp_project_id are required for GCR")
+		}
+		authType = AuthTypeToken // GCR uses service account
+		creds.GCPServiceAccountJSON = *req.GCPServiceAccountJSON
+		creds.GCPProjectID = *req.GCPProjectID
+
+	case ProviderACR:
+		if req.AzureTenantID == nil || *req.AzureTenantID == "" ||
+			req.AzureClientID == nil || *req.AzureClientID == "" ||
+			req.AzureClientSecret == nil || *req.AzureClientSecret == "" ||
+			req.AzureRegistryName == nil || *req.AzureRegistryName == "" {
+			return nil, fmt.Errorf("azure_tenant_id, azure_client_id, azure_client_secret, and azure_registry_name are required for ACR")
+		}
+		authType = AuthTypeToken // ACR uses service principal
+		creds.AzureTenantID = *req.AzureTenantID
+		creds.AzureClientID = *req.AzureClientID
+		creds.AzureClientSecret = *req.AzureClientSecret
+		creds.AzureRegistryName = *req.AzureRegistryName
+
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", req.Provider)
 	}
@@ -368,6 +404,15 @@ func (s *Service) getClient(registry *Registry) (Client, error) {
 
 	case ProviderDockerHub:
 		return NewDockerHubClient(creds.Username, creds.Password, namespace), nil
+
+	case ProviderECR:
+		return NewECRClient(creds.AWSAccessKeyID, creds.AWSSecretAccessKey, creds.AWSRegion, creds.AWSAccountID), nil
+
+	case ProviderGCR:
+		return NewGCRClient(creds.GCPServiceAccountJSON, creds.GCPProjectID), nil
+
+	case ProviderACR:
+		return NewACRClient(creds.AzureTenantID, creds.AzureClientID, creds.AzureClientSecret, creds.AzureRegistryName), nil
 
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", registry.Provider)

@@ -81,6 +81,11 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 			authGroup.POST("/mfa/confirm", h.AuthMiddleware(), h.confirmMFASetup)
 			authGroup.POST("/mfa/disable", h.AuthMiddleware(), h.disableMFA)
 			authGroup.POST("/mfa/backup-codes", h.AuthMiddleware(), h.regenerateBackupCodes)
+
+			// SSO/OIDC routes (public)
+			authGroup.GET("/sso/providers", h.getAvailableSSOProviders)
+			authGroup.GET("/sso/:config_id/login", h.ssoLogin)
+			authGroup.GET("/sso/:config_id/callback", h.ssoCallback)
 		}
 
 		// Webhook receiver (public - uses signature verification)
@@ -408,6 +413,12 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				settings.GET("/default-pages/:type", h.getDefaultPage)
 				settings.PUT("/default-pages/:type", h.updateDefaultPage)
 				settings.GET("/default-pages/:type/preview", h.previewDefaultPage)
+
+				// SSO Configuration
+				settings.GET("/sso", h.listSSOConfigs)
+				settings.POST("/sso", h.createSSOConfig)
+				settings.GET("/sso/:id", h.getSSOConfig)
+				settings.DELETE("/sso/:id", h.deleteSSOConfig)
 			}
 
 			// SSL/TLS Management
