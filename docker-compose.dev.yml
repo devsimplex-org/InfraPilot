@@ -89,6 +89,7 @@ services:
     container_name: infrapilot-dev-frontend
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api/v1}
+      BACKEND_URL: http://backend:8080
       WATCHPACK_POLLING: "true"
     volumes:
       - ./frontend:/app
@@ -126,6 +127,20 @@ services:
     networks:
       - infrapilot-dev
 
+  # =============================================================
+  # Nginx - Managed by Agent for network attachments
+  # =============================================================
+  nginx:
+    image: nginx:stable-alpine
+    container_name: infrapilot-nginx
+    # No ports exposed - external nginx on host handles traffic
+    # This container is for agent to manage network attachments
+    volumes:
+      - nginx_dev_conf:/etc/nginx/sites
+      - nginx_dev_certs:/etc/letsencrypt
+    networks:
+      - infrapilot-dev
+
 networks:
   infrapilot-dev:
     driver: bridge
@@ -135,3 +150,5 @@ volumes:
   redis_dev_data:
   go_mod_cache:
   agent_dev_data:
+  nginx_dev_conf:
+  nginx_dev_certs:
