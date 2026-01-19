@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -504,7 +505,7 @@ func (h *Handler) processScanWSRequest(ctx context.Context, orgID uuid.UUID, req
 					// Store individual vulnerabilities (non-blocking)
 					go func(scanID uuid.UUID, vulns []scanner.Vulnerability) {
 						for _, v := range vulns {
-							h.db.Exec(context.Background(), `
+							_, err := h.db.Exec(context.Background(), `
 								INSERT INTO vulnerabilities (
 									scan_result_id, cve_id, severity,
 									package_name, package_version, package_type,
@@ -513,13 +514,23 @@ func (h *Handler) processScanWSRequest(ctx context.Context, orgID uuid.UUID, req
 									reference_urls
 								)
 								VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-							`, scanID, v.CVEID, v.Severity,
+							`, scanID, v.CVEID, strings.ToLower(v.Severity),
 								v.PackageName, v.PackageVersion, v.PackageType,
 								v.FixedVersion, v.FixAvailable,
 								v.Title, v.Description, v.CVSSScore, v.CVSSVector,
 								v.References,
 							)
+							if err != nil {
+								h.logger.Error("Failed to store vulnerability",
+									zap.Error(err),
+									zap.String("cve", v.CVEID),
+									zap.String("scan_id", scanID.String()),
+								)
+							}
 						}
+						h.logger.Info("Stored vulnerabilities",
+							zap.String("scan_id", scanID.String()),
+							zap.Int("count", len(vulns)))
 					}(scanID, scanResult.Vulnerabilities)
 
 					// Send scan result

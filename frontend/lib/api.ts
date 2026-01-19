@@ -927,17 +927,17 @@ export interface Deployment {
 
 export interface ScanResult {
   id: string;
-  org_id: string;
+  org_id?: string;
   image_digest?: string;
   image_repository: string;
   image_tag?: string;
-  critical_count: number;
-  high_count: number;
-  medium_count: number;
-  low_count: number;
-  unknown_count: number;
-  total_count: number;
-  fixable_count: number;
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+  unknown: number;
+  total: number;
+  fixable: number;
   scanner_name: string;
   scanner_version?: string;
   scan_duration_ms?: number;

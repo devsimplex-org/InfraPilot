@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Shield,
@@ -31,6 +32,7 @@ import { ScanModal } from "@/components/ui/ScanModal";
 type TabType = "scans" | "sboms";
 
 export default function ScansPage() {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<TabType>("scans");
   const [selectedScan, setSelectedScan] = useState<ScanResult | null>(null);
@@ -65,10 +67,10 @@ export default function ScansPage() {
       return false;
     }
     if (severityFilter.length > 0) {
-      const hasCritical = severityFilter.includes("critical") && scan.critical_count > 0;
-      const hasHigh = severityFilter.includes("high") && scan.high_count > 0;
-      const hasMedium = severityFilter.includes("medium") && scan.medium_count > 0;
-      const hasLow = severityFilter.includes("low") && scan.low_count > 0;
+      const hasCritical = severityFilter.includes("critical") && scan.critical > 0;
+      const hasHigh = severityFilter.includes("high") && scan.high > 0;
+      const hasMedium = severityFilter.includes("medium") && scan.medium > 0;
+      const hasLow = severityFilter.includes("low") && scan.low > 0;
       if (!hasCritical && !hasHigh && !hasMedium && !hasLow) {
         return false;
       }
@@ -86,8 +88,8 @@ export default function ScansPage() {
 
   // Calculate metrics
   const totalScans = scans?.length || 0;
-  const criticalIssues = scans?.reduce((sum, s) => sum + s.critical_count, 0) || 0;
-  const highIssues = scans?.reduce((sum, s) => sum + s.high_count, 0) || 0;
+  const criticalIssues = scans?.reduce((sum, s) => sum + s.critical, 0) || 0;
+  const highIssues = scans?.reduce((sum, s) => sum + s.high, 0) || 0;
   const uniqueImages = new Set(scans?.map((s) => s.image_repository) || []).size;
   const lastScan = scans && scans.length > 0
     ? scans.reduce((latest, scan) =>
@@ -145,7 +147,7 @@ export default function ScansPage() {
       ),
     },
     {
-      key: "critical_count",
+      key: "critical",
       header: "Critical",
       align: "center" as const,
       sortable: true,
@@ -159,7 +161,7 @@ export default function ScansPage() {
         ),
     },
     {
-      key: "high_count",
+      key: "high",
       header: "High",
       align: "center" as const,
       sortable: true,
@@ -173,7 +175,7 @@ export default function ScansPage() {
         ),
     },
     {
-      key: "medium_count",
+      key: "medium",
       header: "Medium",
       align: "center" as const,
       sortable: true,
@@ -187,7 +189,7 @@ export default function ScansPage() {
         ),
     },
     {
-      key: "low_count",
+      key: "low",
       header: "Low",
       align: "center" as const,
       sortable: true,
@@ -201,7 +203,7 @@ export default function ScansPage() {
         ),
     },
     {
-      key: "total_count",
+      key: "total",
       header: "Total",
       align: "center" as const,
       sortable: true,
@@ -220,9 +222,17 @@ export default function ScansPage() {
     {
       key: "actions",
       header: "",
-      width: "40px",
+      width: "120px",
       render: (_: any, row: ScanResult) => (
-        <ChevronRight className="h-4 w-4 text-gray-400" />
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            router.push(`/scans/${row.id}`);
+          }}
+          className="px-3 py-1.5 text-sm font-medium text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded-lg transition-colors"
+        >
+          View Report
+        </button>
       ),
     },
   ];
@@ -448,11 +458,8 @@ export default function ScansPage() {
                 columns={scanColumns}
                 data={filteredScans}
                 keyExtractor={(row) => row.id}
-                onRowClick={(row) => setSelectedScan(row)}
+                onRowClick={(row) => router.push(`/scans/${row.id}`)}
                 hoverable
-                rowClassName={(row) =>
-                  cn(selectedScan?.id === row.id && "bg-primary-50 dark:bg-primary-900/20")
-                }
               />
             </div>
           ) : (
@@ -533,31 +540,31 @@ export default function ScansPage() {
                 <div className="grid grid-cols-5 gap-3">
                   <div className="p-3 bg-red-50 dark:bg-red-900/20 rounded-lg text-center">
                     <p className="text-2xl font-bold text-red-600 dark:text-red-400">
-                      {selectedScan.critical_count}
+                      {selectedScan.critical}
                     </p>
                     <p className="text-xs text-red-600 dark:text-red-400">Critical</p>
                   </div>
                   <div className="p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg text-center">
                     <p className="text-2xl font-bold text-orange-600 dark:text-orange-400">
-                      {selectedScan.high_count}
+                      {selectedScan.high}
                     </p>
                     <p className="text-xs text-orange-600 dark:text-orange-400">High</p>
                   </div>
                   <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg text-center">
                     <p className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
-                      {selectedScan.medium_count}
+                      {selectedScan.medium}
                     </p>
                     <p className="text-xs text-yellow-600 dark:text-yellow-400">Medium</p>
                   </div>
                   <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-center">
                     <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                      {selectedScan.low_count}
+                      {selectedScan.low}
                     </p>
                     <p className="text-xs text-blue-600 dark:text-blue-400">Low</p>
                   </div>
                   <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-center">
                     <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                      {selectedScan.total_count}
+                      {selectedScan.total}
                     </p>
                     <p className="text-xs text-gray-600 dark:text-gray-400">Total</p>
                   </div>
@@ -593,7 +600,7 @@ export default function ScansPage() {
                     <div>
                       <p className="text-gray-500 dark:text-gray-400">Fixable</p>
                       <p className="text-gray-900 dark:text-white">
-                        {selectedScan.fixable_count} of {selectedScan.total_count}
+                        {selectedScan.fixable} of {selectedScan.total}
                       </p>
                     </div>
                   </div>
