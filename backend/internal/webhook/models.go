@@ -8,19 +8,20 @@ import (
 
 // WebhookConfig represents a configured webhook endpoint
 type WebhookConfig struct {
-	ID          uuid.UUID  `json:"id"`
-	OrgID       uuid.UUID  `json:"org_id"`
-	AgentID     uuid.UUID  `json:"agent_id"`
-	Name        string     `json:"name"`
-	Provider    string     `json:"provider"` // github, gitlab, jenkins, generic
-	Secret      string     `json:"-"`        // Never expose in JSON
-	SecretHash  string     `json:"-"`        // bcrypt hash of secret
-	Enabled     bool       `json:"enabled"`
-	ServiceName string     `json:"service_name"`
-	Environment string     `json:"environment"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
-	LastUsedAt  *time.Time `json:"last_used_at,omitempty"`
+	ID              uuid.UUID  `json:"id"`
+	OrgID           uuid.UUID  `json:"org_id"`
+	AgentID         uuid.UUID  `json:"agent_id"`
+	Name            string     `json:"name"`
+	Provider        string     `json:"provider"` // github, gitlab, jenkins, generic
+	Secret          string     `json:"-"`        // Never expose in JSON
+	SecretHash      string     `json:"-"`        // bcrypt hash of secret (legacy)
+	SecretEncrypted []byte     `json:"-"`        // AES-256-GCM encrypted secret for HMAC verification
+	Enabled         bool       `json:"enabled"`
+	ServiceName     string     `json:"service_name"`
+	Environment     string     `json:"environment"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+	LastUsedAt      *time.Time `json:"last_used_at,omitempty"`
 }
 
 // WebhookEvent represents a received webhook event

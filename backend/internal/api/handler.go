@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/infrapilot/backend/internal/auth"
+	"github.com/infrapilot/backend/internal/crypto"
 	"github.com/infrapilot/backend/internal/feedback"
 	agentgrpc "github.com/infrapilot/backend/internal/grpc"
 	"github.com/infrapilot/backend/internal/policy"
@@ -28,9 +29,10 @@ type Handler struct {
 	webhookService      *webhook.Service
 	feedbackIntegration *feedback.DeploymentIntegration
 	registryService     *registry.Service
+	encryptionSvc       *crypto.EncryptionService
 }
 
-func NewHandler(db *pgxpool.Pool, authService *auth.Service, logger *zap.Logger) *Handler {
+func NewHandler(db *pgxpool.Pool, authService *auth.Service, logger *zap.Logger, encryptionSvc *crypto.EncryptionService) *Handler {
 	// Initialize feedback system
 	feedbackManager := feedback.NewManager(db, logger)
 	feedbackRenderer := feedback.NewTemplateRenderer(db, logger)
@@ -47,9 +49,10 @@ func NewHandler(db *pgxpool.Pool, authService *auth.Service, logger *zap.Logger)
 		scanner:             scanner.NewScanner(logger),
 		sbomGenerator:       scanner.NewSBOMGenerator(logger),
 		policyEngine:        policy.NewPolicyEngine(logger, "/app/policies"),
-		webhookService:      webhook.NewService(db, logger),
+		webhookService:      webhook.NewService(db, logger, encryptionSvc),
 		feedbackIntegration: feedbackIntegration,
-		registryService:     registry.NewService(db, logger),
+		registryService:     registry.NewService(db, logger, encryptionSvc),
+		encryptionSvc:       encryptionSvc,
 	}
 }
 

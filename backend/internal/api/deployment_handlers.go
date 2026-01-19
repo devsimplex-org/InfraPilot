@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	agentgrpc "github.com/infrapilot/backend/internal/grpc"
 	"github.com/infrapilot/backend/internal/policy"
 )
 

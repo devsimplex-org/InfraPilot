@@ -6,24 +6,28 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
-	"golang.org/x/crypto/bcrypt"
+
+	"github.com/infrapilot/backend/internal/crypto"
 )
 
 type Service struct {
-	db     *pgxpool.Pool
-	logger *zap.Logger
+	db            *pgxpool.Pool
+	logger        *zap.Logger
+	encryptionSvc *crypto.EncryptionService
 }
 
-func NewService(db *pgxpool.Pool, logger *zap.Logger) *Service {
+func NewService(db *pgxpool.Pool, logger *zap.Logger, encryptionSvc *crypto.EncryptionService) *Service {
 	return &Service{
-		db:     db,
-		logger: logger,
+		db:            db,
+		logger:        logger,
+		encryptionSvc: encryptionSvc,
 	}
 }
 
@@ -37,35 +41,40 @@ func (s *Service) CreateWebhook(ctx context.Context, orgID, agentID uuid.UUID, r
 		return nil, "", fmt.Errorf("failed to generate secret: %w", err)
 	}
 
-	// Hash the secret for storage
-	secretHash, err := bcrypt.GenerateFromPassword([]byte(secret), bcrypt.DefaultCost)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to hash secret: %w", err)
+	// Encrypt the secret for storage (allows decryption for HMAC verification)
+	var secretEncrypted []byte
+	if s.encryptionSvc != nil {
+		secretEncrypted, err = s.encryptionSvc.Encrypt([]byte(secret))
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to encrypt secret: %w", err)
+		}
+	} else {
+		s.logger.Warn("encryption service not configured, webhook signature verification will be unavailable")
 	}
 
 	// Insert webhook config
 	config := &WebhookConfig{
-		ID:          uuid.New(),
-		OrgID:       orgID,
-		AgentID:     agentID,
-		Name:        req.Name,
-		Provider:    req.Provider,
-		SecretHash:  string(secretHash),
-		Enabled:     true,
-		ServiceName: req.ServiceName,
-		Environment: req.Environment,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		ID:              uuid.New(),
+		OrgID:           orgID,
+		AgentID:         agentID,
+		Name:            req.Name,
+		Provider:        req.Provider,
+		SecretEncrypted: secretEncrypted,
+		Enabled:         true,
+		ServiceName:     req.ServiceName,
+		Environment:     req.Environment,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
 	}
 
 	query := `
-		INSERT INTO webhook_configs (id, org_id, agent_id, name, provider, secret_hash, enabled, service_name, environment, created_at, updated_at)
+		INSERT INTO webhook_configs (id, org_id, agent_id, name, provider, secret_encrypted, enabled, service_name, environment, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	`
 
 	_, err = s.db.Exec(ctx, query,
 		config.ID, config.OrgID, config.AgentID, config.Name, config.Provider,
-		config.SecretHash, config.Enabled, config.ServiceName, config.Environment,
+		config.SecretEncrypted, config.Enabled, config.ServiceName, config.Environment,
 		config.CreatedAt, config.UpdatedAt,
 	)
 	if err != nil {
@@ -109,14 +118,14 @@ func (s *Service) ListWebhooks(ctx context.Context, orgID, agentID uuid.UUID) ([
 // GetWebhook retrieves a webhook by ID
 func (s *Service) GetWebhook(ctx context.Context, webhookID uuid.UUID) (*WebhookConfig, error) {
 	query := `
-		SELECT id, org_id, agent_id, name, provider, secret_hash, enabled, service_name, environment, created_at, updated_at, last_used_at
+		SELECT id, org_id, agent_id, name, provider, secret_hash, secret_encrypted, enabled, service_name, environment, created_at, updated_at, last_used_at
 		FROM webhook_configs
 		WHERE id = $1
 	`
 
 	var w WebhookConfig
 	err := s.db.QueryRow(ctx, query, webhookID).Scan(
-		&w.ID, &w.OrgID, &w.AgentID, &w.Name, &w.Provider, &w.SecretHash, &w.Enabled,
+		&w.ID, &w.OrgID, &w.AgentID, &w.Name, &w.Provider, &w.SecretHash, &w.SecretEncrypted, &w.Enabled,
 		&w.ServiceName, &w.Environment, &w.CreatedAt, &w.UpdatedAt, &w.LastUsedAt,
 	)
 	if err != nil {
@@ -195,14 +204,43 @@ func (s *Service) VerifyAndParse(ctx context.Context, webhookID uuid.UUID, heade
 		return nil, fmt.Errorf("webhook is disabled")
 	}
 
-	// Note: Webhook signature verification is currently skipped
-	// The secret is stored as a bcrypt hash (for comparison with user input)
-	// but signature verification requires the plain secret
-	// TODO: Store secrets encrypted (not hashed) to enable signature verification
-	s.logger.Warn("webhook signature verification skipped - secret is hashed, not encrypted",
-		zap.String("webhook_id", webhookID.String()),
-		zap.String("provider", config.Provider),
-	)
+	// Verify webhook signature
+	if len(config.SecretEncrypted) > 0 && s.encryptionSvc != nil {
+		// Decrypt the secret
+		secret, err := s.encryptionSvc.Decrypt(config.SecretEncrypted)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decrypt webhook secret: %w", err)
+		}
+
+		// Get the appropriate verifier
+		verifier, err := GetVerifier(config.Provider)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get verifier: %w", err)
+		}
+
+		// Get the signature header based on provider
+		signature := s.getSignatureHeader(headers, config.Provider)
+
+		// Verify the signature
+		if err := verifier.Verify(payload, signature, string(secret)); err != nil {
+			s.logger.Warn("webhook signature verification failed",
+				zap.String("webhook_id", webhookID.String()),
+				zap.String("provider", config.Provider),
+				zap.Error(err),
+			)
+			return nil, fmt.Errorf("signature verification failed: %w", err)
+		}
+
+		s.logger.Debug("webhook signature verified successfully",
+			zap.String("webhook_id", webhookID.String()),
+			zap.String("provider", config.Provider),
+		)
+	} else {
+		s.logger.Warn("webhook signature verification skipped - no encrypted secret available",
+			zap.String("webhook_id", webhookID.String()),
+			zap.String("provider", config.Provider),
+		)
+	}
 
 	// Parse payload
 	parser, err := GetParser(config.Provider)
@@ -222,6 +260,24 @@ func (s *Service) VerifyAndParse(ctx context.Context, webhookID uuid.UUID, heade
 	}
 
 	return metadata, nil
+}
+
+// getSignatureHeader returns the appropriate signature header value based on provider
+func (s *Service) getSignatureHeader(headers map[string]string, provider string) string {
+	// Normalize headers to lowercase for case-insensitive lookup
+	normalizedHeaders := make(map[string]string)
+	for k, v := range headers {
+		normalizedHeaders[strings.ToLower(k)] = v
+	}
+
+	switch provider {
+	case "github":
+		return normalizedHeaders["x-hub-signature-256"]
+	case "gitlab":
+		return normalizedHeaders["x-gitlab-token"]
+	default:
+		return normalizedHeaders["x-webhook-signature"]
+	}
 }
 
 // RecordWebhookEvent records a webhook event for audit purposes

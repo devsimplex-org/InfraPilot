@@ -19,6 +19,7 @@ import (
 	"github.com/infrapilot/backend/internal/api"
 	"github.com/infrapilot/backend/internal/auth"
 	"github.com/infrapilot/backend/internal/config"
+	"github.com/infrapilot/backend/internal/crypto"
 	"github.com/infrapilot/backend/internal/db"
 	agentgrpc "github.com/infrapilot/backend/internal/grpc"
 )
@@ -70,6 +71,19 @@ func main() {
 
 	logger.Info("InfraPilot Community Edition started")
 
+	// Initialize encryption service (optional but recommended)
+	var encryptionSvc *crypto.EncryptionService
+	if cfg.EncryptionKey != "" {
+		var err error
+		encryptionSvc, err = crypto.NewEncryptionService(cfg.EncryptionKey)
+		if err != nil {
+			logger.Fatal("Failed to initialize encryption service", zap.Error(err))
+		}
+		logger.Info("Encryption service initialized")
+	} else {
+		logger.Warn("ENCRYPTION_KEY not set - webhook signature verification and credential encryption will be disabled")
+	}
+
 	// Initialize auth service
 	authService := auth.NewService(cfg.JWTSecret, cfg.JWTExpiry)
 
@@ -84,7 +98,7 @@ func main() {
 	router.Use(api.CORSMiddleware(cfg.AllowedOrigins))
 
 	// Setup API routes
-	apiHandler := api.NewHandler(pool, authService, logger)
+	apiHandler := api.NewHandler(pool, authService, logger, encryptionSvc)
 	apiHandler.RegisterRoutes(router)
 
 	httpServer := &http.Server{
