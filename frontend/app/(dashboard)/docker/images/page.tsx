@@ -14,6 +14,10 @@ import {
   Tag,
   Layers,
   Shield,
+  CheckSquare,
+  Square,
+  MinusSquare,
+  Filter,
 } from "lucide-react";
 import { api, DockerImage } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -33,9 +37,18 @@ export default function ImagesPage() {
   const [selectedImage, setSelectedImage] = useState<DockerImage | null>(null);
   const [showPullModal, setShowPullModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [forceDelete, setForceDelete] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  // Multi-selection state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDeleteProgress, setBulkDeleteProgress] = useState<{
+    total: number;
+    completed: number;
+    failed: string[];
+  } | null>(null);
 
   // Pull form state
   const [pullImageRef, setPullImageRef] = useState("");
@@ -94,6 +107,83 @@ export default function ImagesPage() {
     }
   }, [activeAgents, selectedAgent]);
 
+  // Clear selection when agent changes
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [selectedAgent]);
+
+  // Selection helpers
+  const toggleSelection = (id: string) => {
+    setSelectedIds((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  };
+
+  const selectAll = () => {
+    if (images) {
+      setSelectedIds(new Set(images.map((img) => img.id)));
+    }
+  };
+
+  const selectNone = () => {
+    setSelectedIds(new Set());
+  };
+
+  const selectUnused = () => {
+    if (images) {
+      setSelectedIds(new Set(images.filter((img) => img.used_by.length === 0).map((img) => img.id)));
+    }
+  };
+
+  const selectDangling = () => {
+    if (images) {
+      setSelectedIds(new Set(images.filter((img) => img.tags.length === 0).map((img) => img.id)));
+    }
+  };
+
+  const isAllSelected = images && images.length > 0 && selectedIds.size === images.length;
+  const isSomeSelected = selectedIds.size > 0 && !isAllSelected;
+  const selectedImages = images?.filter((img) => selectedIds.has(img.id)) || [];
+  const selectedSize = selectedImages.reduce((sum, img) => sum + img.size, 0);
+  const unusedCount = images?.filter((img) => img.used_by.length === 0).length || 0;
+  const danglingCount = images?.filter((img) => img.tags.length === 0).length || 0;
+
+  // Bulk delete function
+  const handleBulkDelete = async () => {
+    if (!selectedAgent || selectedIds.size === 0) return;
+
+    const imagesToDelete = Array.from(selectedIds);
+    setBulkDeleteProgress({ total: imagesToDelete.length, completed: 0, failed: [] });
+
+    const failed: string[] = [];
+
+    for (let i = 0; i < imagesToDelete.length; i++) {
+      try {
+        await api.deleteDockerImage(selectedAgent, imagesToDelete[i], forceDelete);
+      } catch (error) {
+        const img = images?.find((img) => img.id === imagesToDelete[i]);
+        failed.push(img?.tags[0] || imagesToDelete[i].slice(0, 12));
+      }
+      setBulkDeleteProgress({ total: imagesToDelete.length, completed: i + 1, failed });
+    }
+
+    // Refresh the list
+    queryClient.invalidateQueries({ queryKey: ["docker-images", selectedAgent] });
+
+    if (failed.length === 0) {
+      setShowBulkDeleteModal(false);
+      setSelectedIds(new Set());
+      setBulkDeleteProgress(null);
+      setForceDelete(false);
+    }
+  };
+
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text);
     setCopied(true);
@@ -129,6 +219,46 @@ export default function ImagesPage() {
 
   // Table columns
   const columns = [
+    {
+      key: "checkbox",
+      header: (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (isAllSelected) {
+              selectNone();
+            } else {
+              selectAll();
+            }
+          }}
+          className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
+        >
+          {isAllSelected ? (
+            <CheckSquare className="h-4 w-4 text-primary-600" />
+          ) : isSomeSelected ? (
+            <MinusSquare className="h-4 w-4 text-primary-600" />
+          ) : (
+            <Square className="h-4 w-4 text-gray-400" />
+          )}
+        </button>
+      ),
+      width: "40px",
+      render: (_: any, row: DockerImage) => (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleSelection(row.id);
+          }}
+          className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
+        >
+          {selectedIds.has(row.id) ? (
+            <CheckSquare className="h-4 w-4 text-primary-600" />
+          ) : (
+            <Square className="h-4 w-4 text-gray-400" />
+          )}
+        </button>
+      ),
+    },
     {
       key: "name",
       header: "Image Name",
@@ -304,6 +434,61 @@ export default function ImagesPage() {
             />
           </MetricsGrid>
 
+          {/* Selection Action Bar */}
+          {images && images.length > 0 && (
+            <div className="mb-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-500 dark:text-gray-400">
+                  Quick select:
+                </span>
+                <button
+                  onClick={selectAll}
+                  className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                >
+                  All ({images.length})
+                </button>
+                <button
+                  onClick={selectUnused}
+                  disabled={unusedCount === 0}
+                  className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Unused ({unusedCount})
+                </button>
+                <button
+                  onClick={selectDangling}
+                  disabled={danglingCount === 0}
+                  className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Dangling ({danglingCount})
+                </button>
+                {selectedIds.size > 0 && (
+                  <button
+                    onClick={selectNone}
+                    className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+
+              {selectedIds.size > 0 && (
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-gray-700 dark:text-gray-300">
+                    <strong>{selectedIds.size}</strong> selected ({formatSize(selectedSize)})
+                  </span>
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={() => setShowBulkDeleteModal(true)}
+                  >
+                    <Trash2 className="h-4 w-4 mr-1" />
+                    Delete Selected
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Table */}
           {images && images.length > 0 ? (
             <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
@@ -314,9 +499,10 @@ export default function ImagesPage() {
                 onRowClick={(row) => setSelectedImage(row)}
                 hoverable
                 rowClassName={(row) =>
-                  selectedImage?.id === row.id
-                    ? "bg-primary-50 dark:bg-primary-900/20"
-                    : ""
+                  cn(
+                    selectedImage?.id === row.id && "bg-primary-50 dark:bg-primary-900/20",
+                    selectedIds.has(row.id) && "bg-blue-50 dark:bg-blue-900/10"
+                  )
                 }
               />
             </div>
@@ -599,6 +785,131 @@ export default function ImagesPage() {
                 {deleteMutation.isPending ? "Deleting..." : "Delete Image"}
               </Button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Delete Modal */}
+      {showBulkDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => !bulkDeleteProgress && setShowBulkDeleteModal(false)} />
+          <div className="relative bg-white dark:bg-gray-900 rounded-lg shadow-xl max-w-lg w-full mx-4 p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-full">
+                <Trash2 className="h-5 w-5 text-red-600 dark:text-red-400" />
+              </div>
+              <h3 className="text-lg font-semibold">Delete {selectedIds.size} Images</h3>
+            </div>
+
+            {!bulkDeleteProgress ? (
+              <>
+                <p className="text-gray-600 dark:text-gray-400 mb-4">
+                  Are you sure you want to delete <strong>{selectedIds.size}</strong> selected images?
+                  This will free up <strong>{formatSize(selectedSize)}</strong> of disk space.
+                </p>
+
+                {/* List selected images */}
+                <div className="max-h-48 overflow-y-auto mb-4 space-y-1">
+                  {selectedImages.map((img) => (
+                    <div
+                      key={img.id}
+                      className={cn(
+                        "flex items-center justify-between p-2 rounded text-sm",
+                        img.used_by.length > 0 ? "bg-yellow-50 dark:bg-yellow-900/20" : "bg-gray-50 dark:bg-gray-800"
+                      )}
+                    >
+                      <span className="font-mono truncate">
+                        {img.tags[0] || img.id.slice(0, 12)}
+                      </span>
+                      <span className="text-gray-500 text-xs">
+                        {formatSize(img.size)}
+                        {img.used_by.length > 0 && (
+                          <span className="ml-2 text-yellow-600 dark:text-yellow-400">
+                            (in use)
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+
+                {selectedImages.some((img) => img.used_by.length > 0) && (
+                  <div className="mb-4">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={forceDelete}
+                        onChange={(e) => setForceDelete(e.target.checked)}
+                        className="rounded border-gray-300"
+                      />
+                      <span className="text-sm text-yellow-600 dark:text-yellow-400">
+                        Force delete images in use ({selectedImages.filter((img) => img.used_by.length > 0).length} images)
+                      </span>
+                    </label>
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-3">
+                  <Button variant="secondary" onClick={() => { setShowBulkDeleteModal(false); setForceDelete(false); }}>
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="danger"
+                    onClick={handleBulkDelete}
+                    disabled={selectedImages.some((img) => img.used_by.length > 0) && !forceDelete}
+                  >
+                    Delete {selectedIds.size} Images
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                {/* Progress indicator */}
+                <div className="space-y-4">
+                  <div>
+                    <div className="flex justify-between text-sm mb-1">
+                      <span>Deleting images...</span>
+                      <span>{bulkDeleteProgress.completed} / {bulkDeleteProgress.total}</span>
+                    </div>
+                    <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                      <div
+                        className="bg-red-600 h-2 rounded-full transition-all duration-300"
+                        style={{ width: `${(bulkDeleteProgress.completed / bulkDeleteProgress.total) * 100}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {bulkDeleteProgress.failed.length > 0 && (
+                    <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                      <p className="text-sm font-medium text-red-600 dark:text-red-400 mb-2">
+                        Failed to delete {bulkDeleteProgress.failed.length} images:
+                      </p>
+                      <ul className="text-xs text-red-600 dark:text-red-400 space-y-1">
+                        {bulkDeleteProgress.failed.map((name, idx) => (
+                          <li key={idx}>• {name}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {bulkDeleteProgress.completed === bulkDeleteProgress.total && (
+                    <div className="flex justify-end">
+                      <Button
+                        variant="secondary"
+                        onClick={() => {
+                          setShowBulkDeleteModal(false);
+                          setSelectedIds(new Set());
+                          setBulkDeleteProgress(null);
+                          setForceDelete(false);
+                        }}
+                      >
+                        {bulkDeleteProgress.failed.length > 0 ? "Close" : "Done"}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
