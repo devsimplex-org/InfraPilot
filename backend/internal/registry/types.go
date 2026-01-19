@@ -13,6 +13,9 @@ type Provider string
 const (
 	ProviderGHCR      Provider = "ghcr"
 	ProviderDockerHub Provider = "dockerhub"
+	ProviderECR       Provider = "ecr" // AWS Elastic Container Registry
+	ProviderGCR       Provider = "gcr" // Google Container Registry / Artifact Registry
+	ProviderACR       Provider = "acr" // Azure Container Registry
 )
 
 // AuthType represents the authentication method
@@ -58,6 +61,22 @@ type Credentials struct {
 	// For username/password auth (Docker Hub)
 	Username string `json:"username,omitempty"`
 	Password string `json:"password,omitempty"`
+
+	// AWS ECR credentials
+	AWSAccessKeyID     string `json:"aws_access_key_id,omitempty"`
+	AWSSecretAccessKey string `json:"aws_secret_access_key,omitempty"`
+	AWSRegion          string `json:"aws_region,omitempty"`
+	AWSAccountID       string `json:"aws_account_id,omitempty"`
+
+	// GCP GCR/Artifact Registry credentials
+	GCPServiceAccountJSON string `json:"gcp_service_account_json,omitempty"`
+	GCPProjectID          string `json:"gcp_project_id,omitempty"`
+
+	// Azure ACR credentials
+	AzureTenantID     string `json:"azure_tenant_id,omitempty"`
+	AzureClientID     string `json:"azure_client_id,omitempty"`
+	AzureClientSecret string `json:"azure_client_secret,omitempty"`
+	AzureRegistryName string `json:"azure_registry_name,omitempty"`
 }
 
 // Repository represents a container repository
@@ -112,7 +131,7 @@ type Client interface {
 // CreateRegistryRequest represents a request to create a registry
 type CreateRegistryRequest struct {
 	Name      string   `json:"name" binding:"required,min=1,max=100"`
-	Provider  Provider `json:"provider" binding:"required,oneof=ghcr dockerhub"`
+	Provider  Provider `json:"provider" binding:"required,oneof=ghcr dockerhub ecr gcr acr"`
 	Namespace *string  `json:"namespace,omitempty"`
 
 	// Token-based auth (GHCR)
@@ -121,6 +140,22 @@ type CreateRegistryRequest struct {
 	// Username/password auth (Docker Hub)
 	Username *string `json:"username,omitempty"`
 	Password *string `json:"password,omitempty"`
+
+	// AWS ECR credentials
+	AWSAccessKeyID     *string `json:"aws_access_key_id,omitempty"`
+	AWSSecretAccessKey *string `json:"aws_secret_access_key,omitempty"`
+	AWSRegion          *string `json:"aws_region,omitempty"`
+	AWSAccountID       *string `json:"aws_account_id,omitempty"`
+
+	// GCP GCR/Artifact Registry credentials
+	GCPServiceAccountJSON *string `json:"gcp_service_account_json,omitempty"`
+	GCPProjectID          *string `json:"gcp_project_id,omitempty"`
+
+	// Azure ACR credentials
+	AzureTenantID     *string `json:"azure_tenant_id,omitempty"`
+	AzureClientID     *string `json:"azure_client_id,omitempty"`
+	AzureClientSecret *string `json:"azure_client_secret,omitempty"`
+	AzureRegistryName *string `json:"azure_registry_name,omitempty"`
 }
 
 // UpdateRegistryRequest represents a request to update a registry

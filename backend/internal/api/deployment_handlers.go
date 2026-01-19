@@ -506,8 +506,103 @@ func (h *Handler) runDeploymentPipeline(ctx context.Context, orgID, deploymentID
 		}
 	}
 
-	// TODO: In Phase 4, actually deploy the container
-	// For now, deployment stops at 'deploying' status
+	// Phase 4: Deploy container to agent
+	if policyDecision != "deny" {
+		// Get the agent ID for this deployment
+		var agentID uuid.UUID
+		err = h.db.QueryRow(ctx, `SELECT agent_id FROM deployments WHERE id = $1`, deploymentID).Scan(&agentID)
+		if err != nil {
+			logger.Error("Failed to get agent ID for deployment", zap.Error(err))
+			h.updateDeploymentStatus(ctx, deploymentID.String(), "failed", "Failed to get agent ID")
+			return
+		}
+
+		containerResult, err := h.deployContainerToAgent(ctx, deploymentID, agentID, imageRef, deployment.ServiceName, deployment.Environment)
+		if err != nil {
+			h.updateDeploymentStatus(ctx, deploymentID.String(), "failed",
+				fmt.Sprintf("Container deployment failed: %v", err))
+			return
+		}
+
+		// Update deployment with container info
+		_, err = h.db.Exec(ctx, `
+			UPDATE deployments
+			SET status = 'running',
+			    container_id = $1,
+			    container_name = $2,
+			    deployed_at = NOW(),
+			    status_message = 'Container running successfully'
+			WHERE id = $3`,
+			containerResult.ContainerID,
+			containerResult.Name,
+			deploymentID,
+		)
+		if err != nil {
+			logger.Error("Failed to update deployment with container info", zap.Error(err))
+		}
+
+		logger.Info("Container deployed successfully",
+			zap.String("container_id", containerResult.ContainerID),
+			zap.String("container_name", containerResult.Name),
+		)
+	} else {
+		h.updateDeploymentStatus(ctx, deploymentID.String(), "failed",
+			fmt.Sprintf("Blocked by policy: %s", policyReason))
+	}
+}
+
+// deployContainerToAgent sends a command to the agent to run a container
+func (h *Handler) deployContainerToAgent(ctx context.Context, deploymentID, agentID uuid.UUID, imageRef, serviceName, environment string) (*agentgrpc.ContainerRunResult, error) {
+	// Generate container name
+	containerName := fmt.Sprintf("%s-%s-%s", serviceName, environment, deploymentID.String()[:8])
+
+	// Build the run command options
+	options := map[string]interface{}{
+		"image_ref":      imageRef,
+		"name":           containerName,
+		"restart_policy": "unless-stopped",
+		"labels": map[string]interface{}{
+			"infrapilot.deployment_id": deploymentID.String(),
+			"infrapilot.service":       serviceName,
+			"infrapilot.environment":   environment,
+		},
+	}
+
+	optionsJSON, err := json.Marshal(options)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal options: %w", err)
+	}
+
+	// Create the command
+	cmd := &agentgrpc.BackendMessage{
+		RequestId: uuid.New().String(),
+		Type:      "docker",
+		Command:   json.RawMessage(fmt.Sprintf(`{"action":"run_container","options":%s}`, optionsJSON)),
+	}
+
+	// Send command to agent
+	resp, err := agentgrpc.SendCommand(agentID.String(), cmd, 120*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send command to agent: %w", err)
+	}
+
+	// Parse response
+	result, err := resp.GetCommandResult()
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if !result.Success {
+		return nil, fmt.Errorf("agent returned error: %s", result.Message)
+	}
+
+	// Parse container result
+	var containerResult agentgrpc.ContainerRunResult
+	if err := json.Unmarshal(result.Data, &containerResult); err != nil {
+		return nil, fmt.Errorf("failed to parse container result: %w", err)
+	}
+
+	return &containerResult, nil
 }
 
 // ==================== Rollback Deployment ====================
