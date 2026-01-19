@@ -1,0 +1,291 @@
+// Example Go WebSocket handler for /api/v1/scans/ws
+// Add this to your backend router
+
+package handlers
+
+import (
+	"context"
+	"encoding/json"
+	"log"
+	"net/http"
+	"sync"
+	"time"
+
+	"github.com/gorilla/websocket"
+)
+
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true // Configure for production
+	},
+}
+
+// Message types sent to frontend
+type ProgressMessage struct {
+	Type     string `json:"type"`     // "progress"
+	Image    string `json:"image"`
+	Stage    string `json:"stage"`    // "queued", "pulling", "scanning", "analyzing", "complete", "error"
+	Progress int    `json:"progress,omitempty"` // 0-100
+	Message  string `json:"message,omitempty"`
+}
+
+type ScanResultMessage struct {
+	Type           string `json:"type"` // "scan_result"
+	Image          string `json:"image"`
+	ScanID         string `json:"scan_id"`
+	CriticalCount  int    `json:"critical_count"`
+	HighCount      int    `json:"high_count"`
+	MediumCount    int    `json:"medium_count"`
+	LowCount       int    `json:"low_count"`
+	TotalCount     int    `json:"total_count"`
+	FixableCount   int    `json:"fixable_count"`
+	ScanDurationMs int64  `json:"scan_duration_ms,omitempty"`
+}
+
+type SBOMResultMessage struct {
+	Type            string `json:"type"` // "sbom_result"
+	Image           string `json:"image"`
+	SBOMID          string `json:"sbom_id"`
+	TotalPackages   int    `json:"total_packages"`
+	OSPackages      int    `json:"os_packages"`
+	LibraryPackages int    `json:"library_packages"`
+}
+
+type ErrorMessage struct {
+	Type  string `json:"type"` // "error"
+	Image string `json:"image,omitempty"`
+	Error string `json:"error"`
+	Code  string `json:"code,omitempty"`
+}
+
+type CompleteMessage struct {
+	Type        string `json:"type"` // "complete"
+	TotalImages int    `json:"total_images"`
+	Successful  int    `json:"successful"`
+	Failed      int    `json:"failed"`
+}
+
+// Request from frontend
+type ScanRequest struct {
+	Action string `json:"action"` // "scan", "sbom", "both"
+	Images []struct {
+		Image       string `json:"image"`
+		ImageDigest string `json:"image_digest,omitempty"`
+		ImageTag    string `json:"image_tag,omitempty"`
+	} `json:"images"`
+}
+
+// HandleScanWebSocket handles WebSocket connections for scan operations
+func HandleScanWebSocket(w http.ResponseWriter, r *http.Request) {
+	// Authenticate from query param or header
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		token = r.Header.Get("Authorization")
+	}
+
+	// TODO: Validate token and get user/org context
+	// userID, orgID, err := validateToken(token)
+	// if err != nil {
+	// 	http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	// 	return
+	// }
+
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("WebSocket upgrade failed: %v", err)
+		return
+	}
+	defer conn.Close()
+
+	// Send/receive mutex for thread safety
+	var sendMu sync.Mutex
+
+	sendJSON := func(v interface{}) error {
+		sendMu.Lock()
+		defer sendMu.Unlock()
+		return conn.WriteJSON(v)
+	}
+
+	// Read messages from client
+	for {
+		_, message, err := conn.ReadMessage()
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				log.Printf("WebSocket error: %v", err)
+			}
+			break
+		}
+
+		var req ScanRequest
+		if err := json.Unmarshal(message, &req); err != nil {
+			sendJSON(ErrorMessage{
+				Type:  "error",
+				Error: "Invalid request format",
+			})
+			continue
+		}
+
+		// Process scan request in goroutine
+		go processScanRequest(r.Context(), req, sendJSON)
+	}
+}
+
+func processScanRequest(ctx context.Context, req ScanRequest, send func(interface{}) error) {
+	successful := 0
+	failed := 0
+
+	for _, img := range req.Images {
+		// Send queued status
+		send(ProgressMessage{
+			Type:    "progress",
+			Image:   img.Image,
+			Stage:   "queued",
+			Message: "Scan queued",
+		})
+
+		// Run vulnerability scan
+		if req.Action == "scan" || req.Action == "both" {
+			result, err := runVulnerabilityScan(ctx, img.Image, send)
+			if err != nil {
+				send(ErrorMessage{
+					Type:  "error",
+					Image: img.Image,
+					Error: err.Error(),
+				})
+				failed++
+				continue
+			}
+
+			send(result)
+		}
+
+		// Generate SBOM
+		if req.Action == "sbom" || req.Action == "both" {
+			result, err := generateSBOM(ctx, img.Image, send)
+			if err != nil {
+				send(ErrorMessage{
+					Type:  "error",
+					Image: img.Image,
+					Error: err.Error(),
+				})
+				if req.Action == "sbom" {
+					failed++
+					continue
+				}
+			} else {
+				send(result)
+			}
+		}
+
+		successful++
+	}
+
+	// Send completion message
+	send(CompleteMessage{
+		Type:        "complete",
+		TotalImages: len(req.Images),
+		Successful:  successful,
+		Failed:      failed,
+	})
+}
+
+func runVulnerabilityScan(ctx context.Context, image string, send func(interface{}) error) (*ScanResultMessage, error) {
+	startTime := time.Now()
+
+	// Send progress: pulling
+	send(ProgressMessage{
+		Type:     "progress",
+		Image:    image,
+		Stage:    "pulling",
+		Progress: 10,
+		Message:  "Pulling image...",
+	})
+
+	// TODO: Actually pull image if needed
+	// docker pull or use local cache
+
+	// Send progress: scanning
+	send(ProgressMessage{
+		Type:     "progress",
+		Image:    image,
+		Stage:    "scanning",
+		Progress: 30,
+		Message:  "Running Trivy scan...",
+	})
+
+	// TODO: Run actual Trivy scan
+	// cmd := exec.CommandContext(ctx, "trivy", "image", "--format", "json", image)
+	// output, err := cmd.Output()
+	// Parse trivy JSON output...
+
+	// Simulated scan result - replace with actual implementation
+	time.Sleep(2 * time.Second) // Simulate scan time
+
+	// Send progress: analyzing
+	send(ProgressMessage{
+		Type:     "progress",
+		Image:    image,
+		Stage:    "analyzing",
+		Progress: 80,
+		Message:  "Analyzing results...",
+	})
+
+	// TODO: Save scan results to database
+	// scanID, err := saveScanResult(orgID, image, trivyResult)
+
+	duration := time.Since(startTime)
+
+	// Send progress: complete
+	send(ProgressMessage{
+		Type:     "progress",
+		Image:    image,
+		Stage:    "complete",
+		Progress: 100,
+		Message:  "Scan complete",
+	})
+
+	return &ScanResultMessage{
+		Type:           "scan_result",
+		Image:          image,
+		ScanID:         "scan-uuid-here", // Replace with actual scan ID
+		CriticalCount:  0,                 // Replace with actual counts
+		HighCount:      2,
+		MediumCount:    5,
+		LowCount:       10,
+		TotalCount:     17,
+		FixableCount:   12,
+		ScanDurationMs: duration.Milliseconds(),
+	}, nil
+}
+
+func generateSBOM(ctx context.Context, image string, send func(interface{}) error) (*SBOMResultMessage, error) {
+	// Send progress
+	send(ProgressMessage{
+		Type:     "progress",
+		Image:    image,
+		Stage:    "analyzing",
+		Progress: 50,
+		Message:  "Generating SBOM with Syft...",
+	})
+
+	// TODO: Run actual Syft
+	// cmd := exec.CommandContext(ctx, "syft", image, "-o", "cyclonedx-json")
+	// output, err := cmd.Output()
+
+	time.Sleep(1 * time.Second) // Simulate SBOM generation
+
+	// TODO: Save SBOM to database
+	// sbomID, err := saveSBOM(orgID, image, syftResult)
+
+	return &SBOMResultMessage{
+		Type:            "sbom_result",
+		Image:           image,
+		SBOMID:          "sbom-uuid-here", // Replace with actual SBOM ID
+		TotalPackages:   150,               // Replace with actual counts
+		OSPackages:      45,
+		LibraryPackages: 105,
+	}, nil
+}
+
+// Register the handler in your router:
+// router.HandleFunc("/api/v1/scans/ws", HandleScanWebSocket)

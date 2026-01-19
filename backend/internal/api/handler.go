@@ -205,6 +205,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 			// Security Scanning (Epic 1: Supply Chain Security)
 			protected.POST("/scans", h.RequireModifyContainers(), h.triggerImageScan)
 			protected.GET("/scans", h.listScans)
+			protected.GET("/scans/ws", h.scanWebSocket) // WebSocket for real-time scans (must be before :sid)
 			protected.GET("/scans/:sid", h.getScanDetails)
 			protected.GET("/scans/:sid/vulnerabilities", h.getScanVulnerabilities)
 
