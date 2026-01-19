@@ -20,6 +20,8 @@ import {
   Search,
   Play,
   Container as ContainerIcon,
+  HardDrive,
+  Download,
 } from "lucide-react";
 import {
   api,
@@ -28,6 +30,7 @@ import {
   RegistryTag,
   CreateRegistryRequest,
   Container,
+  DockerImage,
 } from "@/lib/api";
 import { formatRelativeTime, cn } from "@/lib/utils";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -117,6 +120,13 @@ export default function RegistriesPage() {
     enabled: !!defaultAgent?.id,
   });
 
+  // Fetch local Docker images
+  const { data: localImages } = useQuery({
+    queryKey: ["docker-images", defaultAgent?.id],
+    queryFn: () => api.getDockerImages(defaultAgent!.id),
+    enabled: !!defaultAgent?.id,
+  });
+
   // Build a set of running image references for quick lookup
   const runningImages = new Set<string>();
   containers?.forEach((container) => {
@@ -160,6 +170,62 @@ export default function RegistriesPage() {
       imageRef = `${registry.namespace || ""}/${repoName}:${tagName}`.toLowerCase();
     }
     return containers?.find((c) => c.state === "running" && c.image?.toLowerCase() === imageRef);
+  };
+
+  // Build a map of local images for quick lookup
+  const localImageMap = new Map<string, DockerImage>();
+  localImages?.forEach((image) => {
+    image.tags?.forEach((tag) => {
+      localImageMap.set(tag.toLowerCase(), image);
+    });
+    // Also map by digest
+    image.repo_digests?.forEach((digest) => {
+      const digestRef = digest.split("@")[0]?.toLowerCase();
+      if (digestRef) {
+        localImageMap.set(digestRef, image);
+      }
+    });
+  });
+
+  // Get local image info for a registry image
+  const getLocalImageInfo = (registry: ContainerRegistry, repoName: string, tagName: string): DockerImage | undefined => {
+    let imageRef = "";
+    if (registry.provider === "ghcr") {
+      imageRef = `ghcr.io/${registry.namespace || ""}/${repoName}:${tagName}`.toLowerCase();
+    } else {
+      // Docker Hub images can be referenced multiple ways
+      const namespace = registry.namespace || "";
+      imageRef = namespace ? `${namespace}/${repoName}:${tagName}`.toLowerCase() : `${repoName}:${tagName}`.toLowerCase();
+    }
+
+    // Try exact match first
+    let localImage = localImageMap.get(imageRef);
+
+    // Also try with docker.io prefix for Docker Hub images
+    if (!localImage && registry.provider === "dockerhub") {
+      const namespace = registry.namespace || "library";
+      localImage = localImageMap.get(`docker.io/${namespace}/${repoName}:${tagName}`.toLowerCase());
+    }
+
+    return localImage;
+  };
+
+  // Check if repo has any local images
+  const hasLocalImages = (registry: ContainerRegistry, repoName: string): boolean => {
+    let repoPrefix = "";
+    if (registry.provider === "ghcr") {
+      repoPrefix = `ghcr.io/${registry.namespace || ""}/${repoName}:`.toLowerCase();
+    } else {
+      const namespace = registry.namespace || "";
+      repoPrefix = namespace ? `${namespace}/${repoName}:`.toLowerCase() : `${repoName}:`.toLowerCase();
+    }
+
+    for (const key of localImageMap.keys()) {
+      if (key.startsWith(repoPrefix)) {
+        return true;
+      }
+    }
+    return false;
   };
 
   // Mutations
@@ -500,6 +566,11 @@ export default function RegistriesPage() {
                             <Play className="h-2.5 w-2.5 fill-current" />
                           </span>
                         )}
+                        {selectedRegistry && hasLocalImages(selectedRegistry, repo.name) && (
+                          <span className="flex items-center gap-1 px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 text-xs rounded-full">
+                            <HardDrive className="h-2.5 w-2.5" />
+                          </span>
+                        )}
                         {repo.is_private && (
                           <Lock className="h-3 w-3 text-gray-400" />
                         )}
@@ -545,6 +616,10 @@ export default function RegistriesPage() {
                       ? getRunningContainerInfo(selectedRegistry, selectedRepo, tag.name)
                       : undefined;
                     const isRunning = !!runningContainer;
+                    const localImage = selectedRegistry && selectedRepo
+                      ? getLocalImageInfo(selectedRegistry, selectedRepo, tag.name)
+                      : undefined;
+                    const isLocal = !!localImage;
 
                     return (
                       <div
@@ -553,13 +628,19 @@ export default function RegistriesPage() {
                           "p-3 rounded-lg flex items-center justify-between group",
                           isRunning
                             ? "bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800"
+                            : isLocal
+                            ? "bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800/50"
                             : "bg-gray-50 dark:bg-gray-800"
                         )}
                       >
                         <div className="flex items-center gap-3">
-                          <Tag className={cn("h-4 w-4", isRunning ? "text-green-600 dark:text-green-400" : "text-gray-400")} />
+                          <Tag className={cn(
+                            "h-4 w-4",
+                            isRunning ? "text-green-600 dark:text-green-400" :
+                            isLocal ? "text-blue-600 dark:text-blue-400" : "text-gray-400"
+                          )} />
                           <div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <span className="font-mono text-sm text-gray-900 dark:text-white">
                                 {tag.name}
                               </span>
@@ -569,24 +650,53 @@ export default function RegistriesPage() {
                                   Running
                                 </span>
                               )}
+                              {isLocal && !isRunning && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-400 text-xs font-medium rounded-full">
+                                  <HardDrive className="h-2.5 w-2.5" />
+                                  Local
+                                </span>
+                              )}
                             </div>
-                            <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                            <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400 mt-0.5 flex-wrap">
                               {isRunning && runningContainer && (
                                 <span className="flex items-center gap-1 text-green-600 dark:text-green-400">
                                   <ContainerIcon className="h-3 w-3" />
                                   {runningContainer.name?.replace(/^\//, "") || runningContainer.id?.substring(0, 12)}
                                 </span>
                               )}
-                              {tag.digest && (
-                                <span className="font-mono truncate max-w-[200px]">
-                                  {tag.digest.substring(0, 20)}...
-                                </span>
+                              {isLocal && localImage && (
+                                <>
+                                  <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400">
+                                    <HardDrive className="h-3 w-3" />
+                                    {localImage.size_mb?.toFixed(1) || (localImage.size / 1024 / 1024).toFixed(1)} MB local
+                                  </span>
+                                  {localImage.created && (
+                                    <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400">
+                                      <Download className="h-3 w-3" />
+                                      Pulled {formatRelativeTime(localImage.created)}
+                                    </span>
+                                  )}
+                                  {localImage.used_by && localImage.used_by.length > 0 && (
+                                    <span className="text-blue-600 dark:text-blue-400">
+                                      Used by {localImage.used_by.length} container{localImage.used_by.length > 1 ? 's' : ''}
+                                    </span>
+                                  )}
+                                </>
                               )}
-                              {tag.size_bytes > 0 && (
-                                <span>{(tag.size_bytes / 1024 / 1024).toFixed(1)} MB</span>
-                              )}
-                              {tag.pushed_at && (
-                                <span>{formatRelativeTime(tag.pushed_at)}</span>
+                              {!isLocal && (
+                                <>
+                                  {tag.digest && (
+                                    <span className="font-mono truncate max-w-[200px]">
+                                      {tag.digest.substring(0, 20)}...
+                                    </span>
+                                  )}
+                                  {tag.size_bytes > 0 && (
+                                    <span>{(tag.size_bytes / 1024 / 1024).toFixed(1)} MB</span>
+                                  )}
+                                  {tag.pushed_at && (
+                                    <span>{formatRelativeTime(tag.pushed_at)}</span>
+                                  )}
+                                </>
                               )}
                             </div>
                           </div>
