@@ -2608,6 +2608,61 @@ export const api = {
       body: JSON.stringify(request),
     }),
 
+  // Batch scan multiple images - scans sequentially and returns all results
+  triggerBatchScan: async (
+    images: Array<{ image: string; image_digest?: string; image_tag?: string }>,
+    onProgress?: (completed: number, total: number, current: string) => void
+  ): Promise<Array<{ id: string; image: string; status: string; error?: string }>> => {
+    const results: Array<{ id: string; image: string; status: string; error?: string }> = [];
+    for (let i = 0; i < images.length; i++) {
+      const img = images[i];
+      onProgress?.(i, images.length, img.image);
+      try {
+        const result = await fetchAPI<{ id: string; image: string; status: string }>("/scans", {
+          method: "POST",
+          body: JSON.stringify(img),
+        });
+        results.push(result);
+      } catch (error) {
+        results.push({
+          id: "",
+          image: img.image,
+          status: "failed",
+          error: error instanceof Error ? error.message : "Scan failed",
+        });
+      }
+    }
+    onProgress?.(images.length, images.length, "");
+    return results;
+  },
+
+  // Batch generate SBOMs - generates sequentially and returns all results
+  generateBatchSBOM: async (
+    images: Array<{ image: string }>,
+    onProgress?: (completed: number, total: number, current: string) => void
+  ): Promise<Array<{ id: string; image: string; format?: string; total_packages?: number; error?: string }>> => {
+    const results: Array<{ id: string; image: string; format?: string; total_packages?: number; error?: string }> = [];
+    for (let i = 0; i < images.length; i++) {
+      const img = images[i];
+      onProgress?.(i, images.length, img.image);
+      try {
+        const result = await fetchAPI<{ id: string; image: string; format: string; total_packages: number }>("/sboms", {
+          method: "POST",
+          body: JSON.stringify(img),
+        });
+        results.push(result);
+      } catch (error) {
+        results.push({
+          id: "",
+          image: img.image,
+          error: error instanceof Error ? error.message : "SBOM generation failed",
+        });
+      }
+    }
+    onProgress?.(images.length, images.length, "");
+    return results;
+  },
+
   // SBOMs
   listSBOMs: (params?: { org_id?: string }) => {
     const searchParams = new URLSearchParams();

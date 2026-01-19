@@ -22,6 +22,10 @@ import {
   Container as ContainerIcon,
   HardDrive,
   Download,
+  Shield,
+  CheckSquare,
+  Square,
+  X,
 } from "lucide-react";
 import {
   api,
@@ -47,6 +51,7 @@ import {
   Tabs,
   Input,
 } from "@/components/ui/page-layout";
+import { ScanModal, ScanImage } from "@/components/ui/ScanModal";
 
 type Tab = "registries" | "browse";
 type RegistryProvider = "ghcr" | "dockerhub";
@@ -68,6 +73,11 @@ export default function RegistriesPage() {
   const [selectedRegistry, setSelectedRegistry] = useState<ContainerRegistry | null>(null);
   const [selectedRepo, setSelectedRepo] = useState<string | null>(null);
   const [copiedImage, setCopiedImage] = useState<string | null>(null);
+
+  // Tag selection state for scanning
+  const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
+  const [showScanModal, setShowScanModal] = useState(false);
+  const [scanImages, setScanImages] = useState<ScanImage[]>([]);
 
   // Form state for adding registry
   const [formData, setFormData] = useState<{
@@ -227,6 +237,60 @@ export default function RegistriesPage() {
     }
     return false;
   };
+
+  // Get full image reference for a tag
+  const getTagImageRef = (registry: ContainerRegistry, repoName: string, tagName: string): string => {
+    if (registry.provider === "ghcr") {
+      return `ghcr.io/${registry.namespace || ""}/${repoName}:${tagName}`;
+    }
+    const namespace = registry.namespace || "";
+    return namespace ? `${namespace}/${repoName}:${tagName}` : `${repoName}:${tagName}`;
+  };
+
+  // Tag selection helpers
+  const toggleTagSelection = (imageRef: string) => {
+    setSelectedTags((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(imageRef)) {
+        newSet.delete(imageRef);
+      } else {
+        newSet.add(imageRef);
+      }
+      return newSet;
+    });
+  };
+
+  const selectAllTagsInRepo = () => {
+    if (!selectedRegistry || !selectedRepo || !tagsData?.tags) return;
+    const refs = tagsData.tags.map((tag) =>
+      getTagImageRef(selectedRegistry, selectedRepo, tag.name)
+    );
+    setSelectedTags(new Set(refs));
+  };
+
+  const clearTagSelection = () => {
+    setSelectedTags(new Set());
+  };
+
+  const handleScanSelectedTags = () => {
+    const imagesToScan: ScanImage[] = Array.from(selectedTags).map((ref) => ({
+      reference: ref,
+      tag: ref.split(":").pop(),
+    }));
+    setScanImages(imagesToScan);
+    setShowScanModal(true);
+  };
+
+  const handleScanSingleTag = (registry: ContainerRegistry, repoName: string, tagName: string) => {
+    const ref = getTagImageRef(registry, repoName, tagName);
+    setScanImages([{ reference: ref, tag: tagName }]);
+    setShowScanModal(true);
+  };
+
+  // Clear tag selection when repo changes
+  useEffect(() => {
+    setSelectedTags(new Set());
+  }, [selectedRepo]);
 
   // Mutations
   const createRegistryMutation = useMutation({
@@ -595,13 +659,47 @@ export default function RegistriesPage() {
           <div className="lg:col-span-2">
             <Card className="p-4 h-full">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  {selectedRepo ? `Tags for ${selectedRepo}` : "Image Tags"}
-                </h3>
-                {selectedRepo && (
-                  <Badge variant="outline" size="sm">
-                    {tagsData?.total_count || 0} tags
-                  </Badge>
+                <div className="flex items-center gap-3">
+                  <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {selectedRepo ? `Tags for ${selectedRepo}` : "Image Tags"}
+                  </h3>
+                  {selectedRepo && tagsData?.tags && tagsData.tags.length > 0 && (
+                    <Badge size="sm">
+                      {tagsData?.total_count || 0} tags
+                    </Badge>
+                  )}
+                </div>
+                {selectedRepo && tagsData?.tags && tagsData.tags.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    {selectedTags.size > 0 ? (
+                      <>
+                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                          {selectedTags.size} selected
+                        </span>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={handleScanSelectedTags}
+                        >
+                          <Shield className="h-3.5 w-3.5 mr-1" />
+                          Scan
+                        </Button>
+                        <button
+                          onClick={clearTagSelection}
+                          className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        onClick={selectAllTagsInRepo}
+                        className="text-xs text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300"
+                      >
+                        Select All
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -620,13 +718,19 @@ export default function RegistriesPage() {
                       ? getLocalImageInfo(selectedRegistry, selectedRepo, tag.name)
                       : undefined;
                     const isLocal = !!localImage;
+                    const imageRef = selectedRegistry && selectedRepo
+                      ? getTagImageRef(selectedRegistry, selectedRepo, tag.name)
+                      : "";
+                    const isSelected = selectedTags.has(imageRef);
 
                     return (
                       <div
                         key={tag.name}
                         className={cn(
                           "p-3 rounded-lg flex items-center justify-between group",
-                          isRunning
+                          isSelected
+                            ? "bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800"
+                            : isRunning
                             ? "bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800"
                             : isLocal
                             ? "bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800/50"
@@ -634,6 +738,20 @@ export default function RegistriesPage() {
                         )}
                       >
                         <div className="flex items-center gap-3">
+                          {/* Checkbox */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleTagSelection(imageRef);
+                            }}
+                            className="p-0.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
+                          >
+                            {isSelected ? (
+                              <CheckSquare className="h-4 w-4 text-primary-600 dark:text-primary-400" />
+                            ) : (
+                              <Square className="h-4 w-4 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            )}
+                          </button>
                           <Tag className={cn(
                             "h-4 w-4",
                             isRunning ? "text-green-600 dark:text-green-400" :
@@ -701,26 +819,41 @@ export default function RegistriesPage() {
                             </div>
                           </div>
                         </div>
-                        <button
-                          onClick={() => {
-                            if (selectedRegistry && selectedRepo) {
-                              const repo = reposData?.repositories.find(
-                                (r) => r.name === selectedRepo
-                              );
-                              if (repo) {
-                                copyImageReference(selectedRegistry, repo, tag);
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (selectedRegistry && selectedRepo) {
+                                handleScanSingleTag(selectedRegistry, selectedRepo, tag.name);
                               }
-                            }
-                          }}
-                          className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 opacity-0 group-hover:opacity-100 transition-opacity"
-                          title="Copy image reference"
-                        >
-                          {copiedImage ? (
-                            <CheckCircle className="h-4 w-4 text-green-500" />
-                          ) : (
-                            <Copy className="h-4 w-4" />
-                          )}
-                        </button>
+                            }}
+                            className="p-2 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400"
+                            title="Scan for vulnerabilities"
+                          >
+                            <Shield className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (selectedRegistry && selectedRepo) {
+                                const repo = reposData?.repositories.find(
+                                  (r) => r.name === selectedRepo
+                                );
+                                if (repo) {
+                                  copyImageReference(selectedRegistry, repo, tag);
+                                }
+                              }
+                            }}
+                            className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                            title="Copy image reference"
+                          >
+                            {copiedImage ? (
+                              <CheckCircle className="h-4 w-4 text-green-500" />
+                            ) : (
+                              <Copy className="h-4 w-4" />
+                            )}
+                          </button>
+                        </div>
                       </div>
                     );
                   })}
@@ -875,6 +1008,18 @@ export default function RegistriesPage() {
           </div>
         </div>
       )}
+
+      {/* Scan Modal */}
+      <ScanModal
+        isOpen={showScanModal}
+        onClose={() => {
+          setShowScanModal(false);
+          setScanImages([]);
+          setSelectedTags(new Set());
+        }}
+        images={scanImages}
+        mode="both"
+      />
     </div>
   );
 }

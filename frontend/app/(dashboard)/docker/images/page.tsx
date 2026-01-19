@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { api, DockerImage } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { ScanModal, ScanImage } from "@/components/ui/ScanModal";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
@@ -53,6 +54,10 @@ export default function ImagesPage() {
   // Pull form state
   const [pullImageRef, setPullImageRef] = useState("");
   const [pullError, setPullError] = useState<string | null>(null);
+
+  // Scan modal state
+  const [showScanModal, setShowScanModal] = useState(false);
+  const [scanImages, setScanImages] = useState<ScanImage[]>([]);
 
   // Fetch agents
   const { data: agents } = useQuery({
@@ -153,6 +158,37 @@ export default function ImagesPage() {
   const selectedSize = selectedImages.reduce((sum, img) => sum + img.size, 0);
   const unusedCount = images?.filter((img) => img.used_by.length === 0).length || 0;
   const danglingCount = images?.filter((img) => img.tags.length === 0).length || 0;
+
+  // Scan helpers
+  const getImageReference = (image: DockerImage): string => {
+    if (image.tags.length > 0) {
+      return image.tags[0];
+    }
+    // Use digest if no tags
+    if (image.repo_digests.length > 0) {
+      return image.repo_digests[0];
+    }
+    return image.id;
+  };
+
+  const handleScanSelected = () => {
+    const imagesToScan: ScanImage[] = selectedImages.map((img) => ({
+      reference: getImageReference(img),
+      digest: img.repo_digests[0]?.split("@")[1],
+      tag: img.tags[0]?.split(":")[1],
+    }));
+    setScanImages(imagesToScan);
+    setShowScanModal(true);
+  };
+
+  const handleScanSingle = (image: DockerImage) => {
+    setScanImages([{
+      reference: getImageReference(image),
+      digest: image.repo_digests[0]?.split("@")[1],
+      tag: image.tags[0]?.split(":")[1],
+    }]);
+    setShowScanModal(true);
+  };
 
   // Bulk delete function
   const handleBulkDelete = async () => {
@@ -477,6 +513,14 @@ export default function ImagesPage() {
                     <strong>{selectedIds.size}</strong> selected ({formatSize(selectedSize)})
                   </span>
                   <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={handleScanSelected}
+                  >
+                    <Shield className="h-4 w-4 mr-1" />
+                    Scan Selected
+                  </Button>
+                  <Button
                     variant="danger"
                     size="sm"
                     onClick={() => setShowBulkDeleteModal(true)}
@@ -635,16 +679,26 @@ export default function ImagesPage() {
                   </div>
                 </div>
 
-                {/* Vulnerabilities (Placeholder) */}
+                {/* Vulnerabilities */}
                 <div>
                   <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
-                    Vulnerabilities
+                    Security Scan
                   </h3>
-                  <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                    <div className="flex items-center gap-2 text-gray-500">
-                      <Shield className="h-4 w-4" />
-                      <span className="text-sm">Vulnerability scanning not configured</span>
+                  <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-gray-500">
+                        <Shield className="h-4 w-4" />
+                        <span className="text-sm">Scan for vulnerabilities</span>
+                      </div>
                     </div>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => handleScanSingle(selectedImage)}
+                    >
+                      <Shield className="h-4 w-4 mr-1" />
+                      Scan Image
+                    </Button>
                   </div>
                 </div>
 
@@ -913,6 +967,17 @@ export default function ImagesPage() {
           </div>
         </div>
       )}
+
+      {/* Scan Modal */}
+      <ScanModal
+        isOpen={showScanModal}
+        onClose={() => {
+          setShowScanModal(false);
+          setScanImages([]);
+        }}
+        images={scanImages}
+        mode="both"
+      />
     </div>
   );
 }
