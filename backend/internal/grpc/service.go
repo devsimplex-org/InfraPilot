@@ -502,23 +502,44 @@ const (
 	NetworkActionDetachNginxNetwork   = "detach_nginx"
 )
 
-// DockerResourceCommand actions for networks, volumes, images
+// DockerResourceCommand actions for networks, volumes, images, containers
 const (
 	// Network operations
 	DockerActionInspectNetwork = "inspect_network"
 	DockerActionCreateNetwork  = "create_network"
 	DockerActionDeleteNetwork  = "delete_network"
 	// Volume operations
-	DockerActionListVolumes    = "list_volumes"
-	DockerActionInspectVolume  = "inspect_volume"
-	DockerActionCreateVolume   = "create_volume"
-	DockerActionDeleteVolume   = "delete_volume"
+	DockerActionListVolumes   = "list_volumes"
+	DockerActionInspectVolume = "inspect_volume"
+	DockerActionCreateVolume  = "create_volume"
+	DockerActionDeleteVolume  = "delete_volume"
 	// Image operations
 	DockerActionListImages   = "list_images"
 	DockerActionInspectImage = "inspect_image"
 	DockerActionPullImage    = "pull_image"
 	DockerActionDeleteImage  = "delete_image"
+	// Container operations
+	DockerActionRunContainer = "run_container"
 )
+
+// ContainerRunCommand represents a command to run a new container
+type ContainerRunCommand struct {
+	Action        string            `json:"action"`
+	ImageRef      string            `json:"image_ref"`
+	Name          string            `json:"name"`
+	NetworkID     string            `json:"network_id,omitempty"`
+	Env           map[string]string `json:"env,omitempty"`
+	Ports         map[string]string `json:"ports,omitempty"` // container_port -> host_port
+	RestartPolicy string            `json:"restart_policy,omitempty"`
+	Labels        map[string]string `json:"labels,omitempty"`
+}
+
+// ContainerRunResult represents the result of running a container
+type ContainerRunResult struct {
+	ContainerID string `json:"container_id"`
+	Name        string `json:"name"`
+	Status      string `json:"status"`
+}
 
 // DockerResourceCommand represents a Docker resource command (networks, volumes, images)
 type DockerResourceCommand struct {

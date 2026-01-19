@@ -19,6 +19,7 @@ type Config struct {
 	JWTSecret      string
 	JWTExpiry      time.Duration
 	AllowedOrigins []string
+	EncryptionKey  string // 64-char hex string (32 bytes) for AES-256-GCM encryption
 }
 
 func Load() (*Config, error) {
@@ -34,6 +35,7 @@ func Load() (*Config, error) {
 		JWTSecret:      getEnv("JWT_SECRET", ""),
 		JWTExpiry:      getEnvDuration("JWT_EXPIRY", 24*time.Hour),
 		AllowedOrigins: getEnvSlice("ALLOWED_ORIGINS", []string{"http://localhost:3000"}),
+		EncryptionKey:  getEnv("ENCRYPTION_KEY", ""),
 	}
 
 	// Validate required fields

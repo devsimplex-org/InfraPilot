@@ -1204,6 +1204,80 @@ func (h *CommandHandler) handleDockerCommand(ctx context.Context, cmd *agentgrpc
 			Message: "image deleted",
 		}
 
+	// ============ Container Run Operation ============
+	case "run_container":
+		// Parse run container options from the Options map
+		imageRef := getStringOption(dockerCmd.Options, "image_ref")
+		name := getStringOption(dockerCmd.Options, "name")
+		networkID := getStringOption(dockerCmd.Options, "network_id")
+		restartPolicy := getStringOption(dockerCmd.Options, "restart_policy")
+
+		if imageRef == "" {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: "image_ref is required",
+			}
+		}
+		if name == "" {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: "container name is required",
+			}
+		}
+
+		// Parse environment variables
+		env := make(map[string]string)
+		if envMap, ok := dockerCmd.Options["env"].(map[string]interface{}); ok {
+			for k, v := range envMap {
+				if str, ok := v.(string); ok {
+					env[k] = str
+				}
+			}
+		}
+
+		// Parse port mappings
+		ports := make(map[string]string)
+		if portMap, ok := dockerCmd.Options["ports"].(map[string]interface{}); ok {
+			for k, v := range portMap {
+				if str, ok := v.(string); ok {
+					ports[k] = str
+				}
+			}
+		}
+
+		// Parse labels
+		labels := make(map[string]string)
+		if labelMap, ok := dockerCmd.Options["labels"].(map[string]interface{}); ok {
+			for k, v := range labelMap {
+				if str, ok := v.(string); ok {
+					labels[k] = str
+				}
+			}
+		}
+
+		result, err := h.docker.RunContainer(ctx, docker.ContainerRunConfig{
+			ImageRef:      imageRef,
+			Name:          name,
+			NetworkID:     networkID,
+			Env:           env,
+			Ports:         ports,
+			RestartPolicy: restartPolicy,
+			Labels:        labels,
+		})
+		if err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: err.Error(),
+			}
+		}
+
+		data, _ := json.Marshal(result)
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: "container started",
+			Data:    data,
+		}
+
 	default:
 		return &agentgrpc.CommandResult{
 			Success: false,

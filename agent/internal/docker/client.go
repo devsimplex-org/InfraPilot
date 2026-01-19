@@ -15,6 +15,7 @@ import (
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/volume"
 	"github.com/docker/docker/client"
+	"github.com/docker/go-connections/nat"
 )
 
 type Client struct {
@@ -913,4 +914,118 @@ func (c *Client) IsImageInUse(ctx context.Context, imageID string) (bool, []stri
 	}
 
 	return len(usedBy) > 0, usedBy, nil
+}
+
+// ============ Container Run Operations ============
+
+// ContainerRunConfig holds configuration for running a new container
+type ContainerRunConfig struct {
+	ImageRef      string
+	Name          string
+	NetworkID     string
+	Env           map[string]string
+	Ports         map[string]string // container_port -> host_port
+	RestartPolicy string
+	Labels        map[string]string
+}
+
+// ContainerRunResult represents the result of running a container
+type ContainerRunResult struct {
+	ContainerID string `json:"container_id"`
+	Name        string `json:"name"`
+	Status      string `json:"status"`
+}
+
+// RunContainer creates and starts a new container
+func (c *Client) RunContainer(ctx context.Context, cfg ContainerRunConfig) (*ContainerRunResult, error) {
+	// Step 1: Pull the image if it doesn't exist locally
+	_, _, err := c.cli.ImageInspectWithRaw(ctx, cfg.ImageRef)
+	if err != nil {
+		// Image doesn't exist, pull it
+		reader, err := c.cli.ImagePull(ctx, cfg.ImageRef, image.PullOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("failed to pull image %s: %w", cfg.ImageRef, err)
+		}
+		defer reader.Close()
+		// Consume the reader to complete the pull
+		io.Copy(io.Discard, reader)
+	}
+
+	// Step 2: Build container configuration
+	envList := make([]string, 0, len(cfg.Env))
+	for k, v := range cfg.Env {
+		envList = append(envList, fmt.Sprintf("%s=%s", k, v))
+	}
+
+	containerConfig := &container.Config{
+		Image:  cfg.ImageRef,
+		Env:    envList,
+		Labels: cfg.Labels,
+	}
+
+	// Step 3: Build host configuration
+	hostConfig := &container.HostConfig{}
+
+	// Set restart policy
+	switch cfg.RestartPolicy {
+	case "always":
+		hostConfig.RestartPolicy = container.RestartPolicy{Name: "always"}
+	case "unless-stopped":
+		hostConfig.RestartPolicy = container.RestartPolicy{Name: "unless-stopped"}
+	case "on-failure":
+		hostConfig.RestartPolicy = container.RestartPolicy{Name: "on-failure", MaximumRetryCount: 5}
+	default:
+		hostConfig.RestartPolicy = container.RestartPolicy{Name: "no"}
+	}
+
+	// Configure port bindings if specified
+	if len(cfg.Ports) > 0 {
+		portBindings := make(map[nat.Port][]nat.PortBinding)
+		exposedPorts := make(map[nat.Port]struct{})
+
+		for containerPort, hostPort := range cfg.Ports {
+			port := nat.Port(containerPort + "/tcp")
+			exposedPorts[port] = struct{}{}
+			portBindings[port] = []nat.PortBinding{
+				{HostIP: "0.0.0.0", HostPort: hostPort},
+			}
+		}
+
+		containerConfig.ExposedPorts = exposedPorts
+		hostConfig.PortBindings = portBindings
+	}
+
+	// Step 4: Build network configuration
+	var networkConfig *network.NetworkingConfig
+	if cfg.NetworkID != "" {
+		networkConfig = &network.NetworkingConfig{
+			EndpointsConfig: map[string]*network.EndpointSettings{
+				cfg.NetworkID: {},
+			},
+		}
+	}
+
+	// Step 5: Create the container
+	resp, err := c.cli.ContainerCreate(ctx, containerConfig, hostConfig, networkConfig, nil, cfg.Name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create container: %w", err)
+	}
+
+	containerID := resp.ID
+	if len(containerID) > 12 {
+		containerID = containerID[:12]
+	}
+
+	// Step 6: Start the container
+	if err := c.cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+		// Cleanup: remove the created container if start fails
+		c.cli.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true})
+		return nil, fmt.Errorf("failed to start container: %w", err)
+	}
+
+	return &ContainerRunResult{
+		ContainerID: containerID,
+		Name:        cfg.Name,
+		Status:      "running",
+	}, nil
 }

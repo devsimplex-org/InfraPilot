@@ -9,19 +9,23 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
+
+	"github.com/infrapilot/backend/internal/crypto"
 )
 
 // Service manages container registry operations
 type Service struct {
-	db     *pgxpool.Pool
-	logger *zap.Logger
+	db            *pgxpool.Pool
+	logger        *zap.Logger
+	encryptionSvc *crypto.EncryptionService
 }
 
 // NewService creates a new registry service
-func NewService(db *pgxpool.Pool, logger *zap.Logger) *Service {
+func NewService(db *pgxpool.Pool, logger *zap.Logger, encryptionSvc *crypto.EncryptionService) *Service {
 	return &Service{
-		db:     db,
-		logger: logger,
+		db:            db,
+		logger:        logger,
+		encryptionSvc: encryptionSvc,
 	}
 }
 
@@ -51,11 +55,22 @@ func (s *Service) CreateRegistry(ctx context.Context, orgID uuid.UUID, req *Crea
 		return nil, fmt.Errorf("unsupported provider: %s", req.Provider)
 	}
 
-	// Serialize credentials
-	// TODO: Implement proper encryption
+	// Serialize and encrypt credentials
 	credsJSON, err := json.Marshal(creds)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal credentials: %w", err)
+	}
+
+	var encryptedCreds []byte
+	if s.encryptionSvc != nil {
+		encryptedCreds, err = s.encryptionSvc.Encrypt(credsJSON)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encrypt credentials: %w", err)
+		}
+	} else {
+		// Fallback to unencrypted storage (not recommended)
+		s.logger.Warn("encryption service not configured, storing credentials unencrypted")
+		encryptedCreds = credsJSON
 	}
 
 	registry := &Registry{
@@ -65,7 +80,7 @@ func (s *Service) CreateRegistry(ctx context.Context, orgID uuid.UUID, req *Crea
 		Provider:             req.Provider,
 		Enabled:              true,
 		AuthType:             authType,
-		CredentialsEncrypted: credsJSON,
+		CredentialsEncrypted: encryptedCreds,
 		Namespace:            req.Namespace,
 		ConnectionStatus:     StatusPending,
 		CreatedAt:            time.Now(),
@@ -322,7 +337,22 @@ func (s *Service) getClient(registry *Registry) (Client, error) {
 	// Decrypt credentials
 	var creds Credentials
 	if len(registry.CredentialsEncrypted) > 0 {
-		if err := json.Unmarshal(registry.CredentialsEncrypted, &creds); err != nil {
+		var credsJSON []byte
+		if s.encryptionSvc != nil {
+			var err error
+			credsJSON, err = s.encryptionSvc.Decrypt(registry.CredentialsEncrypted)
+			if err != nil {
+				// Try to parse as unencrypted JSON (for backwards compatibility)
+				credsJSON = registry.CredentialsEncrypted
+				s.logger.Warn("failed to decrypt credentials, trying as plain JSON",
+					zap.String("registry_id", registry.ID.String()),
+				)
+			}
+		} else {
+			credsJSON = registry.CredentialsEncrypted
+		}
+
+		if err := json.Unmarshal(credsJSON, &creds); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal credentials: %w", err)
 		}
 	}
