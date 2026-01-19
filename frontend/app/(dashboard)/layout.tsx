@@ -30,6 +30,7 @@ import {
   Play,
   Scale,
   Wrench,
+  Box,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuthStore } from "@/lib/auth";
@@ -69,6 +70,7 @@ const navigationSections: NavigationSection[] = [
     color: "text-orange-600 dark:text-orange-400",
     items: [
       { name: "Deployments", href: "/deployments", icon: Package },
+      { name: "Registries", href: "/registries", icon: Box },
       { name: "Vulnerabilities", href: "/vulnerabilities", icon: AlertTriangle },
       { name: "SBOMs", href: "/sboms", icon: Package },
       { name: "Images", href: "/docker/images", icon: Image },

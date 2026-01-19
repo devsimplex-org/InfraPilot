@@ -1581,6 +1581,77 @@ export interface RuntimeSecurityPosture {
   recent_events: any[];
 }
 
+// Container Registry Types
+export type RegistryProvider = 'ghcr' | 'dockerhub';
+export type RegistryConnectionStatus = 'pending' | 'connected' | 'failed';
+
+export interface ContainerRegistry {
+  id: string;
+  name: string;
+  provider: RegistryProvider;
+  enabled: boolean;
+  namespace?: string;
+  connection_status: RegistryConnectionStatus;
+  connection_error?: string;
+  last_connected_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateRegistryRequest {
+  name: string;
+  provider: RegistryProvider;
+  namespace?: string;
+  token?: string; // For GHCR
+  username?: string; // For Docker Hub
+  password?: string; // For Docker Hub
+}
+
+export interface UpdateRegistryRequest {
+  name?: string;
+  enabled?: boolean;
+  namespace?: string;
+  token?: string;
+  username?: string;
+  password?: string;
+}
+
+export interface RegistryRepository {
+  name: string;
+  full_name: string;
+  description?: string;
+  is_private: boolean;
+  pull_count: number;
+  updated_at?: string;
+}
+
+export interface RegistryTag {
+  name: string;
+  digest?: string;
+  size_bytes: number;
+  pushed_at?: string;
+}
+
+export interface ListRepositoriesResponse {
+  repositories: RegistryRepository[];
+  total_count: number;
+  page: number;
+  page_size: number;
+}
+
+export interface ListTagsResponse {
+  tags: RegistryTag[];
+  total_count: number;
+  page: number;
+  page_size: number;
+}
+
+export interface TestConnectionResponse {
+  success: boolean;
+  message?: string;
+  error?: string;
+}
+
 // API methods
 export const api = {
   // Setup (first-run)
@@ -2925,6 +2996,45 @@ export const api = {
 
   getRuntimeSecurityPosture: () =>
     fetchAPI<RuntimeSecurityPosture>(`/runtime/posture`),
+
+  // Container Registries
+  getRegistries: () =>
+    fetchAPI<ContainerRegistry[]>("/registries"),
+
+  getRegistry: (registryId: string) =>
+    fetchAPI<ContainerRegistry>(`/registries/${registryId}`),
+
+  createRegistry: (data: CreateRegistryRequest) =>
+    fetchAPI<ContainerRegistry>("/registries", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateRegistry: (registryId: string, data: UpdateRegistryRequest) =>
+    fetchAPI<{ message: string }>(`/registries/${registryId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  deleteRegistry: (registryId: string) =>
+    fetchAPI<{ message: string }>(`/registries/${registryId}`, {
+      method: "DELETE",
+    }),
+
+  testRegistryConnection: (registryId: string) =>
+    fetchAPI<TestConnectionResponse>(`/registries/${registryId}/test`, {
+      method: "POST",
+    }),
+
+  getRegistryRepositories: (registryId: string, page: number = 1, pageSize: number = 20) =>
+    fetchAPI<ListRepositoriesResponse>(
+      `/registries/${registryId}/repositories?page=${page}&page_size=${pageSize}`
+    ),
+
+  getRegistryTags: (registryId: string, repository: string, page: number = 1, pageSize: number = 20) =>
+    fetchAPI<ListTagsResponse>(
+      `/registries/${registryId}/repositories/${encodeURIComponent(repository)}/tags?page=${page}&page_size=${pageSize}`
+    ),
 
   // Generic fetch for custom endpoints
   fetchAPI: <T>(endpoint: string, options?: RequestInit) => fetchAPI<T>(endpoint, options),

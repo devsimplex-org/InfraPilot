@@ -13,6 +13,7 @@ import (
 	"github.com/infrapilot/backend/internal/feedback"
 	agentgrpc "github.com/infrapilot/backend/internal/grpc"
 	"github.com/infrapilot/backend/internal/policy"
+	"github.com/infrapilot/backend/internal/registry"
 	"github.com/infrapilot/backend/internal/scanner"
 	"github.com/infrapilot/backend/internal/webhook"
 )
@@ -26,6 +27,7 @@ type Handler struct {
 	policyEngine        *policy.PolicyEngine
 	webhookService      *webhook.Service
 	feedbackIntegration *feedback.DeploymentIntegration
+	registryService     *registry.Service
 }
 
 func NewHandler(db *pgxpool.Pool, authService *auth.Service, logger *zap.Logger) *Handler {
@@ -47,6 +49,7 @@ func NewHandler(db *pgxpool.Pool, authService *auth.Service, logger *zap.Logger)
 		policyEngine:        policy.NewPolicyEngine(logger, "/app/policies"),
 		webhookService:      webhook.NewService(db, logger),
 		feedbackIntegration: feedbackIntegration,
+		registryService:     registry.NewService(db, logger),
 	}
 }
 
@@ -337,6 +340,19 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				runtime.GET("/config", h.getRuntimeSecurityConfig)
 				runtime.PUT("/config", h.RequireManageAlerts(), h.updateRuntimeSecurityConfig)
 				runtime.GET("/posture", h.getRuntimeSecurityPosture)
+			}
+
+			// Container Registries
+			registries := protected.Group("/registries")
+			{
+				registries.GET("", h.listRegistries)
+				registries.POST("", h.RequireManageAlerts(), h.createRegistry)
+				registries.GET("/:rid", h.getRegistry)
+				registries.PUT("/:rid", h.RequireManageAlerts(), h.updateRegistry)
+				registries.DELETE("/:rid", h.RequireManageAlerts(), h.deleteRegistry)
+				registries.POST("/:rid/test", h.RequireManageAlerts(), h.testRegistryConnection)
+				registries.GET("/:rid/repositories", h.listRegistryRepositories)
+				registries.GET("/:rid/repositories/:repo/tags", h.listRegistryTags)
 			}
 
 			// Alerts
