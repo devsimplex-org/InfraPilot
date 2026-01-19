@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	agentgrpc "github.com/infrapilot/backend/internal/grpc"
+	"github.com/infrapilot/backend/internal/scanner"
 	"go.uber.org/zap"
 )
 
@@ -255,6 +256,372 @@ func (h *Handler) sendWSError(conn *websocket.Conn, msg string) {
 
 // agentCommandStream handles WebSocket command streaming for agents
 // This replaces the gRPC bidirectional stream with a WebSocket-based approach
+// ==================== Scan WebSocket ====================
+
+// ScanWSRequest represents a scan request from the frontend
+type ScanWSRequest struct {
+	Action string `json:"action"` // "scan", "sbom", "both"
+	Images []struct {
+		Image       string `json:"image"`
+		ImageDigest string `json:"image_digest,omitempty"`
+		ImageTag    string `json:"image_tag,omitempty"`
+	} `json:"images"`
+}
+
+// ScanWSProgressMessage is sent to indicate scan progress
+type ScanWSProgressMessage struct {
+	Type     string `json:"type"`              // "progress"
+	Image    string `json:"image"`
+	Stage    string `json:"stage"`             // "queued", "pulling", "scanning", "analyzing", "complete", "error"
+	Progress int    `json:"progress,omitempty"` // 0-100
+	Message  string `json:"message,omitempty"`
+}
+
+// ScanWSResultMessage is sent when a scan completes
+type ScanWSResultMessage struct {
+	Type           string `json:"type"` // "scan_result"
+	Image          string `json:"image"`
+	ScanID         string `json:"scan_id"`
+	CriticalCount  int    `json:"critical_count"`
+	HighCount      int    `json:"high_count"`
+	MediumCount    int    `json:"medium_count"`
+	LowCount       int    `json:"low_count"`
+	TotalCount     int    `json:"total_count"`
+	FixableCount   int    `json:"fixable_count"`
+	ScanDurationMs int64  `json:"scan_duration_ms,omitempty"`
+}
+
+// ScanWSSBOMResultMessage is sent when SBOM generation completes
+type ScanWSSBOMResultMessage struct {
+	Type            string `json:"type"` // "sbom_result"
+	Image           string `json:"image"`
+	SBOMID          string `json:"sbom_id"`
+	TotalPackages   int    `json:"total_packages"`
+	OSPackages      int    `json:"os_packages"`
+	LibraryPackages int    `json:"library_packages"`
+}
+
+// ScanWSErrorMessage is sent when an error occurs
+type ScanWSErrorMessage struct {
+	Type  string `json:"type"` // "error"
+	Image string `json:"image,omitempty"`
+	Error string `json:"error"`
+	Code  string `json:"code,omitempty"`
+}
+
+// ScanWSCompleteMessage is sent when all scans are complete
+type ScanWSCompleteMessage struct {
+	Type        string `json:"type"` // "complete"
+	TotalImages int    `json:"total_images"`
+	Successful  int    `json:"successful"`
+	Failed      int    `json:"failed"`
+}
+
+// scanWebSocket handles WebSocket connections for scan operations
+func (h *Handler) scanWebSocket(c *gin.Context) {
+	// Get org_id from context (set by auth middleware)
+	orgID, exists := c.Get("org_id")
+	if !exists {
+		c.JSON(401, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	// Upgrade to WebSocket
+	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		h.logger.Error("Failed to upgrade WebSocket for scan", zap.Error(err))
+		return
+	}
+	defer conn.Close()
+
+	h.logger.Info("Scan WebSocket connection established",
+		zap.String("org_id", orgID.(uuid.UUID).String()))
+
+	// Mutex for thread-safe sending
+	var sendMu sync.Mutex
+	sendJSON := func(v interface{}) error {
+		sendMu.Lock()
+		defer sendMu.Unlock()
+		return conn.WriteJSON(v)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan struct{})
+
+	// Keep connection alive with pings
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				sendMu.Lock()
+				err := conn.WriteMessage(websocket.PingMessage, nil)
+				sendMu.Unlock()
+				if err != nil {
+					cancel()
+					return
+				}
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// Read messages from client
+	for {
+		_, message, err := conn.ReadMessage()
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+				h.logger.Debug("Scan WebSocket read error", zap.Error(err))
+			}
+			break
+		}
+
+		var req ScanWSRequest
+		if err := json.Unmarshal(message, &req); err != nil {
+			sendJSON(ScanWSErrorMessage{
+				Type:  "error",
+				Error: "Invalid request format",
+			})
+			continue
+		}
+
+		// Process scan request in goroutine
+		go h.processScanWSRequest(ctx, orgID.(uuid.UUID), req, sendJSON)
+	}
+
+	close(done)
+	h.logger.Info("Scan WebSocket connection closed",
+		zap.String("org_id", orgID.(uuid.UUID).String()))
+}
+
+// processScanWSRequest handles a scan request from WebSocket
+func (h *Handler) processScanWSRequest(ctx context.Context, orgID uuid.UUID, req ScanWSRequest, send func(interface{}) error) {
+	successful := 0
+	failed := 0
+
+	for _, img := range req.Images {
+		// Check if context is cancelled
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		// Send queued status
+		send(ScanWSProgressMessage{
+			Type:    "progress",
+			Image:   img.Image,
+			Stage:   "queued",
+			Message: "Scan queued",
+		})
+
+		var scanErr error
+		var sbomErr error
+
+		// Run vulnerability scan
+		if req.Action == "scan" || req.Action == "both" {
+			// Send pulling progress
+			send(ScanWSProgressMessage{
+				Type:     "progress",
+				Image:    img.Image,
+				Stage:    "pulling",
+				Progress: 10,
+				Message:  "Preparing image...",
+			})
+
+			// Send scanning progress
+			send(ScanWSProgressMessage{
+				Type:     "progress",
+				Image:    img.Image,
+				Stage:    "scanning",
+				Progress: 30,
+				Message:  "Running Trivy vulnerability scan...",
+			})
+
+			scanResult, err := h.scanner.ScanImage(ctx, img.Image)
+			if err != nil {
+				h.logger.Error("Scan failed", zap.Error(err), zap.String("image", img.Image))
+				send(ScanWSErrorMessage{
+					Type:  "error",
+					Image: img.Image,
+					Error: err.Error(),
+				})
+				scanErr = err
+			} else {
+				// Send analyzing progress
+				send(ScanWSProgressMessage{
+					Type:     "progress",
+					Image:    img.Image,
+					Stage:    "analyzing",
+					Progress: 80,
+					Message:  "Analyzing results...",
+				})
+
+				// Use provided digest or the one from scan
+				imageDigest := img.ImageDigest
+				if imageDigest == "" {
+					imageDigest = scanResult.ImageDigest
+				}
+
+				// Store scan result in database
+				var scanID uuid.UUID
+				err = h.db.QueryRow(ctx, `
+					INSERT INTO scan_results (
+						org_id, image_digest, image_repository, image_tag,
+						critical_count, high_count, medium_count, low_count, unknown_count,
+						total_count, fixable_count,
+						scanner_name, scan_duration_ms, raw_output
+					)
+					VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+					RETURNING id
+				`, orgID, imageDigest, scanResult.ImageRepository, scanResult.ImageTag,
+					scanResult.CriticalCount, scanResult.HighCount, scanResult.MediumCount,
+					scanResult.LowCount, scanResult.UnknownCount,
+					scanResult.TotalCount, scanResult.FixableCount,
+					"trivy", scanResult.ScanDuration.Milliseconds(), scanResult.RawOutput,
+				).Scan(&scanID)
+
+				if err != nil {
+					h.logger.Error("Failed to store scan result", zap.Error(err))
+					send(ScanWSErrorMessage{
+						Type:  "error",
+						Image: img.Image,
+						Error: "Failed to store scan result",
+					})
+					scanErr = err
+				} else {
+					// Store individual vulnerabilities (non-blocking)
+					go func(scanID uuid.UUID, vulns []scanner.Vulnerability) {
+						for _, v := range vulns {
+							h.db.Exec(context.Background(), `
+								INSERT INTO vulnerabilities (
+									scan_result_id, cve_id, severity,
+									package_name, package_version, package_type,
+									fixed_version, fix_available,
+									title, description, cvss_v3_score, cvss_v3_vector,
+									reference_urls
+								)
+								VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+							`, scanID, v.CVEID, v.Severity,
+								v.PackageName, v.PackageVersion, v.PackageType,
+								v.FixedVersion, v.FixAvailable,
+								v.Title, v.Description, v.CVSSScore, v.CVSSVector,
+								v.References,
+							)
+						}
+					}(scanID, scanResult.Vulnerabilities)
+
+					// Send scan result
+					send(ScanWSResultMessage{
+						Type:           "scan_result",
+						Image:          img.Image,
+						ScanID:         scanID.String(),
+						CriticalCount:  scanResult.CriticalCount,
+						HighCount:      scanResult.HighCount,
+						MediumCount:    scanResult.MediumCount,
+						LowCount:       scanResult.LowCount,
+						TotalCount:     scanResult.TotalCount,
+						FixableCount:   scanResult.FixableCount,
+						ScanDurationMs: scanResult.ScanDuration.Milliseconds(),
+					})
+				}
+			}
+		}
+
+		// Generate SBOM
+		if req.Action == "sbom" || req.Action == "both" {
+			// Send SBOM progress
+			send(ScanWSProgressMessage{
+				Type:     "progress",
+				Image:    img.Image,
+				Stage:    "analyzing",
+				Progress: 50,
+				Message:  "Generating SBOM with Syft...",
+			})
+
+			sbomResult, err := h.sbomGenerator.GenerateSBOM(ctx, img.Image)
+			if err != nil {
+				h.logger.Error("SBOM generation failed", zap.Error(err), zap.String("image", img.Image))
+				send(ScanWSErrorMessage{
+					Type:  "error",
+					Image: img.Image,
+					Error: "SBOM generation failed: " + err.Error(),
+				})
+				sbomErr = err
+			} else {
+				// Store SBOM in database
+				var sbomID uuid.UUID
+				err = h.db.QueryRow(ctx, `
+					INSERT INTO sboms (
+						org_id, image_digest, image_repository,
+						format, spec_version,
+						total_packages, os_packages, library_packages,
+						sbom_json, generator_name, generator_version
+					)
+					VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+					RETURNING id
+				`, orgID, sbomResult.ImageDigest, sbomResult.ImageRepository,
+					sbomResult.Format, sbomResult.SpecVersion,
+					sbomResult.TotalPackages, sbomResult.OSPackages, sbomResult.LibraryPackages,
+					sbomResult.Raw, sbomResult.GeneratorName, sbomResult.GeneratorVersion,
+				).Scan(&sbomID)
+
+				if err != nil {
+					h.logger.Error("Failed to store SBOM", zap.Error(err))
+					send(ScanWSErrorMessage{
+						Type:  "error",
+						Image: img.Image,
+						Error: "Failed to store SBOM",
+					})
+					sbomErr = err
+				} else {
+					send(ScanWSSBOMResultMessage{
+						Type:            "sbom_result",
+						Image:           img.Image,
+						SBOMID:          sbomID.String(),
+						TotalPackages:   sbomResult.TotalPackages,
+						OSPackages:      sbomResult.OSPackages,
+						LibraryPackages: sbomResult.LibraryPackages,
+					})
+				}
+			}
+		}
+
+		// Send complete progress for this image
+		if scanErr == nil && sbomErr == nil {
+			send(ScanWSProgressMessage{
+				Type:     "progress",
+				Image:    img.Image,
+				Stage:    "complete",
+				Progress: 100,
+				Message:  "Scan complete",
+			})
+			successful++
+		} else {
+			// Partial success if one action succeeded
+			if (req.Action == "both" && (scanErr == nil || sbomErr == nil)) {
+				successful++
+			} else {
+				failed++
+			}
+		}
+	}
+
+	// Send completion message
+	send(ScanWSCompleteMessage{
+		Type:        "complete",
+		TotalImages: len(req.Images),
+		Successful:  successful,
+		Failed:      failed,
+	})
+}
+
 func (h *Handler) agentCommandStream(c *gin.Context) {
 	agentIDStr := c.Param("id")
 

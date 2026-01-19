@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, Fragment } from "react";
+import React, { useState, useEffect, Fragment, useCallback } from "react";
 import { Dialog, Transition } from "@headlessui/react";
 import {
   X,
@@ -13,10 +13,19 @@ import {
   ExternalLink,
   ChevronDown,
   ChevronRight,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { api } from "@/lib/api";
 import { Button } from "@/components/ui/page-layout";
+import {
+  useScanWebSocket,
+  ScanProgress,
+  ScanResultMessage,
+  SBOMResultMessage,
+  ErrorMessage,
+  CompleteMessage,
+} from "@/hooks/useScanWebSocket";
 
 export interface ScanImage {
   reference: string;
@@ -48,8 +57,17 @@ type ScanStage = "preview" | "scanning" | "complete";
 
 interface ImageScanState {
   image: string;
-  status: "pending" | "scanning" | "success" | "error";
-  scanResult?: ScanResult;
+  status: "pending" | "queued" | "pulling" | "scanning" | "analyzing" | "success" | "error";
+  progress?: number;
+  message?: string;
+  scanResult?: {
+    id: string;
+    critical_count: number;
+    high_count: number;
+    medium_count: number;
+    low_count: number;
+    total_count: number;
+  };
   sbomResult?: { id: string; total_packages: number };
   error?: string;
 }
@@ -65,15 +83,126 @@ export function ScanModal({
   const [generateSBOM, setGenerateSBOM] = useState(mode === "sbom" || mode === "both");
   const [runScan, setRunScan] = useState(mode === "scan" || mode === "both");
   const [imageStates, setImageStates] = useState<Map<string, ImageScanState>>(new Map());
-  const [currentImage, setCurrentImage] = useState<string>("");
   const [expandedResults, setExpandedResults] = useState<Set<string>>(new Set());
+  const [scanComplete, setScanComplete] = useState(false);
 
-  // Reset state when modal opens
+  // WebSocket handlers
+  const handleProgress = useCallback((progress: ScanProgress) => {
+    setImageStates((prev) => {
+      const newMap = new Map(prev);
+      const current = newMap.get(progress.image);
+      if (current) {
+        newMap.set(progress.image, {
+          ...current,
+          status: progress.stage === "complete" ? "success" : progress.stage === "error" ? "error" : progress.stage,
+          progress: progress.progress,
+          message: progress.message,
+        });
+      }
+      return newMap;
+    });
+  }, []);
+
+  const handleScanResult = useCallback((result: ScanResultMessage) => {
+    setImageStates((prev) => {
+      const newMap = new Map(prev);
+      const current = newMap.get(result.image);
+      if (current) {
+        newMap.set(result.image, {
+          ...current,
+          status: "success",
+          scanResult: {
+            id: result.scan_id,
+            critical_count: result.critical_count,
+            high_count: result.high_count,
+            medium_count: result.medium_count,
+            low_count: result.low_count,
+            total_count: result.total_count,
+          },
+        });
+      }
+      return newMap;
+    });
+  }, []);
+
+  const handleSBOMResult = useCallback((result: SBOMResultMessage) => {
+    setImageStates((prev) => {
+      const newMap = new Map(prev);
+      const current = newMap.get(result.image);
+      if (current) {
+        newMap.set(result.image, {
+          ...current,
+          sbomResult: {
+            id: result.sbom_id,
+            total_packages: result.total_packages,
+          },
+        });
+      }
+      return newMap;
+    });
+  }, []);
+
+  const handleError = useCallback((error: ErrorMessage) => {
+    if (error.image) {
+      setImageStates((prev) => {
+        const newMap = new Map(prev);
+        const current = newMap.get(error.image!);
+        if (current) {
+          newMap.set(error.image!, {
+            ...current,
+            status: "error",
+            error: error.error,
+          });
+        }
+        return newMap;
+      });
+    }
+  }, []);
+
+  const handleComplete = useCallback((complete: CompleteMessage) => {
+    setScanComplete(true);
+    setStage("complete");
+
+    // Collect results for onComplete callback
+    const results: ScanResult[] = [];
+    imageStates.forEach((state) => {
+      if (state.scanResult) {
+        results.push({
+          id: state.scanResult.id,
+          image: state.image,
+          status: state.status === "success" ? "completed" : "failed",
+          critical_count: state.scanResult.critical_count,
+          high_count: state.scanResult.high_count,
+          medium_count: state.scanResult.medium_count,
+          low_count: state.scanResult.low_count,
+          total_count: state.scanResult.total_count,
+          error: state.error,
+        });
+      } else if (state.error) {
+        results.push({
+          id: "",
+          image: state.image,
+          status: "failed",
+          error: state.error,
+        });
+      }
+    });
+    onComplete?.(results);
+  }, [imageStates, onComplete]);
+
+  const { connected, connecting, error: wsError, startScan, connect, disconnect } = useScanWebSocket({
+    onProgress: handleProgress,
+    onScanResult: handleScanResult,
+    onSBOMResult: handleSBOMResult,
+    onError: handleError,
+    onComplete: handleComplete,
+  });
+
+  // Reset state and connect when modal opens
   useEffect(() => {
     if (isOpen) {
       setStage("preview");
-      setImageStates(new Map());
-      setCurrentImage("");
+      setScanComplete(false);
       setExpandedResults(new Set());
 
       // Initialize image states
@@ -85,105 +214,44 @@ export function ScanModal({
         });
       });
       setImageStates(initialStates);
-    }
-  }, [isOpen, images]);
 
-  const handleStartScan = async () => {
+      // Connect to WebSocket when modal opens
+      connect();
+    } else {
+      // Disconnect when modal closes
+      disconnect();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, images]); // connect/disconnect are stable, no need to include
+
+  const handleStartScan = () => {
     if (!runScan && !generateSBOM) return;
 
     setStage("scanning");
-    const results: ScanResult[] = [];
+    setScanComplete(false);
 
-    for (let i = 0; i < images.length; i++) {
-      const img = images[i];
-      setCurrentImage(img.reference);
-
-      // Update state to scanning
-      setImageStates((prev) => {
-        const newMap = new Map(prev);
-        newMap.set(img.reference, { ...newMap.get(img.reference)!, status: "scanning" });
-        return newMap;
+    // Mark all images as queued
+    setImageStates((prev) => {
+      const newMap = new Map(prev);
+      newMap.forEach((state, key) => {
+        newMap.set(key, { ...state, status: "queued" });
       });
+      return newMap;
+    });
 
-      let scanResult: ScanResult | undefined;
-      let sbomResult: { id: string; total_packages: number } | undefined;
-      let error: string | undefined;
-
-      try {
-        // Run vulnerability scan
-        if (runScan) {
-          const result = await api.triggerImageScan({
-            image: img.reference,
-            image_digest: img.digest,
-            image_tag: img.tag,
-          });
-
-          // Fetch scan details to get vulnerability counts
-          if (result.id) {
-            const details = await api.getScanDetails(result.id);
-            scanResult = {
-              id: details.id,
-              image: img.reference,
-              status: "completed",
-              critical_count: details.critical_count,
-              high_count: details.high_count,
-              medium_count: details.medium_count,
-              low_count: details.low_count,
-              total_count: details.total_count,
-            };
-            results.push(scanResult);
-          }
-        }
-
-        // Generate SBOM
-        if (generateSBOM) {
-          const result = await api.generateSBOM({ image: img.reference });
-          sbomResult = { id: result.id, total_packages: result.total_packages };
-        }
-
-        // Update state to success
-        setImageStates((prev) => {
-          const newMap = new Map(prev);
-          newMap.set(img.reference, {
-            ...newMap.get(img.reference)!,
-            status: "success",
-            scanResult,
-            sbomResult,
-          });
-          return newMap;
-        });
-      } catch (err) {
-        error = err instanceof Error ? err.message : "Scan failed";
-
-        // Update state to error
-        setImageStates((prev) => {
-          const newMap = new Map(prev);
-          newMap.set(img.reference, {
-            ...newMap.get(img.reference)!,
-            status: "error",
-            error,
-          });
-          return newMap;
-        });
-
-        if (runScan) {
-          results.push({
-            id: "",
-            image: img.reference,
-            status: "failed",
-            error,
-          });
-        }
-      }
-    }
-
-    setCurrentImage("");
-    setStage("complete");
-    onComplete?.(results);
+    // Send scan request via WebSocket
+    startScan({
+      action: runScan && generateSBOM ? "both" : runScan ? "scan" : "sbom",
+      images: images.map((img) => ({
+        image: img.reference,
+        image_digest: img.digest,
+        image_tag: img.tag,
+      })),
+    });
   };
 
   const handleClose = () => {
-    if (stage === "scanning") return; // Prevent closing during scan
+    if (stage === "scanning" && !scanComplete) return; // Prevent closing during scan
     onClose();
   };
 
@@ -223,6 +291,41 @@ export function ScanModal({
   const highCount = Array.from(imageStates.values()).reduce((sum, state) => {
     return sum + (state.scanResult?.high_count || 0);
   }, 0);
+
+  const getStatusIcon = (status: ImageScanState["status"]) => {
+    switch (status) {
+      case "pending":
+      case "queued":
+        return <div className="h-4 w-4 rounded-full border-2 border-gray-300 dark:border-gray-600" />;
+      case "pulling":
+      case "scanning":
+      case "analyzing":
+        return <Loader2 className="h-4 w-4 text-primary-600 dark:text-primary-400 animate-spin" />;
+      case "success":
+        return <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />;
+      case "error":
+        return <XCircle className="h-4 w-4 text-red-600 dark:text-red-400" />;
+    }
+  };
+
+  const getStatusText = (status: ImageScanState["status"]) => {
+    switch (status) {
+      case "pending":
+        return "Pending";
+      case "queued":
+        return "Queued";
+      case "pulling":
+        return "Pulling image...";
+      case "scanning":
+        return "Scanning...";
+      case "analyzing":
+        return "Analyzing...";
+      case "success":
+        return "Complete";
+      case "error":
+        return "Failed";
+    }
+  };
 
   return (
     <Transition.Root show={isOpen} as={Fragment}>
@@ -265,25 +368,55 @@ export function ScanModal({
                       </Dialog.Title>
                       <p className="text-sm text-gray-500 dark:text-gray-400">
                         {stage === "preview" && `${images.length} image${images.length !== 1 ? "s" : ""} selected`}
-                        {stage === "scanning" && `Scanning ${completedCount + 1} of ${images.length}...`}
+                        {stage === "scanning" && `${completedCount} of ${images.length} complete`}
                         {stage === "complete" && `${successCount} successful, ${errorCount} failed`}
                       </p>
                     </div>
                   </div>
-                  <button
-                    onClick={handleClose}
-                    disabled={stage === "scanning"}
-                    className={cn(
-                      "text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors",
-                      stage === "scanning" && "opacity-50 cursor-not-allowed"
-                    )}
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
+                  <div className="flex items-center gap-3">
+                    {/* Connection indicator */}
+                    <div className="flex items-center gap-1.5">
+                      {connected ? (
+                        <Wifi className="h-4 w-4 text-green-500" />
+                      ) : connecting ? (
+                        <Loader2 className="h-4 w-4 text-yellow-500 animate-spin" />
+                      ) : (
+                        <WifiOff className="h-4 w-4 text-red-500" />
+                      )}
+                      <span className={cn(
+                        "text-xs",
+                        connected ? "text-green-600 dark:text-green-400" :
+                        connecting ? "text-yellow-600 dark:text-yellow-400" :
+                        "text-red-600 dark:text-red-400"
+                      )}>
+                        {connected ? "Connected" : connecting ? "Connecting..." : "Disconnected"}
+                      </span>
+                    </div>
+                    <button
+                      onClick={handleClose}
+                      disabled={stage === "scanning" && !scanComplete}
+                      className={cn(
+                        "text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors",
+                        stage === "scanning" && !scanComplete && "opacity-50 cursor-not-allowed"
+                      )}
+                    >
+                      <X className="h-5 w-5" />
+                    </button>
+                  </div>
                 </div>
 
                 {/* Body */}
                 <div className="px-6 py-4 max-h-[60vh] overflow-y-auto">
+                  {/* WebSocket Error */}
+                  {wsError && stage === "preview" && (
+                    <div className="mb-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                      <div className="flex items-center gap-2 text-yellow-700 dark:text-yellow-400 text-sm">
+                        <AlertTriangle className="h-4 w-4" />
+                        <span>{wsError}. Scans may not work in real-time.</span>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Preview Stage */}
                   {stage === "preview" && (
                     <div className="space-y-4">
@@ -351,10 +484,10 @@ export function ScanModal({
                   {/* Scanning Stage */}
                   {stage === "scanning" && (
                     <div className="space-y-4">
-                      {/* Progress */}
+                      {/* Overall Progress */}
                       <div>
                         <div className="flex justify-between text-sm mb-2">
-                          <span className="text-gray-600 dark:text-gray-400">Progress</span>
+                          <span className="text-gray-600 dark:text-gray-400">Overall Progress</span>
                           <span className="text-gray-900 dark:text-white">
                             {completedCount} / {images.length}
                           </span>
@@ -367,50 +500,60 @@ export function ScanModal({
                         </div>
                       </div>
 
-                      {/* Current Image */}
-                      {currentImage && (
-                        <div className="flex items-center gap-3 p-4 bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800 rounded-lg">
-                          <Loader2 className="h-5 w-5 text-primary-600 dark:text-primary-400 animate-spin" />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-primary-700 dark:text-primary-300">
-                              Scanning...
-                            </p>
-                            <p className="text-xs text-primary-600 dark:text-primary-400 truncate font-mono">
-                              {currentImage}
-                            </p>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Completed Images */}
+                      {/* Image List with Status */}
                       <div className="space-y-2">
-                        {Array.from(imageStates.values())
-                          .filter((s) => s.status === "success" || s.status === "error")
-                          .map((state) => (
-                            <div
-                              key={state.image}
-                              className={cn(
-                                "flex items-center gap-3 p-3 rounded-lg",
-                                state.status === "success"
-                                  ? "bg-green-50 dark:bg-green-900/20"
-                                  : "bg-red-50 dark:bg-red-900/20"
-                              )}
-                            >
-                              {state.status === "success" ? (
-                                <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
-                              ) : (
-                                <XCircle className="h-4 w-4 text-red-600 dark:text-red-400" />
-                              )}
-                              <span className="font-mono text-sm truncate flex-1">
-                                {state.image}
-                              </span>
+                        {Array.from(imageStates.values()).map((state) => (
+                          <div
+                            key={state.image}
+                            className={cn(
+                              "p-3 rounded-lg border transition-colors",
+                              state.status === "success"
+                                ? "bg-green-50 dark:bg-green-900/10 border-green-200 dark:border-green-800"
+                                : state.status === "error"
+                                ? "bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-800"
+                                : ["pulling", "scanning", "analyzing"].includes(state.status)
+                                ? "bg-primary-50 dark:bg-primary-900/10 border-primary-200 dark:border-primary-800"
+                                : "bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700"
+                            )}
+                          >
+                            <div className="flex items-center gap-3">
+                              {getStatusIcon(state.status)}
+                              <div className="flex-1 min-w-0">
+                                <p className="font-mono text-sm text-gray-900 dark:text-white truncate">
+                                  {state.image}
+                                </p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400">
+                                  {state.message || getStatusText(state.status)}
+                                </p>
+                              </div>
                               {state.scanResult && (
-                                <span className="text-xs text-gray-500">
-                                  {state.scanResult.total_count} vulnerabilities
-                                </span>
+                                <div className="flex items-center gap-1 flex-shrink-0">
+                                  {state.scanResult.critical_count > 0 && (
+                                    <span className="px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 rounded">
+                                      {state.scanResult.critical_count}C
+                                    </span>
+                                  )}
+                                  {state.scanResult.high_count > 0 && (
+                                    <span className="px-1.5 py-0.5 text-xs font-medium bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 rounded">
+                                      {state.scanResult.high_count}H
+                                    </span>
+                                  )}
+                                </div>
                               )}
                             </div>
-                          ))}
+                            {/* Progress bar for individual image */}
+                            {state.progress !== undefined && state.progress < 100 && (
+                              <div className="mt-2">
+                                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1">
+                                  <div
+                                    className="bg-primary-600 h-1 rounded-full transition-all duration-300"
+                                    style={{ width: `${state.progress}%` }}
+                                  />
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ))}
                       </div>
                     </div>
                   )}
@@ -474,12 +617,12 @@ export function ScanModal({
                               </span>
                               {state.scanResult && (
                                 <div className="flex items-center gap-2 flex-shrink-0">
-                                  {state.scanResult.critical_count! > 0 && (
+                                  {state.scanResult.critical_count > 0 && (
                                     <span className="px-2 py-0.5 text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 rounded">
                                       {state.scanResult.critical_count} C
                                     </span>
                                   )}
-                                  {state.scanResult.high_count! > 0 && (
+                                  {state.scanResult.high_count > 0 && (
                                     <span className="px-2 py-0.5 text-xs font-medium bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 rounded">
                                       {state.scanResult.high_count} H
                                     </span>
@@ -571,20 +714,20 @@ export function ScanModal({
                         <Button
                           variant="primary"
                           onClick={handleStartScan}
-                          disabled={!runScan && !generateSBOM}
+                          disabled={(!runScan && !generateSBOM) || !connected}
                         >
                           <Shield className="h-4 w-4 mr-1" />
-                          Start Scan
+                          {connected ? "Start Scan" : "Connecting..."}
                         </Button>
                       </>
                     )}
-                    {stage === "scanning" && (
+                    {stage === "scanning" && !scanComplete && (
                       <Button variant="secondary" disabled>
                         <Loader2 className="h-4 w-4 mr-1 animate-spin" />
                         Scanning...
                       </Button>
                     )}
-                    {stage === "complete" && (
+                    {(stage === "complete" || (stage === "scanning" && scanComplete)) && (
                       <Button variant="primary" onClick={handleClose}>
                         Done
                       </Button>
