@@ -342,7 +342,12 @@ func (h *Handler) scanWebSocket(c *gin.Context) {
 	sendJSON := func(v interface{}) error {
 		sendMu.Lock()
 		defer sendMu.Unlock()
-		return conn.WriteJSON(v)
+		if err := conn.WriteJSON(v); err != nil {
+			h.logger.Error("Failed to send WebSocket message", zap.Error(err), zap.Any("message", v))
+			return err
+		}
+		h.logger.Debug("Sent WebSocket message", zap.Any("message", v))
+		return nil
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -518,6 +523,10 @@ func (h *Handler) processScanWSRequest(ctx context.Context, orgID uuid.UUID, req
 					}(scanID, scanResult.Vulnerabilities)
 
 					// Send scan result
+					h.logger.Info("Sending scan_result via WebSocket",
+						zap.String("image", img.Image),
+						zap.String("scan_id", scanID.String()),
+						zap.Int("total", scanResult.TotalCount))
 					send(ScanWSResultMessage{
 						Type:           "scan_result",
 						Image:          img.Image,
@@ -581,6 +590,10 @@ func (h *Handler) processScanWSRequest(ctx context.Context, orgID uuid.UUID, req
 					})
 					sbomErr = err
 				} else {
+					h.logger.Info("Sending sbom_result via WebSocket",
+						zap.String("image", img.Image),
+						zap.String("sbom_id", sbomID.String()),
+						zap.Int("packages", sbomResult.TotalPackages))
 					send(ScanWSSBOMResultMessage{
 						Type:            "sbom_result",
 						Image:           img.Image,
@@ -614,6 +627,10 @@ func (h *Handler) processScanWSRequest(ctx context.Context, orgID uuid.UUID, req
 	}
 
 	// Send completion message
+	h.logger.Info("Sending complete message via WebSocket",
+		zap.Int("total", len(req.Images)),
+		zap.Int("successful", successful),
+		zap.Int("failed", failed))
 	send(ScanWSCompleteMessage{
 		Type:        "complete",
 		TotalImages: len(req.Images),
