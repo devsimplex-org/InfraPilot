@@ -241,7 +241,7 @@ export default function NetworksPage() {
   ];
 
   return (
-    <div className="p-6">
+    <div className="space-y-6">
       <PageHeader
         title="Docker Networks"
         description="Manage Docker networks and nginx proxy connections"

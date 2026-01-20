@@ -315,7 +315,7 @@ export default function ScansPage() {
   ];
 
   return (
-    <div className="p-6">
+    <div className="space-y-6">
       <PageHeader
         title="Security Scans"
         description="View vulnerability scans and software bill of materials"

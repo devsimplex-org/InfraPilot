@@ -296,7 +296,7 @@ export default function ContainersPage() {
   ];
 
   return (
-    <div className="p-6">
+    <div className="space-y-6">
       <PageHeader
         title="Containers"
         description="View and manage Docker containers"

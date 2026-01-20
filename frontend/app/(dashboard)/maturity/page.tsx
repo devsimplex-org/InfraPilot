@@ -225,7 +225,7 @@ export default function SecurityMaturityPage() {
   ];
 
   return (
-    <div className="p-6">
+    <div className="space-y-6">
       <PageHeader
         title="Security Maturity"
         description="Team security scores and performance benchmarks"

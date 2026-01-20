@@ -163,7 +163,7 @@ export default function VolumesPage() {
   ];
 
   return (
-    <div className="p-6">
+    <div className="space-y-6">
       <PageHeader
         title="Docker Volumes"
         description="Manage Docker volumes for persistent data storage"

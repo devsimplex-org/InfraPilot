@@ -208,7 +208,7 @@ export default function ScanDetailPage() {
 
   if (!scan) {
     return (
-      <div className="p-6">
+      <div className="space-y-6">
         <EmptyState
           icon={Shield}
           title="Scan not found"
@@ -227,7 +227,7 @@ export default function ScanDetailPage() {
   const imageRef = `${scan.image_repository}${scan.image_tag ? `:${scan.image_tag}` : ""}`;
 
   return (
-    <div className="p-6">
+    <div className="space-y-6">
       <PageHeader
         title="Scan Report"
         description={imageRef}

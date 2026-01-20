@@ -282,7 +282,7 @@ export default function WebhooksPage() {
   ];
 
   return (
-    <div className="p-6">
+    <div className="space-y-6">
       <PageHeader
         title="CI/CD Webhooks"
         description="Manage webhook integrations for automated deployments"
