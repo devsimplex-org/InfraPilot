@@ -3,7 +3,7 @@
 import React, { ReactNode, useState } from "react";
 import { LucideIcon, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Breadcrumb, BreadcrumbItem } from "./Breadcrumb";
+import { Breadcrumb } from "./Breadcrumb";
 import { StatCard, StatCardProps, MetricsGrid } from "./StatCard";
 import { Tabs } from "./page-layout";
 
@@ -175,17 +175,13 @@ export function GoldenPage({
         <div className="flex-shrink-0">
           {/* Breadcrumbs */}
           {breadcrumbs && breadcrumbs.length > 0 && (
-            <Breadcrumb className="mb-2">
-              {breadcrumbs.map((crumb, index) => (
-                <BreadcrumbItem
-                  key={index}
-                  href={crumb.href}
-                  isLast={index === breadcrumbs.length - 1}
-                >
-                  {crumb.label}
-                </BreadcrumbItem>
-              ))}
-            </Breadcrumb>
+            <Breadcrumb
+              className="mb-2"
+              items={breadcrumbs.map((crumb) => ({
+                label: crumb.label,
+                href: crumb.href,
+              }))}
+            />
           )}
 
           {/* Title and Actions */}

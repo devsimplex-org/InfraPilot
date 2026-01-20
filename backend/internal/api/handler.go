@@ -468,6 +468,34 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				dependencies.PUT("/incidents/:incidentId", h.RequireManageAlerts(), h.updateExternalIncidentStatus)
 			}
 
+			// Research & Metrics (Epic 7)
+			metrics := protected.Group("/metrics")
+			{
+				metrics.GET("", h.listMetricDefinitions)
+				metrics.POST("", h.RequireManageAlerts(), h.createMetricDefinition)
+				metrics.DELETE("/:metricId", h.RequireManageAlerts(), h.deleteMetricDefinition)
+				metrics.GET("/:metricId/values", h.getMetricValues)
+				metrics.GET("/summary", h.getMetricSummary)
+			}
+			dashboards := protected.Group("/dashboards")
+			{
+				dashboards.GET("", h.listDashboards)
+				dashboards.POST("", h.RequireManageAlerts(), h.createDashboard)
+				dashboards.DELETE("/:dashboardId", h.RequireManageAlerts(), h.deleteDashboard)
+			}
+			reports := protected.Group("/reports")
+			{
+				reports.GET("", h.listReports)
+				reports.POST("", h.RequireManageAlerts(), h.createReport)
+				reports.POST("/:reportId/run", h.RequireManageAlerts(), h.runReport)
+				reports.GET("/executions", h.listReportExecutions)
+			}
+			telemetry := protected.Group("/telemetry")
+			{
+				telemetry.GET("/settings", h.getTelemetrySettings)
+				telemetry.PUT("/settings", h.RequireManageAlerts(), h.updateTelemetrySettings)
+			}
+
 			// Container Registries
 			registries := protected.Group("/registries")
 			{

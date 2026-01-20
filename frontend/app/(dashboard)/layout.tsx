@@ -34,6 +34,7 @@ import {
   Database,
   Key,
   Archive,
+  BarChart3,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuthStore } from "@/lib/auth";
@@ -114,6 +115,7 @@ const navigationSections: NavigationSection[] = [
       { name: "Risk Exceptions", href: "/exceptions", icon: ShieldAlert },
       { name: "Teams & Ownership", href: "/ownership", icon: Users },
       { name: "Security Maturity", href: "/maturity", icon: Trophy },
+      { name: "External Dependencies", href: "/dependencies", icon: Globe },
       { name: "Webhooks", href: "/webhooks", icon: Activity },
     ],
   },
@@ -125,6 +127,7 @@ const navigationSections: NavigationSection[] = [
     items: [
       { name: "Platform Security", href: "/platform-security", icon: ShieldCheck },
       { name: "Background Jobs", href: "/platform/jobs", icon: Activity },
+      { name: "Metrics & Reports", href: "/platform/metrics", icon: BarChart3 },
       { name: "Proxies", href: "/proxies", icon: Globe },
       { name: "Networks", href: "/docker/networks", icon: Network },
       { name: "Volumes", href: "/docker/volumes", icon: HardDrive },

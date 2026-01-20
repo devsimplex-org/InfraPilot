@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 // External Service types
@@ -236,7 +237,7 @@ func (h *Handler) listExternalServices(c *gin.Context) {
 
 	rows, err := h.db.Query(c.Request.Context(), query, args...)
 	if err != nil {
-		h.logger.Error("failed to query external services", "error", err)
+		h.logger.Error("failed to query external services", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch external services"})
 		return
 	}
@@ -255,7 +256,7 @@ func (h *Handler) listExternalServices(c *gin.Context) {
 			&s.Description, &s.DocumentationURL, &s.Tags, &s.Metadata, &s.Enabled, &s.CreatedAt, &s.UpdatedAt,
 		)
 		if err != nil {
-			h.logger.Error("failed to scan external service", "error", err)
+			h.logger.Error("failed to scan external service", zap.Error(err))
 			continue
 		}
 		services = append(services, s)
@@ -370,7 +371,7 @@ func (h *Handler) createExternalService(c *gin.Context) {
 	).Scan(&id)
 
 	if err != nil {
-		h.logger.Error("failed to create external service", "error", err)
+		h.logger.Error("failed to create external service", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create external service"})
 		return
 	}
@@ -427,7 +428,7 @@ func (h *Handler) updateExternalService(c *gin.Context) {
 
 	_, err = h.db.Exec(c.Request.Context(), query, args...)
 	if err != nil {
-		h.logger.Error("failed to update external service", "error", err)
+		h.logger.Error("failed to update external service", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update external service"})
 		return
 	}
@@ -449,7 +450,7 @@ func (h *Handler) deleteExternalService(c *gin.Context) {
 		serviceID, orgID,
 	)
 	if err != nil {
-		h.logger.Error("failed to delete external service", "error", err)
+		h.logger.Error("failed to delete external service", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete external service"})
 		return
 	}
@@ -480,7 +481,7 @@ func (h *Handler) getExternalHealthOverview(c *gin.Context) {
 		&overview.CriticalUnhealthy,
 	)
 	if err != nil {
-		h.logger.Error("failed to get external health overview", "error", err)
+		h.logger.Error("failed to get external health overview", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch health overview"})
 		return
 	}
@@ -530,7 +531,7 @@ func (h *Handler) listServiceDependencies(c *gin.Context) {
 
 	rows, err := h.db.Query(c.Request.Context(), query, args...)
 	if err != nil {
-		h.logger.Error("failed to query service dependencies", "error", err)
+		h.logger.Error("failed to query service dependencies", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch dependencies"})
 		return
 	}
@@ -548,7 +549,7 @@ func (h *Handler) listServiceDependencies(c *gin.Context) {
 			&d.ExternalServiceName, &d.ExternalServiceType, &d.Provider,
 		)
 		if err != nil {
-			h.logger.Error("failed to scan service dependency", "error", err)
+			h.logger.Error("failed to scan service dependency", zap.Error(err))
 			continue
 		}
 		dependencies = append(dependencies, d)
@@ -608,7 +609,7 @@ func (h *Handler) createServiceDependency(c *gin.Context) {
 	).Scan(&id)
 
 	if err != nil {
-		h.logger.Error("failed to create service dependency", "error", err)
+		h.logger.Error("failed to create service dependency", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create dependency"})
 		return
 	}
@@ -630,7 +631,7 @@ func (h *Handler) deleteServiceDependency(c *gin.Context) {
 		depID, orgID,
 	)
 	if err != nil {
-		h.logger.Error("failed to delete service dependency", "error", err)
+		h.logger.Error("failed to delete service dependency", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete dependency"})
 		return
 	}
@@ -684,7 +685,7 @@ func (h *Handler) getDependencyRisks(c *gin.Context) {
 
 	rows, err := h.db.Query(c.Request.Context(), query, args...)
 	if err != nil {
-		h.logger.Error("failed to query dependency risks", "error", err)
+		h.logger.Error("failed to query dependency risks", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch dependency risks"})
 		return
 	}
@@ -700,7 +701,7 @@ func (h *Handler) getDependencyRisks(c *gin.Context) {
 			&r.FailureImpact, &r.RiskLevel,
 		)
 		if err != nil {
-			h.logger.Error("failed to scan dependency risk", "error", err)
+			h.logger.Error("failed to scan dependency risk", zap.Error(err))
 			continue
 		}
 		risks = append(risks, r)
@@ -751,7 +752,7 @@ func (h *Handler) listExternalIncidents(c *gin.Context) {
 
 	rows, err := h.db.Query(c.Request.Context(), query, args...)
 	if err != nil {
-		h.logger.Error("failed to query external incidents", "error", err)
+		h.logger.Error("failed to query external incidents", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch incidents"})
 		return
 	}
@@ -769,7 +770,7 @@ func (h *Handler) listExternalIncidents(c *gin.Context) {
 			&i.ServiceName,
 		)
 		if err != nil {
-			h.logger.Error("failed to scan external incident", "error", err)
+			h.logger.Error("failed to scan external incident", zap.Error(err))
 			continue
 		}
 		incidents = append(incidents, i)
@@ -819,7 +820,7 @@ func (h *Handler) createExternalIncident(c *gin.Context) {
 	).Scan(&id)
 
 	if err != nil {
-		h.logger.Error("failed to create external incident", "error", err)
+		h.logger.Error("failed to create external incident", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create incident"})
 		return
 	}
@@ -873,7 +874,7 @@ func (h *Handler) updateExternalIncidentStatus(c *gin.Context) {
 
 	_, err = h.db.Exec(c.Request.Context(), query, args...)
 	if err != nil {
-		h.logger.Error("failed to update incident status", "error", err)
+		h.logger.Error("failed to update incident status", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update incident"})
 		return
 	}
@@ -903,7 +904,7 @@ func (h *Handler) getServiceHealthHistory(c *gin.Context) {
 		serviceID, orgID, limit,
 	)
 	if err != nil {
-		h.logger.Error("failed to query health history", "error", err)
+		h.logger.Error("failed to query health history", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch health history"})
 		return
 	}

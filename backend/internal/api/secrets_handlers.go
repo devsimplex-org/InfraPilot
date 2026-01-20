@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 // ============================================================================
@@ -263,7 +264,7 @@ func (h *Handler) listSecrets(c *gin.Context) {
 
 	rows, err := h.db.Query(c.Request.Context(), query, args...)
 	if err != nil {
-		h.logger.Error("Failed to list secrets", "error", err)
+		h.logger.Error("Failed to list secrets", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list secrets"})
 		return
 	}
@@ -282,7 +283,7 @@ func (h *Handler) listSecrets(c *gin.Context) {
 			&s.LastScannedAt, &s.CreatedAt, &s.UpdatedAt,
 		)
 		if err != nil {
-			h.logger.Error("Failed to scan secret", "error", err)
+			h.logger.Error("Failed to scan secret", zap.Error(err))
 			continue
 		}
 		secrets = append(secrets, s)
@@ -377,7 +378,7 @@ func (h *Handler) createSecret(c *gin.Context) {
 	).Scan(&secretID)
 
 	if err != nil {
-		h.logger.Error("Failed to create secret", "error", err)
+		h.logger.Error("Failed to create secret", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create secret"})
 		return
 	}
@@ -399,7 +400,7 @@ func (h *Handler) deleteSecret(c *gin.Context) {
 		secretID, orgID,
 	)
 	if err != nil {
-		h.logger.Error("Failed to delete secret", "error", err)
+		h.logger.Error("Failed to delete secret", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete secret"})
 		return
 	}
@@ -484,7 +485,7 @@ func (h *Handler) listSecretExposures(c *gin.Context) {
 
 	rows, err := h.db.Query(c.Request.Context(), query, args...)
 	if err != nil {
-		h.logger.Error("Failed to list secret exposures", "error", err)
+		h.logger.Error("Failed to list secret exposures", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list exposures"})
 		return
 	}
@@ -503,7 +504,7 @@ func (h *Handler) listSecretExposures(c *gin.Context) {
 			&e.SecretName,
 		)
 		if err != nil {
-			h.logger.Error("Failed to scan exposure", "error", err)
+			h.logger.Error("Failed to scan exposure", zap.Error(err))
 			continue
 		}
 		exposures = append(exposures, e)
@@ -548,7 +549,7 @@ func (h *Handler) updateExposureStatus(c *gin.Context) {
 
 	result, err := h.db.Exec(c.Request.Context(), query, args...)
 	if err != nil {
-		h.logger.Error("Failed to update exposure", "error", err)
+		h.logger.Error("Failed to update exposure", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update exposure"})
 		return
 	}
@@ -619,7 +620,7 @@ func (h *Handler) listRotationHistory(c *gin.Context) {
 
 	rows, err := h.db.Query(c.Request.Context(), query, args...)
 	if err != nil {
-		h.logger.Error("Failed to list rotation history", "error", err)
+		h.logger.Error("Failed to list rotation history", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list rotation history"})
 		return
 	}
@@ -658,7 +659,7 @@ func (h *Handler) listRotationPolicies(c *gin.Context) {
 		orgID,
 	)
 	if err != nil {
-		h.logger.Error("Failed to list rotation policies", "error", err)
+		h.logger.Error("Failed to list rotation policies", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list policies"})
 		return
 	}
@@ -674,7 +675,7 @@ func (h *Handler) listRotationPolicies(c *gin.Context) {
 			&p.Enabled, &p.CreatedAt, &p.UpdatedAt,
 		)
 		if err != nil {
-			h.logger.Error("Failed to scan policy", "error", err)
+			h.logger.Error("Failed to scan policy", zap.Error(err))
 			continue
 		}
 		policies = append(policies, p)
@@ -716,7 +717,7 @@ func (h *Handler) createRotationPolicy(c *gin.Context) {
 	).Scan(&policyID)
 
 	if err != nil {
-		h.logger.Error("Failed to create rotation policy", "error", err)
+		h.logger.Error("Failed to create rotation policy", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create policy"})
 		return
 	}
@@ -738,7 +739,7 @@ func (h *Handler) deleteRotationPolicy(c *gin.Context) {
 		policyID, orgID,
 	)
 	if err != nil {
-		h.logger.Error("Failed to delete rotation policy", "error", err)
+		h.logger.Error("Failed to delete rotation policy", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete policy"})
 		return
 	}
@@ -767,7 +768,7 @@ func (h *Handler) listSecretScans(c *gin.Context) {
 		orgID,
 	)
 	if err != nil {
-		h.logger.Error("Failed to list secret scans", "error", err)
+		h.logger.Error("Failed to list secret scans", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list scans"})
 		return
 	}
@@ -783,7 +784,7 @@ func (h *Handler) listSecretScans(c *gin.Context) {
 			&s.FilesScanned, &s.ContainersScanned, &s.EnvVarsScanned, &s.ErrorMessage, &s.CreatedAt,
 		)
 		if err != nil {
-			h.logger.Error("Failed to scan secret scan result", "error", err)
+			h.logger.Error("Failed to scan secret scan result", zap.Error(err))
 			continue
 		}
 		scans = append(scans, s)
@@ -827,7 +828,7 @@ func (h *Handler) triggerSecretScan(c *gin.Context) {
 	).Scan(&scanID)
 
 	if err != nil {
-		h.logger.Error("Failed to create secret scan", "error", err)
+		h.logger.Error("Failed to create secret scan", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start scan"})
 		return
 	}

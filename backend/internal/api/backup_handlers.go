@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 // ============================================================================
@@ -258,7 +259,7 @@ func (h *Handler) listBackupJobs(c *gin.Context) {
 
 	rows, err := h.db.Query(c.Request.Context(), query, args...)
 	if err != nil {
-		h.logger.Error("Failed to list backup jobs", "error", err)
+		h.logger.Error("Failed to list backup jobs", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list backup jobs"})
 		return
 	}
@@ -276,7 +277,7 @@ func (h *Handler) listBackupJobs(c *gin.Context) {
 			&job.DatabaseName, &job.PolicyName,
 		)
 		if err != nil {
-			h.logger.Error("Failed to scan backup job", "error", err)
+			h.logger.Error("Failed to scan backup job", zap.Error(err))
 			continue
 		}
 		jobs = append(jobs, job)
@@ -310,7 +311,7 @@ func (h *Handler) triggerBackup(c *gin.Context) {
 	).Scan(&jobID)
 
 	if err != nil {
-		h.logger.Error("Failed to create backup job", "error", err)
+		h.logger.Error("Failed to create backup job", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create backup job"})
 		return
 	}
@@ -340,7 +341,7 @@ func (h *Handler) listRestoreOperations(c *gin.Context) {
 		orgID,
 	)
 	if err != nil {
-		h.logger.Error("Failed to list restore operations", "error", err)
+		h.logger.Error("Failed to list restore operations", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list restore operations"})
 		return
 	}
@@ -360,7 +361,7 @@ func (h *Handler) listRestoreOperations(c *gin.Context) {
 			&op.SourceDatabaseName, &op.BackupName,
 		)
 		if err != nil {
-			h.logger.Error("Failed to scan restore operation", "error", err)
+			h.logger.Error("Failed to scan restore operation", zap.Error(err))
 			continue
 		}
 		operations = append(operations, op)
@@ -409,7 +410,7 @@ func (h *Handler) triggerRestore(c *gin.Context) {
 	).Scan(&opID)
 
 	if err != nil {
-		h.logger.Error("Failed to create restore operation", "error", err)
+		h.logger.Error("Failed to create restore operation", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create restore operation"})
 		return
 	}
@@ -448,7 +449,7 @@ func (h *Handler) listRecoveryTests(c *gin.Context) {
 
 	rows, err := h.db.Query(c.Request.Context(), query, args...)
 	if err != nil {
-		h.logger.Error("Failed to list recovery tests", "error", err)
+		h.logger.Error("Failed to list recovery tests", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list recovery tests"})
 		return
 	}
@@ -467,7 +468,7 @@ func (h *Handler) listRecoveryTests(c *gin.Context) {
 			&test.DatabaseName,
 		)
 		if err != nil {
-			h.logger.Error("Failed to scan recovery test", "error", err)
+			h.logger.Error("Failed to scan recovery test", zap.Error(err))
 			continue
 		}
 		tests = append(tests, test)
@@ -501,7 +502,7 @@ func (h *Handler) triggerRecoveryTest(c *gin.Context) {
 	).Scan(&testID)
 
 	if err != nil {
-		h.logger.Error("Failed to create recovery test", "error", err)
+		h.logger.Error("Failed to create recovery test", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create recovery test"})
 		return
 	}
@@ -544,7 +545,7 @@ func (h *Handler) listBackupAlerts(c *gin.Context) {
 
 	rows, err := h.db.Query(c.Request.Context(), query, args...)
 	if err != nil {
-		h.logger.Error("Failed to list backup alerts", "error", err)
+		h.logger.Error("Failed to list backup alerts", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list backup alerts"})
 		return
 	}
@@ -560,7 +561,7 @@ func (h *Handler) listBackupAlerts(c *gin.Context) {
 			&alert.DatabaseName,
 		)
 		if err != nil {
-			h.logger.Error("Failed to scan backup alert", "error", err)
+			h.logger.Error("Failed to scan backup alert", zap.Error(err))
 			continue
 		}
 		alerts = append(alerts, alert)
@@ -605,7 +606,7 @@ func (h *Handler) updateBackupAlertStatus(c *gin.Context) {
 
 	result, err := h.db.Exec(c.Request.Context(), query, args...)
 	if err != nil {
-		h.logger.Error("Failed to update backup alert", "error", err)
+		h.logger.Error("Failed to update backup alert", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update alert"})
 		return
 	}
@@ -672,7 +673,7 @@ func (h *Handler) getRecoveryReadiness(c *gin.Context) {
 		orgID,
 	)
 	if err != nil {
-		h.logger.Error("Failed to get recovery readiness", "error", err)
+		h.logger.Error("Failed to get recovery readiness", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get recovery readiness"})
 		return
 	}
@@ -687,7 +688,7 @@ func (h *Handler) getRecoveryReadiness(c *gin.Context) {
 			&r.LastRTOSeconds, &r.LastRPOSeconds, &r.TestsLast90d, &r.ReadinessStatus,
 		)
 		if err != nil {
-			h.logger.Error("Failed to scan recovery readiness", "error", err)
+			h.logger.Error("Failed to scan recovery readiness", zap.Error(err))
 			continue
 		}
 		readiness = append(readiness, r)
@@ -711,7 +712,7 @@ func (h *Handler) listBackupStorage(c *gin.Context) {
 		orgID,
 	)
 	if err != nil {
-		h.logger.Error("Failed to list backup storage", "error", err)
+		h.logger.Error("Failed to list backup storage", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list backup storage"})
 		return
 	}
@@ -727,7 +728,7 @@ func (h *Handler) listBackupStorage(c *gin.Context) {
 			&s.LastHealthCheck, &s.BackupCount, &s.Enabled, &s.CreatedAt, &s.UpdatedAt,
 		)
 		if err != nil {
-			h.logger.Error("Failed to scan backup storage", "error", err)
+			h.logger.Error("Failed to scan backup storage", zap.Error(err))
 			continue
 		}
 		storages = append(storages, s)
@@ -766,7 +767,7 @@ func (h *Handler) createBackupStorage(c *gin.Context) {
 	).Scan(&storageID)
 
 	if err != nil {
-		h.logger.Error("Failed to create backup storage", "error", err)
+		h.logger.Error("Failed to create backup storage", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create backup storage"})
 		return
 	}
@@ -788,7 +789,7 @@ func (h *Handler) deleteBackupStorage(c *gin.Context) {
 		storageID, orgID,
 	)
 	if err != nil {
-		h.logger.Error("Failed to delete backup storage", "error", err)
+		h.logger.Error("Failed to delete backup storage", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete backup storage"})
 		return
 	}

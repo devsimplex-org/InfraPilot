@@ -222,6 +222,7 @@ export function Table<T = any>({
 
   // Sort data if needed
   const sortedData = React.useMemo(() => {
+    if (!data) return [];
     if (!sortConfig.direction || !sortConfig.key) {
       return data;
     }
@@ -251,7 +252,7 @@ export function Table<T = any>({
   };
 
   // Empty state
-  if (!loading && data.length === 0) {
+  if (!loading && (!data || data.length === 0)) {
     return (
       <div className={cn('overflow-x-auto', containerClassName)}>
         <div className="min-w-full">
@@ -292,9 +293,9 @@ export function Table<T = any>({
                 <input
                   type="checkbox"
                   className="rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500"
-                  checked={selectedRows?.size === data.length && data.length > 0}
+                  checked={selectedRows?.size === data?.length && (data?.length ?? 0) > 0}
                   onChange={(e) => {
-                    if (!selectedRows || !onRowSelect) return;
+                    if (!selectedRows || !onRowSelect || !data) return;
                     if (e.target.checked) {
                       onRowSelect(new Set(data.map((row, index) => keyExtractor(row, index))));
                     } else {
