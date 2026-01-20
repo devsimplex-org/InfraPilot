@@ -1833,6 +1833,202 @@ export interface CreateRateLimitProfileRequest {
   enabled?: boolean;
 }
 
+// Epic 13 v2: Traffic Resources & Policies Types
+export interface PathConfig {
+  path: string;
+  match: 'prefix' | 'exact' | 'regex';
+}
+
+export interface TrafficResource {
+  id: string;
+  org_id: string;
+  agent_id: string;
+  name: string;
+  description?: string;
+  domains: string[];
+  paths: PathConfig[];
+  gateway_type: 'system' | 'application';
+  status: 'draft' | 'pending' | 'active' | 'disabled' | 'error';
+  desired_state?: Record<string, unknown>;
+  applied_state?: Record<string, unknown>;
+  last_applied_at?: string;
+  last_error?: string;
+  labels: Record<string, string>;
+  annotations: Record<string, string>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UpstreamTarget {
+  id?: string;
+  address: string;
+  port: number;
+  weight: number;
+  max_fails: number;
+  fail_timeout_sec: number;
+  is_healthy: boolean;
+  last_health_check?: string;
+  consecutive_failures: number;
+  last_error?: string;
+  enabled: boolean;
+}
+
+export interface TrafficUpstream {
+  id: string;
+  traffic_resource_id: string;
+  name: string;
+  targets: UpstreamTarget[];
+  lb_method: 'round_robin' | 'least_conn' | 'ip_hash' | 'random';
+  health_check_enabled: boolean;
+  health_check_path: string;
+  health_check_interval_sec: number;
+  health_check_timeout_sec: number;
+  healthy_threshold: number;
+  unhealthy_threshold: number;
+  max_connections?: number;
+  max_keepalive: number;
+  connect_timeout_sec: number;
+  read_timeout_sec: number;
+  send_timeout_sec: number;
+  last_health_check?: string;
+  healthy_targets: number;
+  total_targets: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export type TrafficPolicyType =
+  | 'rate_limit'
+  | 'bot_protection'
+  | 'geo_blocking'
+  | 'captcha'
+  | 'ip_filtering'
+  | 'header_transform'
+  | 'cors'
+  | 'authentication';
+
+export interface TrafficPolicy {
+  id: string;
+  org_id: string;
+  name: string;
+  description?: string;
+  policy_type: TrafficPolicyType;
+  config: Record<string, unknown>;
+  is_global: boolean;
+  priority: number;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TrafficPolicyAssignment {
+  id: string;
+  policy_id: string;
+  traffic_resource_id?: string;
+  path_pattern?: string;
+  config_override?: Record<string, unknown>;
+  priority: number;
+  enabled: boolean;
+  created_at: string;
+}
+
+export interface TrafficTLSConfig {
+  id: string;
+  traffic_resource_id: string;
+  cert_source: 'auto' | 'manual' | 'acme';
+  cert_id?: string;
+  min_version: string;
+  max_version: string;
+  cipher_suites?: string[];
+  prefer_server_ciphers: boolean;
+  hsts_enabled: boolean;
+  hsts_max_age: number;
+  hsts_include_subdomains: boolean;
+  hsts_preload: boolean;
+  ocsp_stapling: boolean;
+  mtls_enabled: boolean;
+  mtls_ca_cert?: string;
+  mtls_verify_depth: number;
+  mtls_verify_client: 'off' | 'optional' | 'require';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TrafficApplyHistory {
+  id: string;
+  traffic_resource_id: string;
+  action: 'create' | 'update' | 'delete' | 'rollback' | 'apply' | 'validate';
+  previous_state?: Record<string, unknown>;
+  new_state?: Record<string, unknown>;
+  dry_run_result?: Record<string, unknown>;
+  validation_passed?: boolean;
+  validation_errors?: string[];
+  applied_by?: string;
+  applied_at: string;
+  apply_duration_ms?: number;
+  success?: boolean;
+  error_message?: string;
+  rendered_nginx_config?: string;
+  config_hash?: string;
+}
+
+export interface TrafficResourceSummary {
+  org_id: string;
+  total_resources: number;
+  active_resources: number;
+  draft_resources: number;
+  error_resources: number;
+  system_gateways: number;
+  application_gateways: number;
+  agents_with_traffic: number;
+}
+
+export interface CreateTrafficResourceRequest {
+  agent_id: string;
+  name: string;
+  description?: string;
+  domains: string[];
+  paths?: PathConfig[];
+  gateway_type?: 'system' | 'application';
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+}
+
+export interface CreateTrafficPolicyRequest {
+  name: string;
+  description?: string;
+  policy_type: TrafficPolicyType;
+  config: Record<string, unknown>;
+  is_global?: boolean;
+  priority?: number;
+  enabled?: boolean;
+}
+
+export interface CreateTrafficUpstreamRequest {
+  name: string;
+  targets?: UpstreamTarget[];
+  lb_method?: 'round_robin' | 'least_conn' | 'ip_hash' | 'random';
+  health_check_enabled?: boolean;
+  health_check_path?: string;
+  health_check_interval_sec?: number;
+  health_check_timeout_sec?: number;
+  healthy_threshold?: number;
+  unhealthy_threshold?: number;
+  max_connections?: number;
+  max_keepalive?: number;
+  connect_timeout_sec?: number;
+  read_timeout_sec?: number;
+  send_timeout_sec?: number;
+}
+
+export interface AssignTrafficPolicyRequest {
+  traffic_resource_id: string;
+  path_pattern?: string;
+  config_override?: Record<string, unknown>;
+  priority?: number;
+  enabled?: boolean;
+}
+
 // Epic 14: Database & Data Governance Types
 export interface DatabaseInventoryItem {
   id: string;
@@ -4425,6 +4621,102 @@ export const api = {
     fetchAPI<{ message: string }>(`/tls/config`, {
       method: "PUT",
       body: JSON.stringify(config),
+    }),
+
+  // Epic 13 v2: Traffic Resources & Policies
+  getTrafficSummary: () =>
+    fetchAPI<TrafficResourceSummary>(`/traffic/summary`),
+
+  listTrafficResources: (params?: {
+    agent_id?: string;
+    status?: string;
+    gateway_type?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.agent_id) searchParams.set("agent_id", params.agent_id);
+    if (params?.status) searchParams.set("status", params.status);
+    if (params?.gateway_type) searchParams.set("gateway_type", params.gateway_type);
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    if (params?.offset) searchParams.set("offset", params.offset.toString());
+    const query = searchParams.toString();
+    return fetchAPI<{ resources: TrafficResource[]; total: number }>(
+      `/traffic/resources${query ? `?${query}` : ""}`
+    );
+  },
+
+  getTrafficResource: (resourceId: string) =>
+    fetchAPI<TrafficResource>(`/traffic/resources/${resourceId}`),
+
+  createTrafficResource: (data: CreateTrafficResourceRequest) =>
+    fetchAPI<TrafficResource>(`/traffic/resources`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateTrafficResource: (resourceId: string, data: Partial<TrafficResource>) =>
+    fetchAPI<{ message: string }>(`/traffic/resources/${resourceId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  deleteTrafficResource: (resourceId: string) =>
+    fetchAPI<{ message: string }>(`/traffic/resources/${resourceId}`, {
+      method: "DELETE",
+    }),
+
+  // Traffic Upstreams
+  listTrafficUpstreams: (resourceId: string) =>
+    fetchAPI<{ upstreams: TrafficUpstream[] }>(`/traffic/resources/${resourceId}/upstreams`),
+
+  createTrafficUpstream: (resourceId: string, data: CreateTrafficUpstreamRequest) =>
+    fetchAPI<TrafficUpstream>(`/traffic/resources/${resourceId}/upstreams`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  // Traffic Apply History
+  getTrafficApplyHistory: (resourceId: string) =>
+    fetchAPI<{ history: TrafficApplyHistory[] }>(`/traffic/resources/${resourceId}/history`),
+
+  // Traffic Policies
+  listTrafficPolicies: (params?: { type?: TrafficPolicyType; limit?: number; offset?: number }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.type) searchParams.set("type", params.type);
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    if (params?.offset) searchParams.set("offset", params.offset.toString());
+    const query = searchParams.toString();
+    return fetchAPI<{ policies: TrafficPolicy[] }>(
+      `/traffic/policies${query ? `?${query}` : ""}`
+    );
+  },
+
+  getTrafficPolicy: (policyId: string) =>
+    fetchAPI<TrafficPolicy>(`/traffic/policies/${policyId}`),
+
+  createTrafficPolicy: (data: CreateTrafficPolicyRequest) =>
+    fetchAPI<TrafficPolicy>(`/traffic/policies`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateTrafficPolicy: (policyId: string, data: Partial<TrafficPolicy>) =>
+    fetchAPI<{ message: string }>(`/traffic/policies/${policyId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  deleteTrafficPolicy: (policyId: string) =>
+    fetchAPI<{ message: string }>(`/traffic/policies/${policyId}`, {
+      method: "DELETE",
+    }),
+
+  // Policy Assignment
+  assignTrafficPolicy: (policyId: string, data: AssignTrafficPolicyRequest) =>
+    fetchAPI<TrafficPolicyAssignment>(`/traffic/policies/${policyId}/assign`, {
+      method: "POST",
+      body: JSON.stringify(data),
     }),
 
   // Epic 14: Database & Data Governance
