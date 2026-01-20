@@ -392,7 +392,7 @@ export default function RegistriesPage() {
   }, [activeTab, connectedRegistries, selectedRegistry]);
 
   return (
-    <div className="p-6">
+    <div className="space-y-6">
       <PageHeader
         title="Container Registries"
         description="Connect to container registries to browse and deploy images"
