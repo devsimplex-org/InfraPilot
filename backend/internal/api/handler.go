@@ -351,6 +351,36 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				runtime.GET("/posture", h.getRuntimeSecurityPosture)
 			}
 
+			// Traffic & Exposure Governance (Epic 13)
+			exposure := protected.Group("/exposure")
+			{
+				exposure.GET("/endpoints", h.listExposedEndpoints)
+				exposure.GET("/endpoints/:id", h.getExposedEndpoint)
+				exposure.POST("/endpoints", h.RequireManageAlerts(), h.createExposedEndpoint)
+				exposure.PUT("/endpoints/:id", h.RequireManageAlerts(), h.updateExposedEndpoint)
+				exposure.DELETE("/endpoints/:id", h.RequireManageAlerts(), h.deleteExposedEndpoint)
+				exposure.GET("/summary", h.getExposureSummary)
+				exposure.GET("/map", h.getExposureMap)
+			}
+
+			// Rate Limit Profiles (Epic 13)
+			ratelimits := protected.Group("/ratelimits")
+			{
+				ratelimits.GET("/profiles", h.listRateLimitProfiles)
+				ratelimits.POST("/profiles", h.RequireManageAlerts(), h.createRateLimitProfile)
+				ratelimits.PUT("/profiles/:id", h.RequireManageAlerts(), h.updateRateLimitProfile)
+				ratelimits.DELETE("/profiles/:id", h.RequireManageAlerts(), h.deleteRateLimitProfile)
+			}
+
+			// TLS Governance (Epic 13)
+			tls := protected.Group("/tls")
+			{
+				tls.GET("/posture", h.getTLSPosture)
+				tls.GET("/scans", h.listTLSScans)
+				tls.GET("/config", h.getTLSAlertConfig)
+				tls.PUT("/config", h.RequireManageAlerts(), h.updateTLSAlertConfig)
+			}
+
 			// Container Registries
 			registries := protected.Group("/registries")
 			{

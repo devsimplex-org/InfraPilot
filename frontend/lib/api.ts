@@ -1652,6 +1652,187 @@ export interface TestConnectionResponse {
   error?: string;
 }
 
+// Epic 13: Traffic & Exposure Governance Types
+export interface ExposedEndpoint {
+  id: string;
+  org_id: string;
+  agent_id: string;
+  proxy_host_id?: string;
+  deployment_id?: string;
+  domain: string;
+  path: string;
+  port: number;
+  protocol: string;
+  exposure_type: 'public' | 'internal' | 'private' | 'partner';
+  authentication_required: boolean;
+  authentication_type?: string;
+  risk_score: number;
+  risk_factors: Record<string, unknown>;
+  last_risk_assessment?: string;
+  avg_requests_per_hour?: number;
+  peak_requests_per_hour?: number;
+  unique_clients_24h?: number;
+  last_accessed_at?: string;
+  service_name?: string;
+  service_owner?: string;
+  description?: string;
+  tags: string[];
+  status: 'active' | 'inactive' | 'deprecated' | 'blocked';
+  discovered_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RateLimitProfile {
+  id: string;
+  org_id: string;
+  name: string;
+  description?: string;
+  requests_per_second?: number;
+  requests_per_minute?: number;
+  requests_per_hour?: number;
+  burst_size: number;
+  key_type: 'ip' | 'api_key' | 'user' | 'custom';
+  custom_key_header?: string;
+  exceeded_action: 'reject' | 'throttle' | 'queue';
+  exceeded_status_code: number;
+  exceeded_message: string;
+  is_default: boolean;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RateLimitAssignment {
+  id: string;
+  org_id: string;
+  profile_id: string;
+  endpoint_id?: string;
+  proxy_host_id?: string;
+  domain_pattern?: string;
+  requests_per_second?: number;
+  requests_per_minute?: number;
+  burst_size?: number;
+  priority: number;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TLSAlertConfig {
+  id: string;
+  org_id: string;
+  expiry_warning_days: number;
+  expiry_critical_days: number;
+  alert_on_weak_cipher: boolean;
+  alert_on_protocol_downgrade: boolean;
+  alert_on_cert_mismatch: boolean;
+  alert_on_self_signed: boolean;
+  alert_on_expired: boolean;
+  notification_channels: string[];
+  auto_scan_enabled: boolean;
+  scan_interval_hours: number;
+  last_scan_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TLSScanResult {
+  id: string;
+  org_id: string;
+  endpoint_id?: string;
+  proxy_host_id?: string;
+  domain: string;
+  cert_valid: boolean;
+  cert_issuer?: string;
+  cert_subject?: string;
+  cert_expires_at?: string;
+  cert_days_left?: number;
+  cert_san: string[];
+  is_self_signed: boolean;
+  protocol_version?: string;
+  cipher_suite?: string;
+  key_exchange?: string;
+  is_weak_cipher: boolean;
+  hsts_enabled: boolean;
+  hsts_max_age?: number;
+  hsts_preload: boolean;
+  grade?: string;
+  score?: number;
+  issues: Record<string, unknown>;
+  scanned_at: string;
+  created_at: string;
+}
+
+export interface ExposureSummary {
+  org_id: string;
+  total_endpoints: number;
+  public_endpoints: number;
+  internal_endpoints: number;
+  unauthenticated_public: number;
+  avg_risk_score: number;
+  high_risk_endpoints: number;
+  active_endpoints: number;
+}
+
+export interface TLSPosture {
+  org_id: string;
+  total_domains: number;
+  valid_certs: number;
+  invalid_certs: number;
+  self_signed: number;
+  weak_ciphers: number;
+  expiring_critical: number;
+  expiring_warning: number;
+  avg_score: number;
+}
+
+export interface ExposureMap {
+  endpoints: ExposedEndpoint[];
+  connection_matrix: Array<{
+    source: string;
+    target: string;
+    protocol: string;
+    port: number;
+    encrypted: boolean;
+  }>;
+  external_domains: string[];
+  internal_services: string[];
+}
+
+export interface CreateExposedEndpointRequest {
+  agent_id: string;
+  proxy_host_id?: string;
+  deployment_id?: string;
+  domain: string;
+  path?: string;
+  port: number;
+  protocol?: string;
+  exposure_type: 'public' | 'internal' | 'private' | 'partner';
+  authentication_required?: boolean;
+  authentication_type?: string;
+  service_name?: string;
+  service_owner?: string;
+  description?: string;
+  tags?: string[];
+}
+
+export interface CreateRateLimitProfileRequest {
+  name: string;
+  description?: string;
+  requests_per_second?: number;
+  requests_per_minute?: number;
+  requests_per_hour?: number;
+  burst_size?: number;
+  key_type?: 'ip' | 'api_key' | 'user' | 'custom';
+  custom_key_header?: string;
+  exceeded_action?: 'reject' | 'throttle' | 'queue';
+  exceeded_status_code?: number;
+  exceeded_message?: string;
+  is_default?: boolean;
+  enabled?: boolean;
+}
+
 // API methods
 export const api = {
   // Setup (first-run)
@@ -3090,6 +3271,96 @@ export const api = {
     fetchAPI<ListTagsResponse>(
       `/registries/${registryId}/repositories/${encodeURIComponent(repository)}/tags?page=${page}&page_size=${pageSize}`
     ),
+
+  // Epic 13: Traffic & Exposure Governance
+  listExposedEndpoints: (params?: {
+    exposure_type?: string;
+    status?: string;
+    min_risk_score?: number;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.exposure_type) searchParams.set("exposure_type", params.exposure_type);
+    if (params?.status) searchParams.set("status", params.status);
+    if (params?.min_risk_score !== undefined) searchParams.set("min_risk_score", params.min_risk_score.toString());
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    if (params?.offset) searchParams.set("offset", params.offset.toString());
+    const query = searchParams.toString();
+    return fetchAPI<{ endpoints: ExposedEndpoint[]; total: number }>(
+      `/exposure/endpoints${query ? `?${query}` : ""}`
+    );
+  },
+
+  getExposedEndpoint: (endpointId: string) =>
+    fetchAPI<ExposedEndpoint>(`/exposure/endpoints/${endpointId}`),
+
+  createExposedEndpoint: (data: CreateExposedEndpointRequest) =>
+    fetchAPI<ExposedEndpoint>(`/exposure/endpoints`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateExposedEndpoint: (endpointId: string, data: Partial<ExposedEndpoint>) =>
+    fetchAPI<{ message: string }>(`/exposure/endpoints/${endpointId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  deleteExposedEndpoint: (endpointId: string) =>
+    fetchAPI<{ message: string }>(`/exposure/endpoints/${endpointId}`, {
+      method: "DELETE",
+    }),
+
+  getExposureSummary: () =>
+    fetchAPI<ExposureSummary>(`/exposure/summary`),
+
+  getExposureMap: () =>
+    fetchAPI<ExposureMap>(`/exposure/map`),
+
+  // Rate Limit Profiles
+  listRateLimitProfiles: () =>
+    fetchAPI<{ profiles: RateLimitProfile[] }>(`/ratelimits/profiles`),
+
+  createRateLimitProfile: (data: CreateRateLimitProfileRequest) =>
+    fetchAPI<RateLimitProfile>(`/ratelimits/profiles`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateRateLimitProfile: (profileId: string, data: Partial<RateLimitProfile>) =>
+    fetchAPI<{ message: string }>(`/ratelimits/profiles/${profileId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  deleteRateLimitProfile: (profileId: string) =>
+    fetchAPI<{ message: string }>(`/ratelimits/profiles/${profileId}`, {
+      method: "DELETE",
+    }),
+
+  // TLS Governance
+  getTLSPosture: () =>
+    fetchAPI<TLSPosture>(`/tls/posture`),
+
+  listTLSScans: (params?: { domain?: string; limit?: number }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.domain) searchParams.set("domain", params.domain);
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    const query = searchParams.toString();
+    return fetchAPI<{ scans: TLSScanResult[] }>(
+      `/tls/scans${query ? `?${query}` : ""}`
+    );
+  },
+
+  getTLSAlertConfig: () =>
+    fetchAPI<TLSAlertConfig>(`/tls/config`),
+
+  updateTLSAlertConfig: (config: Partial<TLSAlertConfig>) =>
+    fetchAPI<{ message: string }>(`/tls/config`, {
+      method: "PUT",
+      body: JSON.stringify(config),
+    }),
 
   // Generic fetch for custom endpoints
   fetchAPI: <T>(endpoint: string, options?: RequestInit) => fetchAPI<T>(endpoint, options),
