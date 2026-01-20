@@ -293,7 +293,7 @@ export default function ScanDetailPage() {
           value={scan.fixable}
           icon={CheckCircle}
           iconColor="text-green-600 dark:text-green-400"
-          subtitle={`${scan.total > 0 ? Math.round((scan.fixable / scan.total) * 100) : 0}%`}
+          description={`${scan.total > 0 ? Math.round((scan.fixable / scan.total) * 100) : 0}%`}
         />
       </MetricsGrid>
 
