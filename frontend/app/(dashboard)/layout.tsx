@@ -96,6 +96,17 @@ const navigationSections: NavigationSection[] = [
     ],
   },
   {
+    id: "traffic",
+    label: "Traffic",
+    icon: Network,
+    color: "text-emerald-600 dark:text-emerald-400",
+    items: [
+      { name: "Overview", href: "/traffic", icon: Network },
+      { name: "Resources", href: "/traffic/resources", icon: Globe },
+      { name: "Policies", href: "/traffic/policies", icon: Shield },
+    ],
+  },
+  {
     id: "data",
     label: "Data",
     icon: Database,
