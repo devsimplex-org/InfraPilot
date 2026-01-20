@@ -381,6 +381,37 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				tls.PUT("/config", h.RequireManageAlerts(), h.updateTLSAlertConfig)
 			}
 
+			// Traffic Resources & Policies (Epic 13 v2)
+			traffic := protected.Group("/traffic")
+			{
+				// Traffic summary
+				traffic.GET("/summary", h.getTrafficSummary)
+
+				// Traffic Resources
+				traffic.GET("/resources", h.listTrafficResources)
+				traffic.GET("/resources/:id", h.getTrafficResource)
+				traffic.POST("/resources", h.RequireManageAlerts(), h.createTrafficResource)
+				traffic.PUT("/resources/:id", h.RequireManageAlerts(), h.updateTrafficResource)
+				traffic.DELETE("/resources/:id", h.RequireManageAlerts(), h.deleteTrafficResource)
+
+				// Traffic Resource Upstreams
+				traffic.GET("/resources/:id/upstreams", h.listTrafficUpstreams)
+				traffic.POST("/resources/:id/upstreams", h.RequireManageAlerts(), h.createTrafficUpstream)
+
+				// Traffic Resource History
+				traffic.GET("/resources/:id/history", h.getTrafficApplyHistory)
+
+				// Traffic Policies
+				traffic.GET("/policies", h.listTrafficPolicies)
+				traffic.GET("/policies/:id", h.getTrafficPolicy)
+				traffic.POST("/policies", h.RequireManageAlerts(), h.createTrafficPolicy)
+				traffic.PUT("/policies/:id", h.RequireManageAlerts(), h.updateTrafficPolicy)
+				traffic.DELETE("/policies/:id", h.RequireManageAlerts(), h.deleteTrafficPolicy)
+
+				// Policy Assignment
+				traffic.POST("/policies/:id/assign", h.RequireManageAlerts(), h.assignTrafficPolicy)
+			}
+
 			// Database & Data Governance (Epic 14)
 			databases := protected.Group("/databases")
 			{
