@@ -84,6 +84,7 @@ const navigationSections: NavigationSection[] = [
     color: "text-red-600 dark:text-red-400",
     items: [
       { name: "Runtime Security", href: "/runtime-security", icon: ShieldCheck },
+      { name: "Exposure", href: "/run/exposure", icon: Globe },
       { name: "Containers", href: "/containers", icon: Container },
       { name: "Logs", href: "/logs", icon: FileText },
       { name: "Alerts", href: "/alerts", icon: Bell },
