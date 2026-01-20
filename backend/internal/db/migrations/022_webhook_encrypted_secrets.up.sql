@@ -4,6 +4,9 @@
 
 ALTER TABLE webhook_configs ADD COLUMN IF NOT EXISTS secret_encrypted BYTEA;
 
+-- Make secret_hash nullable since we're migrating to encrypted secrets
+ALTER TABLE webhook_configs ALTER COLUMN secret_hash DROP NOT NULL;
+
 -- Note: Existing webhooks will need their secrets regenerated since we cannot
 -- recover the original secret from the bcrypt hash. The old secret_hash column
 -- is kept temporarily for reference but will not be used for verification.

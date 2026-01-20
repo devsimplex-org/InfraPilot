@@ -170,7 +170,7 @@ func (h *Handler) ssoLogin(c *gin.Context) {
 // ssoCallback handles the SSO callback from the IdP
 func (h *Handler) ssoCallback(c *gin.Context) {
 	configIDStr := c.Param("config_id")
-	configID, err := uuid.Parse(configIDStr)
+	_, err := uuid.Parse(configIDStr)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid configuration ID"})
 		return
@@ -273,13 +273,13 @@ func (h *Handler) ssoCallback(c *gin.Context) {
 	}
 
 	// Generate JWT tokens
-	accessToken, err := h.auth.GenerateAccessToken(userID, ssoConfig.OrgID, userRole)
+	accessToken, err := h.auth.GenerateAccessToken(userID, ssoConfig.OrgID, userInfo.Email, userRole, true)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate token"})
 		return
 	}
 
-	refreshToken, err := h.auth.GenerateRefreshToken(userID)
+	refreshToken, err := h.auth.GenerateRefreshToken()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate refresh token"})
 		return
@@ -295,7 +295,7 @@ func (h *Handler) ssoCallback(c *gin.Context) {
 	}
 
 	// Log the login
-	h.logAuditEvent(ctx, ssoConfig.OrgID, userID, "sso_login", "user", userID.String(), map[string]interface{}{
+	h.logAuditEvent(c, "sso_login", "user", &userID, map[string]interface{}{
 		"provider": ssoConfig.Provider,
 		"email":    userInfo.Email,
 	})
