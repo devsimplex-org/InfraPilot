@@ -5206,7 +5206,7 @@ export const api = {
   },
 
   getMetricSummary: () =>
-    fetchAPI<MetricSummary[]>(`/metrics/summary`),
+    fetchAPI<{ summaries: MetricSummary[] }>(`/metrics/summary`),
 
   // Dashboards
   listDashboards: (params?: {
