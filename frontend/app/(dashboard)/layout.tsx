@@ -31,6 +31,9 @@ import {
   Scale,
   Wrench,
   Box,
+  Database,
+  Key,
+  Archive,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuthStore } from "@/lib/auth";
@@ -39,6 +42,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { AlertBar } from "@/components/ui/alert-bar";
 import { api } from "@/lib/api";
 import { Navigation, NavigationSection } from "@/components/ui/Navigation";
+import { CommandPalette } from "@/components/ui/CommandPalette";
 
 // DevSecOps Lifecycle Navigation Structure
 const navigationSections: NavigationSection[] = [
@@ -91,6 +95,17 @@ const navigationSections: NavigationSection[] = [
     ],
   },
   {
+    id: "data",
+    label: "Data",
+    icon: Database,
+    color: "text-cyan-600 dark:text-cyan-400",
+    items: [
+      { name: "Databases", href: "/data/databases", icon: Database },
+      { name: "Backups", href: "/data/backups", icon: Archive },
+      { name: "Secrets", href: "/data/secrets", icon: Key },
+    ],
+  },
+  {
     id: "govern",
     label: "Govern",
     icon: Scale,
@@ -109,6 +124,7 @@ const navigationSections: NavigationSection[] = [
     color: "text-gray-600 dark:text-gray-400",
     items: [
       { name: "Platform Security", href: "/platform-security", icon: ShieldCheck },
+      { name: "Background Jobs", href: "/platform/jobs", icon: Activity },
       { name: "Proxies", href: "/proxies", icon: Globe },
       { name: "Networks", href: "/docker/networks", icon: Network },
       { name: "Volumes", href: "/docker/volumes", icon: HardDrive },
@@ -304,6 +320,9 @@ export default function DashboardLayout({
           <div className="flex-1 overflow-auto p-4 lg:p-8">{children}</div>
         </main>
       </div>
+
+      {/* Command Palette - accessible via Cmd+K or Ctrl+K */}
+      <CommandPalette />
     </div>
   );
 }
