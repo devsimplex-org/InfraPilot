@@ -381,6 +381,93 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				tls.PUT("/config", h.RequireManageAlerts(), h.updateTLSAlertConfig)
 			}
 
+			// Database & Data Governance (Epic 14)
+			databases := protected.Group("/databases")
+			{
+				databases.GET("", h.listDatabaseInventory)
+				databases.GET("/posture", h.getDatabasePosture)
+				databases.GET("/compliance", h.getDatabaseBackupCompliance)
+				databases.POST("", h.RequireManageAlerts(), h.createDatabaseInventory)
+				databases.GET("/:id", h.getDatabaseInventoryItem)
+				databases.PUT("/:id", h.RequireManageAlerts(), h.updateDatabaseInventory)
+				databases.DELETE("/:id", h.RequireManageAlerts(), h.deleteDatabaseInventory)
+				databases.GET("/:id/backups", h.listDatabaseBackups)
+			}
+
+			// Backup & Recovery (Epic 15)
+			backups := protected.Group("/backups")
+			{
+				backups.GET("/overview", h.getBackupOverview)
+				backups.GET("/jobs", h.listBackupJobs)
+				backups.POST("/jobs", h.RequireManageAlerts(), h.triggerBackup)
+				backups.GET("/restores", h.listRestoreOperations)
+				backups.POST("/restores", h.RequireManageAlerts(), h.triggerRestore)
+				backups.GET("/recovery-tests", h.listRecoveryTests)
+				backups.POST("/recovery-tests", h.RequireManageAlerts(), h.triggerRecoveryTest)
+				backups.GET("/readiness", h.getRecoveryReadiness)
+				backups.GET("/alerts", h.listBackupAlerts)
+				backups.PUT("/alerts/:id", h.RequireManageAlerts(), h.updateBackupAlertStatus)
+				backups.GET("/storage", h.listBackupStorage)
+				backups.POST("/storage", h.RequireManageAlerts(), h.createBackupStorage)
+				backups.DELETE("/storage/:id", h.RequireManageAlerts(), h.deleteBackupStorage)
+			}
+
+			// Secrets Hygiene (Epic 16)
+			secrets := protected.Group("/secrets")
+			{
+				secrets.GET("", h.listSecrets)
+				secrets.GET("/hygiene", h.getSecretsHygieneSummary)
+				secrets.POST("", h.RequireManageAlerts(), h.createSecret)
+				secrets.GET("/:id", h.getSecret)
+				secrets.DELETE("/:id", h.RequireManageAlerts(), h.deleteSecret)
+				secrets.GET("/exposures", h.listSecretExposures)
+				secrets.GET("/exposures/summary", h.getSecretExposureSummary)
+				secrets.PUT("/exposures/:id", h.RequireManageAlerts(), h.updateExposureStatus)
+				secrets.GET("/rotations", h.listRotationHistory)
+				secrets.GET("/policies", h.listRotationPolicies)
+				secrets.POST("/policies", h.RequireManageAlerts(), h.createRotationPolicy)
+				secrets.DELETE("/policies/:id", h.RequireManageAlerts(), h.deleteRotationPolicy)
+				secrets.GET("/scans", h.listSecretScans)
+				secrets.POST("/scans", h.RequireManageAlerts(), h.triggerSecretScan)
+			}
+
+			// Background Jobs & Workers (Epic 17)
+			jobs := protected.Group("/jobs")
+			{
+				jobs.GET("", h.listJobs)
+				jobs.GET("/statistics", h.getJobStatistics)
+				jobs.POST("", h.RequireManageAlerts(), h.createJob)
+				jobs.GET("/:id", h.getJob)
+				jobs.POST("/:id/cancel", h.RequireManageAlerts(), h.cancelJob)
+				jobs.POST("/:id/retry", h.RequireManageAlerts(), h.retryJob)
+				jobs.GET("/:id/logs", h.getJobLogs)
+				jobs.GET("/schedules", h.listSchedules)
+				jobs.POST("/schedules", h.RequireManageAlerts(), h.createSchedule)
+				jobs.PUT("/schedules/:id/toggle", h.RequireManageAlerts(), h.toggleSchedule)
+				jobs.DELETE("/schedules/:id", h.RequireManageAlerts(), h.deleteSchedule)
+				jobs.GET("/workers", h.listWorkers)
+				jobs.GET("/workers/summary", h.getWorkerSummary)
+			}
+
+			// External Dependencies (Epic 18)
+			dependencies := protected.Group("/dependencies")
+			{
+				dependencies.GET("", h.listExternalServices)
+				dependencies.GET("/overview", h.getExternalHealthOverview)
+				dependencies.GET("/risks", h.getDependencyRisks)
+				dependencies.POST("", h.RequireManageAlerts(), h.createExternalService)
+				dependencies.GET("/:serviceId", h.getExternalService)
+				dependencies.PUT("/:serviceId", h.RequireManageAlerts(), h.updateExternalService)
+				dependencies.DELETE("/:serviceId", h.RequireManageAlerts(), h.deleteExternalService)
+				dependencies.GET("/:serviceId/health", h.getServiceHealthHistory)
+				dependencies.GET("/mappings", h.listServiceDependencies)
+				dependencies.POST("/mappings", h.RequireManageAlerts(), h.createServiceDependency)
+				dependencies.DELETE("/mappings/:dependencyId", h.RequireManageAlerts(), h.deleteServiceDependency)
+				dependencies.GET("/incidents", h.listExternalIncidents)
+				dependencies.POST("/incidents", h.RequireManageAlerts(), h.createExternalIncident)
+				dependencies.PUT("/incidents/:incidentId", h.RequireManageAlerts(), h.updateExternalIncidentStatus)
+			}
+
 			// Container Registries
 			registries := protected.Group("/registries")
 			{

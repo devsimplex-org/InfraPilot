@@ -1833,6 +1833,842 @@ export interface CreateRateLimitProfileRequest {
   enabled?: boolean;
 }
 
+// Epic 14: Database & Data Governance Types
+export interface DatabaseInventoryItem {
+  id: string;
+  org_id: string;
+  agent_id: string;
+  deployment_id?: string;
+  name: string;
+  db_type: 'postgresql' | 'mysql' | 'mongodb' | 'redis' | 'elasticsearch';
+  version?: string;
+  container_id?: string;
+  container_name?: string;
+  host?: string;
+  port?: number;
+  database_name?: string;
+  data_classification: 'public' | 'internal' | 'confidential' | 'restricted';
+  environment: 'production' | 'staging' | 'development' | 'testing';
+  is_primary: boolean;
+  is_replica: boolean;
+  replica_of?: string;
+  pii_data: boolean;
+  pci_data: boolean;
+  hipaa_data: boolean;
+  gdpr_relevant: boolean;
+  size_bytes?: number;
+  table_count?: number;
+  active_connections?: number;
+  max_connections?: number;
+  status: 'healthy' | 'degraded' | 'unhealthy' | 'offline';
+  last_health_check?: string;
+  replication_lag_seconds?: number;
+  owner_team?: string;
+  owner_contact?: string;
+  description?: string;
+  tags: string[];
+  discovered_at: string;
+  auto_discovered: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DatabaseBackup {
+  id: string;
+  org_id: string;
+  database_id: string;
+  backup_type: 'full' | 'incremental' | 'differential' | 'snapshot' | 'wal';
+  backup_name?: string;
+  backup_path?: string;
+  size_bytes?: number;
+  compressed_size_bytes?: number;
+  compression_ratio?: number;
+  encryption_enabled: boolean;
+  encryption_algorithm?: string;
+  started_at: string;
+  completed_at?: string;
+  duration_seconds?: number;
+  status: 'running' | 'completed' | 'failed' | 'cancelled' | 'verified';
+  error_message?: string;
+  retention_days: number;
+  expires_at?: string;
+  is_offsite: boolean;
+  offsite_location?: string;
+  last_verified_at?: string;
+  verification_status?: 'verified' | 'failed' | 'pending';
+  verification_notes?: string;
+  recovery_point_objective_minutes?: number;
+  recovery_time_objective_minutes?: number;
+  can_point_in_time_restore: boolean;
+  earliest_restore_point?: string;
+  latest_restore_point?: string;
+  created_at: string;
+}
+
+export interface DatabasePosture {
+  org_id: string;
+  total_databases: number;
+  healthy_databases: number;
+  degraded_databases: number;
+  unhealthy_databases: number;
+  pii_databases: number;
+  restricted_databases: number;
+  replica_count: number;
+  total_size_bytes?: number;
+}
+
+export interface BackupCompliance {
+  org_id: string;
+  database_id: string;
+  database_name: string;
+  db_type: string;
+  data_classification: string;
+  last_backup_at?: string;
+  backups_last_24h: number;
+  backups_last_7d: number;
+  compliance_status: 'compliant' | 'warning' | 'non_compliant';
+}
+
+export interface CreateDatabaseRequest {
+  agent_id: string;
+  deployment_id?: string;
+  name: string;
+  db_type: 'postgresql' | 'mysql' | 'mongodb' | 'redis' | 'elasticsearch';
+  version?: string;
+  container_id?: string;
+  container_name?: string;
+  host?: string;
+  port?: number;
+  database_name?: string;
+  data_classification?: 'public' | 'internal' | 'confidential' | 'restricted';
+  environment?: 'production' | 'staging' | 'development' | 'testing';
+  is_primary?: boolean;
+  is_replica?: boolean;
+  replica_of?: string;
+  pii_data?: boolean;
+  pci_data?: boolean;
+  hipaa_data?: boolean;
+  gdpr_relevant?: boolean;
+  owner_team?: string;
+  owner_contact?: string;
+  description?: string;
+  tags?: string[];
+}
+
+// Epic 15: Backup & Recovery Types
+export interface BackupJob {
+  id: string;
+  org_id: string;
+  policy_id?: string;
+  database_id?: string;
+  job_type: 'scheduled' | 'manual' | 'emergency';
+  triggered_by?: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'skipped';
+  progress_percent: number;
+  current_step?: string;
+  scheduled_at?: string;
+  started_at?: string;
+  completed_at?: string;
+  duration_seconds?: number;
+  backup_id?: string;
+  error_message?: string;
+  error_code?: string;
+  retry_count: number;
+  max_retries: number;
+  created_at: string;
+  updated_at: string;
+  database_name?: string;
+  policy_name?: string;
+}
+
+export interface RestoreOperation {
+  id: string;
+  org_id: string;
+  backup_id: string;
+  source_database_id: string;
+  target_type: 'existing' | 'new' | 'test_environment';
+  target_database_id?: string;
+  target_name?: string;
+  target_host?: string;
+  target_port?: number;
+  restore_type: 'full' | 'partial' | 'point_in_time';
+  point_in_time_target?: string;
+  triggered_by_email?: string;
+  reason?: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'rollback';
+  progress_percent: number;
+  current_step?: string;
+  started_at?: string;
+  completed_at?: string;
+  duration_seconds?: number;
+  rows_restored?: number;
+  tables_restored?: number;
+  size_restored_bytes?: number;
+  error_message?: string;
+  created_at: string;
+  updated_at: string;
+  source_database_name?: string;
+  backup_name?: string;
+}
+
+export interface RecoveryTest {
+  id: string;
+  org_id: string;
+  database_id: string;
+  backup_id?: string;
+  test_type: 'restore' | 'failover' | 'switchover' | 'full_dr';
+  test_name?: string;
+  test_scenario?: string;
+  triggered_by_email?: string;
+  status: 'pending' | 'running' | 'passed' | 'failed' | 'cancelled';
+  scheduled_at?: string;
+  started_at?: string;
+  completed_at?: string;
+  actual_rto_seconds?: number;
+  expected_rto_seconds?: number;
+  actual_rpo_seconds?: number;
+  expected_rpo_seconds?: number;
+  rto_met?: boolean;
+  rpo_met?: boolean;
+  data_integrity_check?: boolean;
+  error_message?: string;
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+  database_name?: string;
+}
+
+export interface BackupAlert {
+  id: string;
+  org_id: string;
+  database_id?: string;
+  backup_id?: string;
+  policy_id?: string;
+  alert_type: 'backup_failed' | 'backup_missed' | 'storage_warning' | 'retention_expiring' | 'verification_failed' | 'rpo_breach';
+  severity: 'info' | 'warning' | 'critical';
+  title: string;
+  message: string;
+  status: 'active' | 'acknowledged' | 'resolved' | 'snoozed';
+  acknowledged_at?: string;
+  resolved_at?: string;
+  created_at: string;
+  database_name?: string;
+}
+
+export interface BackupStorage {
+  id: string;
+  org_id: string;
+  name: string;
+  storage_type: 'local' | 's3' | 'gcs' | 'azure_blob' | 'nfs';
+  location: string;
+  is_primary: boolean;
+  is_offsite: boolean;
+  encryption_enabled: boolean;
+  compression_enabled: boolean;
+  total_capacity_bytes?: number;
+  used_bytes: number;
+  warning_threshold_percent: number;
+  critical_threshold_percent: number;
+  status: 'healthy' | 'degraded' | 'unreachable' | 'full';
+  last_health_check?: string;
+  backup_count: number;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BackupOverview {
+  databases_with_backups: number;
+  total_backups: number;
+  successful_backups: number;
+  failed_backups: number;
+  backups_last_24h: number;
+  backups_last_7d: number;
+  total_backup_size_bytes: number;
+  last_backup_at?: string;
+  avg_backup_duration_seconds?: number;
+}
+
+export interface RecoveryReadiness {
+  database_id: string;
+  database_name: string;
+  db_type: string;
+  data_classification: string;
+  last_successful_backup?: string;
+  last_successful_test?: string;
+  last_rto_seconds?: number;
+  last_rpo_seconds?: number;
+  tests_last_90d: number;
+  readiness_status: 'ready' | 'untested' | 'no_backup';
+}
+
+export interface TriggerBackupRequest {
+  database_id: string;
+  backup_type?: string;
+  reason?: string;
+}
+
+export interface TriggerRestoreRequest {
+  backup_id: string;
+  target_type: 'existing' | 'new' | 'test_environment';
+  target_database_id?: string;
+  target_name?: string;
+  restore_type?: string;
+  point_in_time_target?: string;
+  reason?: string;
+}
+
+export interface TriggerRecoveryTestRequest {
+  database_id: string;
+  test_type?: string;
+  test_name?: string;
+  test_scenario?: string;
+}
+
+export interface CreateBackupStorageRequest {
+  name: string;
+  storage_type: 'local' | 's3' | 'gcs' | 'azure_blob' | 'nfs';
+  location: string;
+  is_primary?: boolean;
+  is_offsite?: boolean;
+  encryption_enabled?: boolean;
+  compression_enabled?: boolean;
+  total_capacity_bytes?: number;
+  warning_threshold_percent?: number;
+  critical_threshold_percent?: number;
+}
+
+// Epic 16: Secrets Hygiene Types
+export interface SecretInventory {
+  id: string;
+  org_id: string;
+  agent_id?: string;
+  name: string;
+  secret_type: 'api_key' | 'password' | 'certificate' | 'ssh_key' | 'oauth_token' | 'database_credential' | 'encryption_key';
+  source: 'env_var' | 'file' | 'vault' | 'k8s_secret' | 'docker_secret' | 'config';
+  location?: string;
+  deployment_id?: string;
+  container_id?: string;
+  container_name?: string;
+  service_name?: string;
+  classification: 'public' | 'internal' | 'confidential' | 'restricted';
+  environment: string;
+  is_sensitive: boolean;
+  age_days?: number;
+  created_date?: string;
+  last_rotated_at?: string;
+  rotation_policy_days: number;
+  is_expired: boolean;
+  needs_rotation: boolean;
+  strength?: 'weak' | 'moderate' | 'strong' | 'unknown';
+  is_hardcoded: boolean;
+  is_exposed: boolean;
+  exposure_risk: 'low' | 'medium' | 'high' | 'critical';
+  description?: string;
+  owner_team?: string;
+  owner_contact?: string;
+  discovered_at: string;
+  auto_discovered: boolean;
+  last_scanned_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SecretRotationHistory {
+  id: string;
+  org_id: string;
+  secret_id: string;
+  rotation_type: 'manual' | 'automated' | 'forced' | 'emergency';
+  triggered_by_email?: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'rolled_back';
+  started_at?: string;
+  completed_at?: string;
+  old_strength?: string;
+  new_strength?: string;
+  error_message?: string;
+  restart_required: boolean;
+  services_restarted: boolean;
+  created_at: string;
+  secret_name?: string;
+}
+
+export interface SecretExposureEvent {
+  id: string;
+  org_id: string;
+  secret_id?: string;
+  detection_type: 'log_leak' | 'git_commit' | 'config_exposure' | 'network_capture' | 'public_endpoint' | 'error_message';
+  detection_source?: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  exposure_location?: string;
+  exposure_content?: string;
+  file_path?: string;
+  line_number?: number;
+  commit_sha?: string;
+  repository_url?: string;
+  status: 'active' | 'investigating' | 'mitigated' | 'false_positive' | 'accepted_risk';
+  acknowledged_at?: string;
+  resolved_at?: string;
+  resolution_notes?: string;
+  potential_impact?: string;
+  was_accessed?: boolean;
+  access_attempts: number;
+  detected_at: string;
+  created_at: string;
+  secret_name?: string;
+}
+
+export interface SecretRotationPolicy {
+  id: string;
+  org_id: string;
+  name: string;
+  description?: string;
+  max_age_days: number;
+  min_strength: string;
+  require_unique: boolean;
+  allow_reuse: boolean;
+  reuse_history_count: number;
+  auto_rotate: boolean;
+  rotation_cron?: string;
+  notify_before_days: number;
+  notify_on_expiry: boolean;
+  notify_on_exposure: boolean;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SecretScanResult {
+  id: string;
+  org_id: string;
+  agent_id?: string;
+  deployment_id?: string;
+  scan_type: 'full' | 'incremental' | 'targeted';
+  scan_target?: string;
+  scanner: string;
+  status: 'running' | 'completed' | 'failed';
+  started_at: string;
+  completed_at?: string;
+  duration_seconds?: number;
+  secrets_found: number;
+  high_risk_findings: number;
+  hardcoded_secrets: number;
+  expired_secrets: number;
+  weak_secrets: number;
+  files_scanned: number;
+  containers_scanned: number;
+  env_vars_scanned: number;
+  error_message?: string;
+  created_at: string;
+}
+
+export interface SecretsHygieneSummary {
+  total_secrets: number;
+  needs_rotation: number;
+  expired_secrets: number;
+  weak_secrets: number;
+  hardcoded_secrets: number;
+  exposed_secrets: number;
+  critical_risk: number;
+  high_risk: number;
+  avg_age_days: number;
+}
+
+export interface SecretExposureSummary {
+  total_exposures: number;
+  active_exposures: number;
+  critical_exposures: number;
+  high_exposures: number;
+  exposures_last_7d: number;
+  exposures_last_30d: number;
+}
+
+export interface CreateSecretRequest {
+  name: string;
+  secret_type: string;
+  source: string;
+  location?: string;
+  agent_id?: string;
+  deployment_id?: string;
+  container_id?: string;
+  container_name?: string;
+  service_name?: string;
+  classification?: string;
+  environment?: string;
+  rotation_policy_days?: number;
+  description?: string;
+  owner_team?: string;
+  owner_contact?: string;
+}
+
+export interface TriggerSecretScanRequest {
+  scan_type?: string;
+  scan_target?: string;
+  agent_id?: string;
+  deployment_id?: string;
+}
+
+export interface CreateRotationPolicyRequest {
+  name: string;
+  description?: string;
+  max_age_days?: number;
+  min_strength?: string;
+  auto_rotate?: boolean;
+  rotation_cron?: string;
+  notify_before_days?: number;
+  notify_on_expiry?: boolean;
+  notify_on_exposure?: boolean;
+}
+
+// Epic 17: Background Jobs & Workers Types
+export interface BackgroundJob {
+  id: string;
+  org_id: string;
+  job_type: string;
+  job_name: string;
+  job_category: 'system' | 'security' | 'maintenance' | 'user_triggered';
+  triggered_by?: string;
+  triggered_by_user?: string;
+  triggered_by_email?: string;
+  target_type?: string;
+  target_id?: string;
+  target_name?: string;
+  parameters?: Record<string, unknown>;
+  status: 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'timeout' | 'retrying';
+  priority: number;
+  progress_percent: number;
+  current_step?: string;
+  steps_total: number;
+  steps_completed: number;
+  scheduled_at?: string;
+  queued_at?: string;
+  started_at?: string;
+  completed_at?: string;
+  timeout_seconds: number;
+  deadline_at?: string;
+  result?: Record<string, unknown>;
+  output?: string;
+  error_message?: string;
+  error_code?: string;
+  error_stack?: string;
+  retry_count: number;
+  max_retries: number;
+  retry_delay_seconds: number;
+  next_retry_at?: string;
+  worker_id?: string;
+  worker_hostname?: string;
+  tags: string[];
+  metadata?: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface JobSchedule {
+  id: string;
+  org_id: string;
+  name: string;
+  description?: string;
+  job_type: string;
+  job_name: string;
+  job_category: string;
+  target_type?: string;
+  target_id?: string;
+  target_name?: string;
+  cron_expression: string;
+  timezone: string;
+  parameters?: Record<string, unknown>;
+  priority: number;
+  timeout_seconds: number;
+  max_retries: number;
+  enabled: boolean;
+  last_run_at?: string;
+  last_run_status?: string;
+  last_run_duration_seconds?: number;
+  next_run_at?: string;
+  run_count: number;
+  failure_count: number;
+  consecutive_failures: number;
+  alert_on_failure: boolean;
+  alert_after_consecutive_failures: number;
+  pause_after_failures: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Worker {
+  id: string;
+  org_id?: string;
+  hostname: string;
+  worker_type: 'general' | 'scan' | 'backup' | 'heavy';
+  version?: string;
+  pid?: number;
+  status: 'starting' | 'idle' | 'busy' | 'stopping' | 'stopped' | 'unhealthy';
+  current_job_id?: string;
+  jobs_processed: number;
+  jobs_failed: number;
+  max_concurrent_jobs: number;
+  current_jobs: number;
+  queue_size: number;
+  last_heartbeat_at: string;
+  started_at: string;
+  stopped_at?: string;
+  health_check_failures: number;
+  cpu_percent?: number;
+  memory_mb?: number;
+  memory_percent?: number;
+  capabilities: string[];
+  metadata?: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface JobLog {
+  id: string;
+  org_id: string;
+  job_id: string;
+  log_level: 'debug' | 'info' | 'warn' | 'error';
+  message: string;
+  details?: Record<string, unknown>;
+  logged_at: string;
+}
+
+export interface JobStatistics {
+  org_id: string;
+  job_type: string;
+  total_jobs: number;
+  completed_jobs: number;
+  failed_jobs: number;
+  running_jobs: number;
+  pending_jobs: number;
+  jobs_last_24h: number;
+  avg_duration_seconds?: number;
+  last_completed_at?: string;
+}
+
+export interface WorkerSummary {
+  org_id: string;
+  total_workers: number;
+  idle_workers: number;
+  busy_workers: number;
+  unhealthy_workers: number;
+  total_jobs_processed: number;
+  total_jobs_failed: number;
+  avg_cpu_percent?: number;
+  avg_memory_percent?: number;
+}
+
+export interface CreateJobRequest {
+  job_type: string;
+  job_name: string;
+  job_category?: string;
+  target_type?: string;
+  target_id?: string;
+  target_name?: string;
+  parameters?: Record<string, unknown>;
+  priority?: number;
+  scheduled_at?: string;
+  timeout_seconds?: number;
+  max_retries?: number;
+  tags?: string[];
+}
+
+export interface CreateScheduleRequest {
+  name: string;
+  description?: string;
+  job_type: string;
+  job_name: string;
+  job_category?: string;
+  target_type?: string;
+  target_id?: string;
+  target_name?: string;
+  cron_expression: string;
+  timezone?: string;
+  parameters?: Record<string, unknown>;
+  priority?: number;
+  timeout_seconds?: number;
+  max_retries?: number;
+  alert_on_failure?: boolean;
+  alert_after_consecutive_failures?: number;
+  pause_after_failures?: number;
+}
+
+// Epic 18: External Dependency Mapping Types
+export interface ExternalService {
+  id: string;
+  org_id: string;
+  name: string;
+  service_type: 'api' | 'database' | 'storage' | 'messaging' | 'cdn' | 'dns' | 'monitoring' | 'auth' | 'payment' | 'other';
+  provider?: string;
+  endpoint_url?: string;
+  base_domain?: string;
+  port?: number;
+  protocol: string;
+  criticality: 'critical' | 'high' | 'medium' | 'low';
+  data_classification?: string;
+  environment: string;
+  health_status: 'healthy' | 'degraded' | 'unhealthy' | 'unknown';
+  last_health_check?: string;
+  health_check_url?: string;
+  health_check_interval_seconds: number;
+  expected_uptime_percent?: number;
+  sla_document_url?: string;
+  compliance_requirements: string[];
+  auth_type?: string;
+  auth_secret_id?: string;
+  owner_team?: string;
+  owner_contact?: string;
+  vendor_contact?: string;
+  contract_end_date?: string;
+  discovered_at: string;
+  auto_discovered: boolean;
+  discovery_source?: string;
+  description?: string;
+  documentation_url?: string;
+  tags: string[];
+  metadata?: Record<string, unknown>;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ServiceDependency {
+  id: string;
+  org_id: string;
+  source_type: string;
+  source_id?: string;
+  source_name: string;
+  external_service_id: string;
+  dependency_type: 'runtime' | 'build' | 'test' | 'optional';
+  is_critical: boolean;
+  fallback_available: boolean;
+  fallback_service_id?: string;
+  usage_pattern?: string;
+  avg_requests_per_minute?: number;
+  avg_latency_ms?: number;
+  failure_impact?: string;
+  discovered_at: string;
+  auto_discovered: boolean;
+  last_seen_at: string;
+  created_at: string;
+  updated_at: string;
+  external_service_name?: string;
+  external_service_type?: string;
+  provider?: string;
+}
+
+export interface ExternalServiceHealth {
+  id: string;
+  org_id: string;
+  service_id: string;
+  status: 'healthy' | 'degraded' | 'unhealthy' | 'timeout' | 'error';
+  response_time_ms?: number;
+  status_code?: number;
+  check_type: string;
+  error_message?: string;
+  checked_at: string;
+  service_name?: string;
+}
+
+export interface ExternalServiceIncident {
+  id: string;
+  org_id: string;
+  service_id: string;
+  title: string;
+  description?: string;
+  severity: 'minor' | 'major' | 'critical';
+  incident_type?: string;
+  status: 'active' | 'investigating' | 'identified' | 'monitoring' | 'resolved';
+  started_at: string;
+  detected_at: string;
+  acknowledged_at?: string;
+  resolved_at?: string;
+  affected_services: string[];
+  impact_description?: string;
+  user_impact?: string;
+  resolution_notes?: string;
+  root_cause?: string;
+  reported_by?: string;
+  vendor_incident_url?: string;
+  created_at: string;
+  updated_at: string;
+  service_name?: string;
+}
+
+export interface DependencyRisk {
+  source_name: string;
+  source_type: string;
+  external_service_name: string;
+  service_type: string;
+  provider?: string;
+  service_criticality: string;
+  dependency_critical: boolean;
+  fallback_available: boolean;
+  health_status: string;
+  failure_impact?: string;
+  risk_level: 'critical' | 'high' | 'medium' | 'low';
+}
+
+export interface ExternalHealthOverview {
+  total_services: number;
+  healthy_services: number;
+  degraded_services: number;
+  unhealthy_services: number;
+  unknown_services: number;
+  critical_services: number;
+  critical_unhealthy: number;
+}
+
+export interface CreateExternalServiceRequest {
+  name: string;
+  service_type: string;
+  provider?: string;
+  endpoint_url?: string;
+  base_domain?: string;
+  port?: number;
+  protocol?: string;
+  criticality?: string;
+  data_classification?: string;
+  environment?: string;
+  health_check_url?: string;
+  health_check_interval_seconds?: number;
+  expected_uptime_percent?: number;
+  auth_type?: string;
+  owner_team?: string;
+  owner_contact?: string;
+  vendor_contact?: string;
+  description?: string;
+  documentation_url?: string;
+  tags?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface CreateServiceDependencyRequest {
+  source_type: string;
+  source_id?: string;
+  source_name: string;
+  external_service_id: string;
+  dependency_type?: string;
+  is_critical?: boolean;
+  fallback_available?: boolean;
+  fallback_service_id?: string;
+  usage_pattern?: string;
+  avg_requests_per_minute?: number;
+  avg_latency_ms?: number;
+  failure_impact?: string;
+}
+
+export interface CreateExternalIncidentRequest {
+  service_id: string;
+  title: string;
+  description?: string;
+  severity: string;
+  incident_type?: string;
+  started_at?: string;
+  affected_services?: string[];
+  impact_description?: string;
+  user_impact?: string;
+  vendor_incident_url?: string;
+}
+
 // API methods
 export const api = {
   // Setup (first-run)
@@ -3360,6 +4196,431 @@ export const api = {
     fetchAPI<{ message: string }>(`/tls/config`, {
       method: "PUT",
       body: JSON.stringify(config),
+    }),
+
+  // Epic 14: Database & Data Governance
+  listDatabases: (params?: {
+    db_type?: string;
+    environment?: string;
+    status?: string;
+    data_classification?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.db_type) searchParams.set("db_type", params.db_type);
+    if (params?.environment) searchParams.set("environment", params.environment);
+    if (params?.status) searchParams.set("status", params.status);
+    if (params?.data_classification) searchParams.set("data_classification", params.data_classification);
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    if (params?.offset) searchParams.set("offset", params.offset.toString());
+    const query = searchParams.toString();
+    return fetchAPI<{ databases: DatabaseInventoryItem[]; total: number }>(
+      `/databases${query ? `?${query}` : ""}`
+    );
+  },
+
+  getDatabase: (databaseId: string) =>
+    fetchAPI<DatabaseInventoryItem>(`/databases/${databaseId}`),
+
+  createDatabase: (data: CreateDatabaseRequest) =>
+    fetchAPI<DatabaseInventoryItem>(`/databases`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateDatabase: (databaseId: string, data: Partial<DatabaseInventoryItem>) =>
+    fetchAPI<{ message: string }>(`/databases/${databaseId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  deleteDatabase: (databaseId: string) =>
+    fetchAPI<{ message: string }>(`/databases/${databaseId}`, {
+      method: "DELETE",
+    }),
+
+  getDatabasePosture: () =>
+    fetchAPI<DatabasePosture>(`/databases/posture`),
+
+  getDatabaseBackups: (databaseId: string, params?: { status?: string; limit?: number }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.status) searchParams.set("status", params.status);
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    const query = searchParams.toString();
+    return fetchAPI<{ backups: DatabaseBackup[] }>(
+      `/databases/${databaseId}/backups${query ? `?${query}` : ""}`
+    );
+  },
+
+  getDatabaseBackupCompliance: () =>
+    fetchAPI<{
+      compliance: BackupCompliance[];
+      summary: {
+        total: number;
+        compliant: number;
+        warning: number;
+        non_compliant: number;
+      };
+    }>(`/databases/compliance`),
+
+  // Epic 15: Backup & Recovery
+  getBackupOverview: () =>
+    fetchAPI<BackupOverview>(`/backups/overview`),
+
+  listBackupJobs: (params?: { status?: string; database_id?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.status) searchParams.set("status", params.status);
+    if (params?.database_id) searchParams.set("database_id", params.database_id);
+    const query = searchParams.toString();
+    return fetchAPI<BackupJob[]>(`/backups/jobs${query ? `?${query}` : ""}`);
+  },
+
+  triggerBackup: (data: TriggerBackupRequest) =>
+    fetchAPI<{ id: string; status: string; message: string }>(`/backups/jobs`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  listRestoreOperations: () =>
+    fetchAPI<RestoreOperation[]>(`/backups/restores`),
+
+  triggerRestore: (data: TriggerRestoreRequest) =>
+    fetchAPI<{ id: string; status: string; message: string }>(`/backups/restores`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  listRecoveryTests: (params?: { database_id?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.database_id) searchParams.set("database_id", params.database_id);
+    const query = searchParams.toString();
+    return fetchAPI<RecoveryTest[]>(`/backups/recovery-tests${query ? `?${query}` : ""}`);
+  },
+
+  triggerRecoveryTest: (data: TriggerRecoveryTestRequest) =>
+    fetchAPI<{ id: string; status: string; message: string }>(`/backups/recovery-tests`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  getRecoveryReadiness: () =>
+    fetchAPI<RecoveryReadiness[]>(`/backups/readiness`),
+
+  listBackupAlerts: (params?: { status?: string; severity?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.status) searchParams.set("status", params.status);
+    if (params?.severity) searchParams.set("severity", params.severity);
+    const query = searchParams.toString();
+    return fetchAPI<BackupAlert[]>(`/backups/alerts${query ? `?${query}` : ""}`);
+  },
+
+  updateBackupAlertStatus: (alertId: string, data: { status: string; resolution_notes?: string }) =>
+    fetchAPI<{ message: string }>(`/backups/alerts/${alertId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  listBackupStorage: () =>
+    fetchAPI<BackupStorage[]>(`/backups/storage`),
+
+  createBackupStorage: (data: CreateBackupStorageRequest) =>
+    fetchAPI<{ id: string }>(`/backups/storage`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  deleteBackupStorage: (storageId: string) =>
+    fetchAPI<{ message: string }>(`/backups/storage/${storageId}`, {
+      method: "DELETE",
+    }),
+
+  // Epic 16: Secrets Hygiene
+  listSecrets: (params?: { secret_type?: string; source?: string; exposure_risk?: string; needs_rotation?: boolean }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.secret_type) searchParams.set("secret_type", params.secret_type);
+    if (params?.source) searchParams.set("source", params.source);
+    if (params?.exposure_risk) searchParams.set("exposure_risk", params.exposure_risk);
+    if (params?.needs_rotation) searchParams.set("needs_rotation", "true");
+    const query = searchParams.toString();
+    return fetchAPI<SecretInventory[]>(`/secrets${query ? `?${query}` : ""}`);
+  },
+
+  getSecret: (secretId: string) =>
+    fetchAPI<SecretInventory>(`/secrets/${secretId}`),
+
+  createSecret: (data: CreateSecretRequest) =>
+    fetchAPI<{ id: string }>(`/secrets`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  deleteSecret: (secretId: string) =>
+    fetchAPI<{ message: string }>(`/secrets/${secretId}`, {
+      method: "DELETE",
+    }),
+
+  getSecretsHygieneSummary: () =>
+    fetchAPI<SecretsHygieneSummary>(`/secrets/hygiene`),
+
+  listSecretExposures: (params?: { status?: string; severity?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.status) searchParams.set("status", params.status);
+    if (params?.severity) searchParams.set("severity", params.severity);
+    const query = searchParams.toString();
+    return fetchAPI<SecretExposureEvent[]>(`/secrets/exposures${query ? `?${query}` : ""}`);
+  },
+
+  getSecretExposureSummary: () =>
+    fetchAPI<SecretExposureSummary>(`/secrets/exposures/summary`),
+
+  updateSecretExposureStatus: (exposureId: string, data: { status: string; resolution_notes?: string }) =>
+    fetchAPI<{ message: string }>(`/secrets/exposures/${exposureId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  listSecretRotationHistory: (params?: { secret_id?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.secret_id) searchParams.set("secret_id", params.secret_id);
+    const query = searchParams.toString();
+    return fetchAPI<SecretRotationHistory[]>(`/secrets/rotations${query ? `?${query}` : ""}`);
+  },
+
+  listSecretRotationPolicies: () =>
+    fetchAPI<SecretRotationPolicy[]>(`/secrets/policies`),
+
+  createSecretRotationPolicy: (data: CreateRotationPolicyRequest) =>
+    fetchAPI<{ id: string }>(`/secrets/policies`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  deleteSecretRotationPolicy: (policyId: string) =>
+    fetchAPI<{ message: string }>(`/secrets/policies/${policyId}`, {
+      method: "DELETE",
+    }),
+
+  listSecretScans: () =>
+    fetchAPI<SecretScanResult[]>(`/secrets/scans`),
+
+  triggerSecretScan: (data: TriggerSecretScanRequest) =>
+    fetchAPI<{ id: string; status: string; message: string }>(`/secrets/scans`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  // Epic 17: Background Jobs & Workers
+  listJobs: (params?: {
+    status?: string;
+    job_type?: string;
+    job_category?: string;
+    triggered_by?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.status) searchParams.set("status", params.status);
+    if (params?.job_type) searchParams.set("job_type", params.job_type);
+    if (params?.job_category) searchParams.set("job_category", params.job_category);
+    if (params?.triggered_by) searchParams.set("triggered_by", params.triggered_by);
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    if (params?.offset) searchParams.set("offset", params.offset.toString());
+    const query = searchParams.toString();
+    return fetchAPI<BackgroundJob[]>(`/jobs${query ? `?${query}` : ""}`);
+  },
+
+  getJob: (jobId: string) =>
+    fetchAPI<BackgroundJob>(`/jobs/${jobId}`),
+
+  createJob: (data: CreateJobRequest) =>
+    fetchAPI<{ id: string; status: string; message: string }>(`/jobs`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  cancelJob: (jobId: string) =>
+    fetchAPI<{ message: string }>(`/jobs/${jobId}/cancel`, {
+      method: "POST",
+    }),
+
+  retryJob: (jobId: string) =>
+    fetchAPI<{ id: string; message: string }>(`/jobs/${jobId}/retry`, {
+      method: "POST",
+    }),
+
+  getJobLogs: (jobId: string, params?: { level?: string; limit?: number }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.level) searchParams.set("level", params.level);
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    const query = searchParams.toString();
+    return fetchAPI<JobLog[]>(`/jobs/${jobId}/logs${query ? `?${query}` : ""}`);
+  },
+
+  getJobStatistics: () =>
+    fetchAPI<JobStatistics[]>(`/jobs/statistics`),
+
+  listSchedules: (params?: { enabled?: boolean; job_type?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.enabled !== undefined) searchParams.set("enabled", params.enabled.toString());
+    if (params?.job_type) searchParams.set("job_type", params.job_type);
+    const query = searchParams.toString();
+    return fetchAPI<JobSchedule[]>(`/jobs/schedules${query ? `?${query}` : ""}`);
+  },
+
+  getSchedule: (scheduleId: string) =>
+    fetchAPI<JobSchedule>(`/jobs/schedules/${scheduleId}`),
+
+  createSchedule: (data: CreateScheduleRequest) =>
+    fetchAPI<{ id: string; message: string }>(`/jobs/schedules`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateSchedule: (scheduleId: string, data: Partial<CreateScheduleRequest>) =>
+    fetchAPI<{ message: string }>(`/jobs/schedules/${scheduleId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  toggleSchedule: (scheduleId: string, enabled: boolean) =>
+    fetchAPI<{ message: string }>(`/jobs/schedules/${scheduleId}/toggle`, {
+      method: "POST",
+      body: JSON.stringify({ enabled }),
+    }),
+
+  deleteSchedule: (scheduleId: string) =>
+    fetchAPI<{ message: string }>(`/jobs/schedules/${scheduleId}`, {
+      method: "DELETE",
+    }),
+
+  listWorkers: (params?: { status?: string; worker_type?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.status) searchParams.set("status", params.status);
+    if (params?.worker_type) searchParams.set("worker_type", params.worker_type);
+    const query = searchParams.toString();
+    return fetchAPI<Worker[]>(`/jobs/workers${query ? `?${query}` : ""}`);
+  },
+
+  getWorkerSummary: () =>
+    fetchAPI<WorkerSummary>(`/jobs/workers/summary`),
+
+  // Epic 18: External Dependencies
+  listExternalServices: (params?: {
+    service_type?: string;
+    provider?: string;
+    criticality?: string;
+    health_status?: string;
+    environment?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.service_type) searchParams.set("service_type", params.service_type);
+    if (params?.provider) searchParams.set("provider", params.provider);
+    if (params?.criticality) searchParams.set("criticality", params.criticality);
+    if (params?.health_status) searchParams.set("health_status", params.health_status);
+    if (params?.environment) searchParams.set("environment", params.environment);
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    if (params?.offset) searchParams.set("offset", params.offset.toString());
+    const query = searchParams.toString();
+    return fetchAPI<{ services: ExternalService[]; total: number }>(
+      `/dependencies${query ? `?${query}` : ""}`
+    );
+  },
+
+  getExternalService: (serviceId: string) =>
+    fetchAPI<ExternalService>(`/dependencies/${serviceId}`),
+
+  createExternalService: (data: CreateExternalServiceRequest) =>
+    fetchAPI<{ id: string; message: string }>(`/dependencies`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateExternalService: (serviceId: string, data: Partial<ExternalService>) =>
+    fetchAPI<{ message: string }>(`/dependencies/${serviceId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  deleteExternalService: (serviceId: string) =>
+    fetchAPI<{ message: string }>(`/dependencies/${serviceId}`, {
+      method: "DELETE",
+    }),
+
+  getExternalHealthOverview: () =>
+    fetchAPI<ExternalHealthOverview>(`/dependencies/overview`),
+
+  getServiceHealthHistory: (serviceId: string, params?: { limit?: number }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    const query = searchParams.toString();
+    return fetchAPI<{ history: ExternalServiceHealth[]; total: number }>(
+      `/dependencies/${serviceId}/health${query ? `?${query}` : ""}`
+    );
+  },
+
+  listServiceDependencies: (params?: {
+    source_name?: string;
+    external_service_id?: string;
+    is_critical?: boolean;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.source_name) searchParams.set("source_name", params.source_name);
+    if (params?.external_service_id) searchParams.set("external_service_id", params.external_service_id);
+    if (params?.is_critical !== undefined) searchParams.set("is_critical", params.is_critical.toString());
+    const query = searchParams.toString();
+    return fetchAPI<{ dependencies: ServiceDependency[]; total: number }>(
+      `/dependencies/mappings${query ? `?${query}` : ""}`
+    );
+  },
+
+  createServiceDependency: (data: CreateServiceDependencyRequest) =>
+    fetchAPI<{ id: string; message: string }>(`/dependencies/mappings`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  deleteServiceDependency: (dependencyId: string) =>
+    fetchAPI<{ message: string }>(`/dependencies/mappings/${dependencyId}`, {
+      method: "DELETE",
+    }),
+
+  getDependencyRisks: (params?: { risk_level?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.risk_level) searchParams.set("risk_level", params.risk_level);
+    const query = searchParams.toString();
+    return fetchAPI<{ risks: DependencyRisk[]; total: number }>(
+      `/dependencies/risks${query ? `?${query}` : ""}`
+    );
+  },
+
+  listExternalIncidents: (params?: {
+    service_id?: string;
+    status?: string;
+    severity?: string;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.service_id) searchParams.set("service_id", params.service_id);
+    if (params?.status) searchParams.set("status", params.status);
+    if (params?.severity) searchParams.set("severity", params.severity);
+    const query = searchParams.toString();
+    return fetchAPI<{ incidents: ExternalServiceIncident[]; total: number }>(
+      `/dependencies/incidents${query ? `?${query}` : ""}`
+    );
+  },
+
+  createExternalIncident: (data: CreateExternalIncidentRequest) =>
+    fetchAPI<{ id: string; message: string }>(`/dependencies/incidents`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateExternalIncidentStatus: (incidentId: string, data: { status: string; resolution_notes?: string; root_cause?: string }) =>
+    fetchAPI<{ message: string }>(`/dependencies/incidents/${incidentId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
     }),
 
   // Generic fetch for custom endpoints
