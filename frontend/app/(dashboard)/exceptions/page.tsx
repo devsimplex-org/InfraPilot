@@ -408,106 +408,97 @@ export default function ExceptionsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Section 1: Header with Breadcrumbs */}
-        <PageHeader
-          title="Risk Exceptions"
-          description="Manage time-boxed security exceptions with approval workflow"
-          breadcrumbs={
-            <Breadcrumb
-              items={[
-                { label: "Govern", href: "/govern" },
-                { label: "Risk Exceptions", current: true },
-              ]}
-            />
-          }
-          action={
-            <button
-              onClick={() => setShowCreateModal(true)}
-              className="inline-flex items-center px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg text-sm font-medium transition-colors"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Request Exception
-            </button>
-          }
+    <div className="space-y-6">
+      {/* Section 1: Header with Breadcrumbs */}
+      <PageHeader
+        title="Risk Exceptions"
+        description="Manage time-boxed security exceptions with approval workflow"
+        breadcrumbs={
+          <Breadcrumb
+            items={[
+              { label: "Govern", href: "/govern" },
+              { label: "Risk Exceptions" },
+            ]}
+          />
+        }
+        action={
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="inline-flex items-center px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg text-sm font-medium transition-colors"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Request Exception
+          </button>
+        }
+      />
+
+      {/* Section 2: Metrics Grid */}
+      <MetricsGrid columns={4}>
+        <StatCard
+          label="Pending Approval"
+          value={metrics.pending}
+          icon={Clock}
+          iconColor="text-yellow-600"
+          valueColor={metrics.pending > 0 ? "text-yellow-600 dark:text-yellow-400" : undefined}
         />
+        <StatCard
+          label="Approved"
+          value={metrics.approved}
+          icon={ShieldCheck}
+          iconColor="text-green-600"
+          valueColor={metrics.approved > 0 ? "text-green-600 dark:text-green-400" : undefined}
+        />
+        <StatCard
+          label="Denied"
+          value={metrics.denied}
+          icon={ShieldX}
+          iconColor="text-red-600"
+          valueColor={metrics.denied > 0 ? "text-red-600 dark:text-red-400" : undefined}
+        />
+        <StatCard
+          label="Expired"
+          value={metrics.expired}
+          icon={AlertTriangle}
+          iconColor="text-orange-600"
+          valueColor={metrics.expired > 0 ? "text-orange-600 dark:text-orange-400" : undefined}
+        />
+      </MetricsGrid>
 
-        {/* Section 2: Metrics Grid */}
-        <MetricsGrid columns={4} className="mb-6">
-          <StatCard
-            label="Pending Approval"
-            value={metrics.pending}
-            icon={Clock}
-            iconColor="text-yellow-600"
-            valueColor="text-yellow-600 dark:text-yellow-400"
-            description="Awaiting review"
+      {/* Section 3: Filters and Table */}
+      <div className="flex gap-6">
+        {/* Filter Sidebar */}
+        <div className="w-64 flex-shrink-0">
+          <FilterPanel
+            filters={filterGroups}
+            onReset={handleResetFilters}
           />
-          <StatCard
-            label="Approved"
-            value={metrics.approved}
-            icon={ShieldCheck}
-            iconColor="text-green-600"
-            valueColor="text-green-600 dark:text-green-400"
-            description="Active exceptions"
-          />
-          <StatCard
-            label="Denied"
-            value={metrics.denied}
-            icon={ShieldX}
-            iconColor="text-red-600"
-            valueColor="text-red-600 dark:text-red-400"
-            description="Rejected requests"
-          />
-          <StatCard
-            label="Expired"
-            value={metrics.expired}
-            icon={AlertTriangle}
-            iconColor="text-orange-600"
-            valueColor="text-orange-600 dark:text-orange-400"
-            description="Past expiration"
-          />
-        </MetricsGrid>
-
-        {/* Section 3: Filters and Table */}
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Filter Panel */}
-          <div className="lg:col-span-1">
-            <FilterPanel
-              filters={filterGroups}
-              onReset={handleResetFilters}
-              collapsible={true}
-              defaultCollapsed={false}
-            />
-          </div>
-
-          {/* Exceptions Table */}
-          <div className="lg:col-span-3">
-            <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg overflow-hidden">
-              {isLoading ? (
-                <div className="flex items-center justify-center h-64">
-                  <Spinner size="lg" label="Loading exceptions..." />
-                </div>
-              ) : filteredExceptions.length === 0 ? (
-                <EmptyState
-                  icon={ShieldAlert}
-                  title="No exceptions found"
-                  description="All deployments comply with security policies. No exceptions have been requested."
-                  size="md"
-                />
-              ) : (
-                <Table
-                  columns={columns}
-                  data={filteredExceptions}
-                  keyExtractor={(row) => row.id}
-                  onRowClick={handleRowClick}
-                  hoverable={true}
-                  stickyHeader={true}
-                />
-              )}
-            </div>
-          </div>
         </div>
+
+        {/* Exceptions Table */}
+        <div className="flex-1 min-w-0 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg overflow-hidden">
+          {isLoading ? (
+            <div className="flex items-center justify-center h-64">
+              <Spinner size="lg" label="Loading exceptions..." />
+            </div>
+          ) : filteredExceptions.length === 0 ? (
+            <EmptyState
+              icon={ShieldAlert}
+              title="No exceptions found"
+              description="All deployments comply with security policies. No exceptions have been requested."
+              size="md"
+            />
+          ) : (
+            <Table
+              columns={columns}
+              data={filteredExceptions}
+              keyExtractor={(row) => row.id}
+              onRowClick={handleRowClick}
+              hoverable={true}
+              stickyHeader={true}
+            />
+          )}
+        </div>
+      </div>
 
         {/* Section 4: SlideOver for Exception Details */}
         <SlideOver
@@ -807,7 +798,6 @@ export default function ExceptionsPage() {
             </div>
           </div>
         )}
-      </div>
     </div>
   );
 }

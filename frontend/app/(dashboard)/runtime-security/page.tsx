@@ -600,27 +600,29 @@ export default function RuntimeSecurityPage() {
       )}
 
       {activeTab === "drift" && (
-        <div className="space-y-6">
-          {/* Filters */}
-          <FilterPanel
-            filters={driftFilterGroups}
-            onReset={() =>
-              setDriftFilters({
-                severity: "",
-                drift_type: "",
-                resolved: undefined,
-                container_name: "",
-              })
-            }
-          />
+        <div className="flex gap-6">
+          {/* Filters Sidebar */}
+          <div className="w-64 flex-shrink-0">
+            <FilterPanel
+              filters={driftFilterGroups}
+              onReset={() =>
+                setDriftFilters({
+                  severity: "",
+                  drift_type: "",
+                  resolved: undefined,
+                  container_name: "",
+                })
+              }
+            />
+          </div>
 
           {/* Drift Events Table */}
-          <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
+          <div className="flex-1 min-w-0 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
             {driftLoading ? (
               <div className="flex items-center justify-center h-64">
                 <Spinner size="lg" label="Loading drift events..." />
               </div>
-            ) : driftData && driftData.drift_events.length > 0 ? (
+            ) : driftData?.drift_events?.length > 0 ? (
               <Table
                 columns={driftColumns}
                 data={driftData.drift_events}
@@ -641,27 +643,29 @@ export default function RuntimeSecurityPage() {
       )}
 
       {activeTab === "anomalies" && (
-        <div className="space-y-6">
-          {/* Filters */}
-          <FilterPanel
-            filters={anomalyFilterGroups}
-            onReset={() =>
-              setAnomalyFilters({
-                severity: "",
-                anomaly_type: "",
-                resolved: undefined,
-                container_name: "",
-              })
-            }
-          />
+        <div className="flex gap-6">
+          {/* Filters Sidebar */}
+          <div className="w-64 flex-shrink-0">
+            <FilterPanel
+              filters={anomalyFilterGroups}
+              onReset={() =>
+                setAnomalyFilters({
+                  severity: "",
+                  anomaly_type: "",
+                  resolved: undefined,
+                  container_name: "",
+                })
+              }
+            />
+          </div>
 
           {/* Anomalies Table */}
-          <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
+          <div className="flex-1 min-w-0 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
             {anomalyLoading ? (
               <div className="flex items-center justify-center h-64">
                 <Spinner size="lg" label="Loading anomalies..." />
               </div>
-            ) : anomalyData && anomalyData.anomalies.length > 0 ? (
+            ) : anomalyData?.anomalies?.length > 0 ? (
               <Table
                 columns={anomalyColumns}
                 data={anomalyData.anomalies}

@@ -84,7 +84,8 @@ export default function PlatformSecurityPage() {
   const overallStatus = getOverallStatus();
 
   // Map severity to SeverityLevel type
-  const mapSeverity = (severity: string) => {
+  const mapSeverity = (severity: string | undefined | null) => {
+    if (!severity) return "medium";
     const normalized = severity.toLowerCase();
     if (normalized === "critical" || normalized === "high" || normalized === "medium" || normalized === "low") {
       return normalized as "critical" | "high" | "medium" | "low";

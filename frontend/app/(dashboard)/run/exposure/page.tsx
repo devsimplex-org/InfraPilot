@@ -557,26 +557,28 @@ export default function ExposurePage() {
       )}
 
       {activeTab === "endpoints" && (
-        <div className="space-y-6">
-          {/* Filters */}
-          <FilterPanel
-            filters={endpointFilterGroups}
-            onReset={() =>
-              setEndpointFilters({
-                exposure_type: "",
-                status: "",
-                min_risk_score: undefined,
-              })
-            }
-          />
+        <div className="flex gap-6">
+          {/* Filters Sidebar */}
+          <div className="w-64 flex-shrink-0">
+            <FilterPanel
+              filters={endpointFilterGroups}
+              onReset={() =>
+                setEndpointFilters({
+                  exposure_type: "",
+                  status: "",
+                  min_risk_score: undefined,
+                })
+              }
+            />
+          </div>
 
           {/* Endpoints Table */}
-          <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
+          <div className="flex-1 min-w-0 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
             {endpointsLoading ? (
               <div className="flex items-center justify-center h-64">
                 <Spinner size="lg" label="Loading endpoints..." />
               </div>
-            ) : endpointsData && endpointsData.endpoints.length > 0 ? (
+            ) : endpointsData?.endpoints?.length > 0 ? (
               <Table
                 columns={endpointColumns}
                 data={endpointsData.endpoints}
@@ -604,7 +606,7 @@ export default function ExposurePage() {
               <div className="flex items-center justify-center h-64">
                 <Spinner size="lg" label="Loading rate limit profiles..." />
               </div>
-            ) : profilesData && profilesData.profiles.length > 0 ? (
+            ) : profilesData?.profiles?.length > 0 ? (
               <Table
                 columns={profileColumns}
                 data={profilesData.profiles}
@@ -616,10 +618,14 @@ export default function ExposurePage() {
                 icon={Shield}
                 title="No rate limit profiles"
                 description="Create rate limit profiles to control traffic to your endpoints"
-                action={{
-                  label: "Create Profile",
-                  onClick: () => {/* TODO: Open create modal */},
-                }}
+                action={
+                  <button
+                    onClick={() => {/* TODO: Open create modal */}}
+                    className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-medium"
+                  >
+                    Create Profile
+                  </button>
+                }
                 size="sm"
               />
             )}
