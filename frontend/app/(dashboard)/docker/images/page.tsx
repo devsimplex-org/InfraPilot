@@ -367,7 +367,7 @@ export default function ImagesPage() {
   ];
 
   return (
-    <div className="p-6">
+    <div className="space-y-6">
       <PageHeader
         title="Docker Images"
         description="Manage Docker images on your server"
