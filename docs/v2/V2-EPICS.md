@@ -922,110 +922,517 @@ CREATE TABLE service_dependencies (
 
 ---
 
-## Epic 19: UX & Navigation System
+## Epic 19: UX & Navigation System (System-Wide Integration)
 
 **Priority**: HIGH | **Effort**: Large | **Status**: Planned
+**Foundation**: v1 Design System (15 components, 150+ Storybook stories)
 
 ### Purpose
 
-Make power feel calm and obvious. Answer: **"How do I find what I need?"**
+Complete system-wide UX integration. Answer: **"How do I find what I need?"**
+
+This epic builds on the **v1 Design System** which includes:
+- 15 production-ready components
+- 150+ Storybook stories
+- Design tokens (colors, typography, spacing)
+- DevSecOps lifecycle navigation structure
+
+### V1 Design System Foundation (Complete)
+
+#### Existing Components (15)
+
+| Component | Purpose | Storybook |
+|-----------|---------|-----------|
+| **Badge** | Severity/status indicators | 12 stories |
+| **Card** | Content containers | 10 stories |
+| **StatCard** | Metric display | 12 stories |
+| **Table** | Data tables with sorting | 13 stories |
+| **SlideOver** | Side panel details | 7 stories |
+| **EmptyState** | No data states | 12 stories |
+| **PageHeader** | Page headers | 10 stories |
+| **Skeleton** | Loading placeholders | 12 stories |
+| **Spinner** | Loading indicators | 12 stories |
+| **StatusIndicator** | Health with pulse | 10 stories |
+| **Timeline** | Event history | 9 stories |
+| **FilterPanel** | Data filtering | 7 stories |
+| **Navigation** | Sidebar nav | 7 stories |
+| **Breadcrumb** | Navigation context | 9 stories |
+| **DetailPanel** | Right panel details | - |
+
+#### Existing Design Tokens
+
+**Severity Colors** (Risk/Impact):
+```
+critical: #B91C1C (red)    - Critical vulnerabilities, failures
+high:     #EA580C (orange) - High severity, violations
+medium:   #CA8A04 (yellow) - Warnings, pending
+low:      #0284C7 (blue)   - Informational
+info:     #6B7280 (gray)   - Neutral
+```
+
+**Status Colors** (Health/State):
+```
+healthy:  #16A34A (green)  - Running, passing
+warning:  #CA8A04 (yellow) - High usage
+degraded: #EA580C (orange) - Partial failures
+critical: #DC2626 (red)    - Down, failed
+```
+
+### V2 Objectives
+
+Epic 19 completes the system-wide integration by:
+
+1. **Applying v1 components to ALL pages** (not just Dashboard)
+2. **Adding v2-specific pages** (Exposure, Databases, Backups, Secrets, Jobs)
+3. **Restructuring navigation** for v2 layers (adding Data layer)
+4. **Adding Command Palette** (Cmd+K)
+5. **Completing accessibility** (WCAG 2.1 AA)
+6. **Entity cross-linking** (click-through navigation)
 
 ### Features
 
-#### 19.1 Risk-Centric Navigation
+#### 19.1 System-Wide Component Rollout
+
+**Pages to Refactor with v1 Components**:
+
+| Layer | Page | Components to Apply |
+|-------|------|---------------------|
+| Overview | Dashboard | ✅ Done (v1) |
+| Build | Code Quality | PageHeader, Table, FilterPanel, SlideOver |
+| Build | Developer Feedback | PageHeader, Timeline, Card |
+| Deploy | Deployments | PageHeader, Table, FilterPanel, SlideOver, StatusIndicator |
+| Deploy | Vulnerabilities | PageHeader, Table, FilterPanel, SlideOver, Badge |
+| Deploy | SBOMs | PageHeader, Table, SlideOver |
+| Deploy | Policies | PageHeader, Table, SlideOver |
+| Run | Containers | PageHeader, Table, StatusIndicator |
+| Run | Runtime Security | PageHeader, Table, FilterPanel, Timeline |
+| Run | **Exposure** (NEW) | PageHeader, Table, StatCard, StatusIndicator |
+| Govern | Risk Exceptions | PageHeader, Table, SlideOver, Timeline |
+| Govern | Teams | PageHeader, Table, Card |
+| Govern | Security Maturity | PageHeader, StatCard, Table |
+| Data | **Databases** (NEW) | PageHeader, Table, StatusIndicator, SlideOver |
+| Data | **Backups** (NEW) | PageHeader, Table, Badge, StatCard |
+| Data | **Secrets** (NEW) | PageHeader, Table, Badge, FilterPanel |
+| Platform | **Jobs** (NEW) | PageHeader, Table, Timeline, StatusIndicator |
+
+#### 19.2 V2 Navigation Structure
+
+**Updated Sidebar with Data Layer**:
+
+```
+🟦 Overview
+   └── Dashboard
+
+🟨 Build
+   ├── Code Quality
+   ├── Developer Feedback
+   └── Policies
+
+🟧 Deploy
+   ├── Deployments (PRIMARY)
+   ├── Vulnerabilities
+   ├── SBOMs
+   └── Images
+
+🟥 Run
+   ├── Containers
+   ├── Runtime Security
+   ├── Exposure (NEW - Epic 13)
+   └── Alerts
+
+🟪 Govern
+   ├── Risk Exceptions
+   ├── Teams & Ownership
+   ├── Security Maturity
+   └── Webhooks
+
+🟩 Data (NEW SECTION)
+   ├── Databases (NEW - Epic 14)
+   ├── Backups (NEW - Epic 15)
+   └── Secrets (NEW - Epic 16)
+
+⚙️ Platform
+   ├── Jobs (NEW - Epic 17)
+   ├── Dependencies (NEW - Epic 18)
+   ├── Platform Security
+   └── Settings
+```
+
+**URL Structure**:
 
 ```
 /                          # Dashboard
-├── /build                 # Build Layer
-│   ├── /vulnerabilities
-│   ├── /sboms
-│   ├── /code-quality
-│   └── /images
-├── /deploy                # Deploy Layer
-│   ├── /deployments
-│   ├── /policies
-│   ├── /webhooks
-│   └── /gates
-├── /run                   # Run Layer
-│   ├── /containers
-│   ├── /drift
-│   ├── /anomalies
-│   └── /exposure          # Epic 13
-├── /govern                # Govern Layer
-│   ├── /ownership
-│   ├── /teams
-│   ├── /exceptions
-│   └── /maturity
-├── /data                  # Data Layer (Epic 14, 15)
-│   ├── /databases
-│   ├── /backups
-│   └── /secrets           # Epic 16
-└── /settings
+/build/code-quality        # Code Quality
+/build/feedback            # Developer Feedback
+/deploy/deployments        # Deployments (PRIMARY)
+/deploy/vulnerabilities    # Vulnerabilities
+/run/containers            # Containers
+/run/exposure              # Exposure Map (NEW)
+/govern/exceptions         # Risk Exceptions
+/govern/maturity           # Security Maturity
+/data/databases            # Database Inventory (NEW)
+/data/backups              # Backup Status (NEW)
+/data/secrets              # Secret Hygiene (NEW)
+/platform/jobs             # Background Jobs (NEW)
+/platform/dependencies     # External Dependencies (NEW)
 ```
 
-#### 19.2 Golden Page Pattern
+#### 19.3 Golden Page Pattern
+
+Apply consistent layout to ALL entity pages:
 
 ```tsx
+// GoldenPage.tsx - Standard entity page layout
 interface GoldenPageProps {
-  entity: {
-    id: string;
-    name: string;
-    type: string;
-    status: 'healthy' | 'warning' | 'critical';
-    owner?: Team;
-  };
+  // Header
   breadcrumbs: Breadcrumb[];
-  tabs: Tab[];
-  actions: Action[];
+  title: string;
+  description?: string;
+  status?: 'healthy' | 'warning' | 'critical';
+  owner?: Team;
+  actions?: React.ReactNode;
+
+  // Content
+  tabs?: Tab[];
+  children: React.ReactNode;
+
+  // Related
+  relatedEntities?: EntityLink[];
 }
-```
 
-#### 19.3 Keyboard Navigation
+const GoldenPage: React.FC<GoldenPageProps> = (props) => {
+  return (
+    <div className="golden-page">
+      <Breadcrumb items={props.breadcrumbs} />
 
-```typescript
-const globalShortcuts = {
-  'g h': 'Go to home/dashboard',
-  'g b': 'Go to build',
-  'g d': 'Go to deploy',
-  'g r': 'Go to run',
-  'g o': 'Go to govern',
-  '/': 'Focus search',
-  '?': 'Show shortcuts',
+      <PageHeader
+        title={props.title}
+        description={props.description}
+        action={props.actions}
+      >
+        {props.status && <StatusIndicator status={props.status} />}
+        {props.owner && <TeamBadge team={props.owner} />}
+      </PageHeader>
+
+      {props.tabs && <TabNavigation tabs={props.tabs} />}
+
+      <div className="golden-page-content">
+        {props.children}
+      </div>
+
+      {props.relatedEntities && (
+        <RelatedEntities entities={props.relatedEntities} />
+      )}
+    </div>
+  );
 };
 ```
 
-#### 19.4 Design System Components
+**Apply to**:
+- Container detail page
+- Deployment detail page
+- Vulnerability (CVE) detail page
+- Database detail page (NEW)
+- Endpoint detail page (NEW)
+- Job detail page (NEW)
 
+#### 19.4 Command Palette (Cmd+K)
+
+**Global Search & Navigation**:
+
+```tsx
+// CommandPalette.tsx
+interface CommandPaletteProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+const commandGroups = [
+  {
+    name: 'Navigation',
+    commands: [
+      { label: 'Go to Dashboard', shortcut: 'g h', action: () => navigate('/') },
+      { label: 'Go to Deployments', shortcut: 'g d', action: () => navigate('/deploy/deployments') },
+      { label: 'Go to Vulnerabilities', shortcut: 'g v', action: () => navigate('/deploy/vulnerabilities') },
+      { label: 'Go to Databases', shortcut: 'g b', action: () => navigate('/data/databases') },
+    ]
+  },
+  {
+    name: 'Actions',
+    commands: [
+      { label: 'Create Deployment', action: () => openCreateDeployment() },
+      { label: 'Scan Container', action: () => openScanContainer() },
+      { label: 'Request Exception', action: () => openRequestException() },
+    ]
+  },
+  {
+    name: 'Recent',
+    commands: [] // Populated dynamically
+  }
+];
+
+// Search endpoint
+// GET /api/v1/search?q=query&types=deployment,container,vulnerability
 ```
-components/
-├── layout/
-│   ├── AppShell.tsx
-│   ├── Sidebar.tsx
-│   ├── PageHeader.tsx
-│   └── GoldenPage.tsx
-├── navigation/
-│   ├── Breadcrumbs.tsx
-│   ├── TabNavigation.tsx
-│   └── CommandPalette.tsx
-├── data-display/
-│   ├── DataTable.tsx
-│   ├── StatusBadge.tsx
-│   ├── ScoreGauge.tsx
-│   └── TrendChart.tsx
-└── entity/
-    ├── EntityCard.tsx
-    ├── EntityLink.tsx
-    └── RelatedEntities.tsx
+
+**Keyboard Shortcuts**:
+
+```typescript
+const globalShortcuts = {
+  // Navigation
+  'g h': 'Go to Dashboard',
+  'g d': 'Go to Deployments',
+  'g v': 'Go to Vulnerabilities',
+  'g c': 'Go to Containers',
+  'g e': 'Go to Exposure',
+  'g b': 'Go to Databases',
+  'g s': 'Go to Secrets',
+  'g j': 'Go to Jobs',
+
+  // Actions
+  '/': 'Focus search / Open command palette',
+  '?': 'Show keyboard shortcuts',
+  'Escape': 'Close modal/panel',
+
+  // Entity shortcuts (when on list page)
+  'j': 'Next item',
+  'k': 'Previous item',
+  'Enter': 'Open selected',
+  'e': 'Edit entity',
+  'x': 'Select/deselect',
+};
 ```
 
-#### 19.5 Accessibility (WCAG 2.1 AA)
+#### 19.5 Entity Cross-Linking
 
-- [ ] Color contrast ratio ≥ 4.5:1
-- [ ] Keyboard accessible
-- [ ] Focus indicators visible
-- [ ] ARIA labels
-- [ ] Screen reader tested
-- [ ] Reduced motion support
+**Click-through Navigation**:
+
+```tsx
+// EntityLink.tsx - Clickable entity reference
+interface EntityLinkProps {
+  type: 'container' | 'deployment' | 'vulnerability' | 'database' | 'endpoint' | 'team';
+  id: string;
+  name: string;
+}
+
+const EntityLink: React.FC<EntityLinkProps> = ({ type, id, name }) => {
+  const href = getEntityUrl(type, id);
+  return (
+    <Link href={href} className="entity-link">
+      <EntityIcon type={type} />
+      <span>{name}</span>
+    </Link>
+  );
+};
+
+// Example relationships
+const entityRelationships = {
+  vulnerability: ['container', 'deployment', 'sbom'],
+  container: ['deployment', 'database', 'endpoint'],
+  deployment: ['container', 'policy_decision', 'webhook'],
+  database: ['container', 'team', 'backup'],
+  endpoint: ['container', 'rate_limit_profile'],
+  job: ['container', 'team'],
+  secret: ['container', 'team'],
+};
+```
+
+**Related Entities Panel**:
+
+```tsx
+// RelatedEntities.tsx - Show related items on entity pages
+<RelatedEntities
+  entity={{ type: 'vulnerability', id: 'CVE-2024-1234' }}
+  relations={[
+    { type: 'container', items: affectedContainers },
+    { type: 'deployment', items: affectedDeployments },
+  ]}
+/>
+```
+
+#### 19.6 New V2 Pages (Using v1 Components)
+
+**Exposure Page** (Epic 13):
+
+```tsx
+<GoldenPage
+  breadcrumbs={[{ label: 'Run' }, { label: 'Exposure' }]}
+  title="Traffic Exposure"
+  description="Monitor publicly accessible endpoints"
+>
+  <MetricsGrid columns={4}>
+    <StatCard label="Public Endpoints" value={12} icon={Globe} />
+    <StatCard label="TLS Score" value="87%" icon={Shield} trend="up" />
+    <StatCard label="Expiring Certs" value={2} icon={AlertTriangle} />
+    <StatCard label="Rate Limited" value={8} icon={Gauge} />
+  </MetricsGrid>
+
+  <FilterPanel filters={exposureFilters} />
+
+  <Table
+    columns={endpointColumns}
+    data={endpoints}
+    onRowClick={openEndpointDetails}
+  />
+</GoldenPage>
+```
+
+**Databases Page** (Epic 14):
+
+```tsx
+<GoldenPage
+  breadcrumbs={[{ label: 'Data' }, { label: 'Databases' }]}
+  title="Database Inventory"
+  description="Monitor database security posture"
+>
+  <MetricsGrid columns={4}>
+    <StatCard label="Total Databases" value={8} icon={Database} />
+    <StatCard label="Public Exposed" value={1} icon={AlertTriangle} severity="critical" />
+    <StatCard label="TLS Enabled" value="87%" icon={Shield} />
+    <StatCard label="With Backups" value="75%" icon={HardDrive} />
+  </MetricsGrid>
+
+  <Table
+    columns={databaseColumns}
+    data={databases}
+    onRowClick={openDatabaseDetails}
+  />
+</GoldenPage>
+```
+
+**Secrets Page** (Epic 16):
+
+```tsx
+<GoldenPage
+  breadcrumbs={[{ label: 'Data' }, { label: 'Secrets' }]}
+  title="Secrets Hygiene"
+  description="Track secret age and rotation"
+>
+  <MetricsGrid columns={4}>
+    <StatCard label="Total Secrets" value={45} icon={Key} />
+    <StatCard label="Stale (>90d)" value={12} icon={Clock} severity="warning" />
+    <StatCard label="Exposed in Code" value={3} icon={AlertTriangle} severity="critical" />
+    <StatCard label="Rotation Due" value={5} icon={RefreshCw} />
+  </MetricsGrid>
+
+  <FilterPanel filters={secretFilters} />
+
+  <Table
+    columns={secretColumns}
+    data={secrets}
+    onRowClick={openSecretDetails}
+  />
+</GoldenPage>
+```
+
+**Jobs Page** (Epic 17):
+
+```tsx
+<GoldenPage
+  breadcrumbs={[{ label: 'Platform' }, { label: 'Jobs' }]}
+  title="Background Jobs"
+  description="Monitor scheduled tasks and workers"
+>
+  <MetricsGrid columns={4}>
+    <StatCard label="Total Jobs" value={23} icon={Clock} />
+    <StatCard label="Running" value={5} icon={Play} />
+    <StatCard label="Failed (24h)" value={2} icon={XCircle} severity="warning" />
+    <StatCard label="Success Rate" value="96%" icon={CheckCircle} trend="up" />
+  </MetricsGrid>
+
+  <Table
+    columns={jobColumns}
+    data={jobs}
+    onRowClick={openJobDetails}
+  />
+</GoldenPage>
+```
+
+#### 19.7 Accessibility Completion (WCAG 2.1 AA)
+
+**Audit Checklist**:
+
+- [ ] Color contrast ratio ≥ 4.5:1 for normal text
+- [ ] Color contrast ratio ≥ 3:1 for large text
+- [ ] All interactive elements keyboard accessible
+- [ ] Focus indicators visible on all focusable elements
+- [ ] ARIA labels for icons and images
+- [ ] ARIA live regions for dynamic content
+- [ ] Screen reader tested (NVDA, VoiceOver)
+- [ ] Reduced motion support (`prefers-reduced-motion`)
+- [ ] Error states announced to assistive tech
+- [ ] Form labels properly associated
+- [ ] Skip links for navigation
+
+**Implementation**:
+
+```tsx
+// Reduced motion support
+const prefersReducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
+
+// StatusIndicator with reduced motion
+<StatusIndicator
+  status="healthy"
+  pulse={!prefersReducedMotion}
+/>
+
+// Focus visible styles
+.focus-visible:focus {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+// Skip link
+<a href="#main-content" className="skip-link">
+  Skip to main content
+</a>
+```
+
+### Implementation Checklist
+
+#### Phase 1: Navigation & Layout
+- [ ] Update Navigation component with Data section
+- [ ] Implement new URL structure
+- [ ] Add keyboard shortcuts
+- [ ] Create GoldenPage component
+
+#### Phase 2: Page Refactoring (v1 → v2)
+- [ ] Refactor Deployments page
+- [ ] Refactor Vulnerabilities page
+- [ ] Refactor Runtime Security page
+- [ ] Refactor Risk Exceptions page
+- [ ] Refactor Containers page
+
+#### Phase 3: New V2 Pages
+- [ ] Create Exposure page (Epic 13)
+- [ ] Create Databases page (Epic 14)
+- [ ] Create Backups page (Epic 15)
+- [ ] Create Secrets page (Epic 16)
+- [ ] Create Jobs page (Epic 17)
+- [ ] Create Dependencies page (Epic 18)
+
+#### Phase 4: Command Palette & Search
+- [ ] Implement CommandPalette component
+- [ ] Create global search API endpoint
+- [ ] Add recent items tracking
+- [ ] Implement keyboard navigation
+
+#### Phase 5: Cross-Linking & Polish
+- [ ] Implement EntityLink component
+- [ ] Add RelatedEntities to all detail pages
+- [ ] Complete accessibility audit
+- [ ] Performance optimization (< 100ms interactions)
+
+### Success Criteria
+
+- [ ] All pages use v1 component library
+- [ ] Navigation reflects v2 structure (6 layers)
+- [ ] Command palette works (Cmd+K)
+- [ ] All keyboard shortcuts functional
+- [ ] Entity cross-linking complete
+- [ ] WCAG 2.1 AA compliant
+- [ ] Dashboard load time < 2 seconds
+- [ ] Page transitions < 100ms
 
 ---
 
