@@ -1,7 +1,6 @@
 package api
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 // ============ Types ============
@@ -283,7 +283,7 @@ func (h *Handler) getTrafficResource(c *gin.Context) {
 		&labelsJSON, &annotationsJSON, &r.CreatedAt, &r.UpdatedAt,
 	)
 
-	if err == sql.ErrNoRows {
+	if err == pgx.ErrNoRows {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Traffic resource not found"})
 		return
 	}
@@ -472,7 +472,7 @@ func (h *Handler) updateTrafficResource(c *gin.Context) {
 	var returnedID uuid.UUID
 	err = h.db.QueryRow(c.Request.Context(), query, args...).Scan(&returnedID)
 
-	if err == sql.ErrNoRows {
+	if err == pgx.ErrNoRows {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Traffic resource not found"})
 		return
 	}
@@ -525,7 +525,7 @@ func (h *Handler) getTrafficSummary(c *gin.Context) {
 		&summary.AgentsWithTraffic,
 	)
 
-	if err == sql.ErrNoRows {
+	if err == pgx.ErrNoRows {
 		summary = TrafficResourceSummary{OrgID: orgID}
 	} else if err != nil {
 		h.logger.Error("Failed to fetch traffic summary: " + err.Error())
@@ -629,7 +629,7 @@ func (h *Handler) getTrafficPolicy(c *gin.Context) {
 		&p.CreatedAt, &p.UpdatedAt,
 	)
 
-	if err == sql.ErrNoRows {
+	if err == pgx.ErrNoRows {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Traffic policy not found"})
 		return
 	}
@@ -777,7 +777,7 @@ func (h *Handler) updateTrafficPolicy(c *gin.Context) {
 	var returnedID uuid.UUID
 	err = h.db.QueryRow(c.Request.Context(), query, args...).Scan(&returnedID)
 
-	if err == sql.ErrNoRows {
+	if err == pgx.ErrNoRows {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Traffic policy not found"})
 		return
 	}
@@ -1179,14 +1179,4 @@ func (h *Handler) assignTrafficPolicy(c *gin.Context) {
 	c.JSON(http.StatusCreated, assignment)
 }
 
-// Helper function
-func joinStrings(strs []string, sep string) string {
-	if len(strs) == 0 {
-		return ""
-	}
-	result := strs[0]
-	for i := 1; i < len(strs); i++ {
-		result += sep + strs[i]
-	}
-	return result
-}
+// joinStrings helper is defined in dependencies_handlers.go
