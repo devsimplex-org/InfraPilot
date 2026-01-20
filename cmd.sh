@@ -8,3 +8,5 @@
   ./scripts/build-and-publish.sh v1.0.0 --all-in-one
 
   Did the all-in-one build fail, or did you use one of the component flags?
+
+  ./scripts/build-and-publish.sh v1.0.0 --all-in-one
