@@ -1,13 +1,10 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   FileText,
-  Search,
   RefreshCw,
-  Filter,
-  ChevronDown,
   AlertCircle,
   AlertTriangle,
   Info,
@@ -17,34 +14,32 @@ import {
   Pause,
   Play,
   Download,
+  Container,
+  Clock,
+  Activity,
+  XCircle,
 } from "lucide-react";
-import { api, LogEntry, Agent } from "@/lib/api";
+import { api, LogEntry } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
-import { FilterPanel, type FilterGroup } from "@/components/ui/FilterPanel";
-import { Card } from "@/components/ui/Card";
+import { FilterPanel } from "@/components/ui/FilterPanel";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Spinner } from "@/components/ui/Spinner";
 import { SlideOver } from "@/components/ui/SlideOver";
-import {
-  Button,
-  Tabs,
-} from "@/components/ui/page-layout";
+import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
+import { Button } from "@/components/ui/page-layout";
 
-type Tab = "unified" | "nginx";
 type LogLevel = "all" | "error" | "warn" | "info" | "debug";
 
 export default function LogsPage() {
-  const [activeTab, setActiveTab] = useState<Tab>("unified");
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
   const [search, setSearch] = useState("");
   const [level, setLevel] = useState<LogLevel>("all");
-  const [tail, setTail] = useState(200);
-  const [nginxType, setNginxType] = useState<"access" | "error">("access");
+  const [selectedContainer, setSelectedContainer] = useState<string>("all");
+  const [tail, setTail] = useState(500);
   const [autoRefresh, setAutoRefresh] = useState(false);
-  const [showFilters, setShowFilters] = useState(false);
   const [selectedLog, setSelectedLog] = useState<LogEntry | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
@@ -64,8 +59,8 @@ export default function LogsPage() {
   // Fetch unified logs
   const {
     data: unifiedLogs,
-    isLoading: unifiedLoading,
-    refetch: refetchUnified,
+    isLoading: isLoading,
+    refetch,
   } = useQuery({
     queryKey: ["unifiedLogs", selectedAgentId, search, level, tail],
     queryFn: () =>
@@ -74,53 +69,69 @@ export default function LogsPage() {
         levels: level !== "all" ? [level] : undefined,
         tail,
       }),
-    enabled: !!selectedAgentId && activeTab === "unified",
+    enabled: !!selectedAgentId,
     refetchInterval: autoRefresh ? 5000 : false,
   });
 
-  // Fetch nginx logs
-  const {
-    data: nginxLogs,
-    isLoading: nginxLoading,
-    refetch: refetchNginx,
-  } = useQuery({
-    queryKey: ["nginxLogs", selectedAgentId, nginxType, tail],
-    queryFn: () => api.getNginxLogs(selectedAgentId, nginxType, tail),
-    enabled: !!selectedAgentId && activeTab === "nginx",
-    refetchInterval: autoRefresh ? 5000 : false,
-  });
+  // Extract unique containers from logs
+  const containers = useMemo(() => {
+    if (!unifiedLogs?.logs) return [];
+    const containerSet = new Set<string>();
+    unifiedLogs.logs.forEach((log) => {
+      if (log.container_name) {
+        containerSet.add(log.container_name);
+      }
+    });
+    return Array.from(containerSet).sort();
+  }, [unifiedLogs?.logs]);
+
+  // Filter logs by selected container
+  const filteredLogs = useMemo(() => {
+    if (!unifiedLogs?.logs) return [];
+    if (selectedContainer === "all") return unifiedLogs.logs;
+    return unifiedLogs.logs.filter((log) => log.container_name === selectedContainer);
+  }, [unifiedLogs?.logs, selectedContainer]);
+
+  // Calculate metrics
+  const metrics = useMemo(() => {
+    const logs = filteredLogs || [];
+    return {
+      total: logs.length,
+      errors: logs.filter((l) => l.level === "error").length,
+      warnings: logs.filter((l) => l.level === "warn").length,
+      info: logs.filter((l) => l.level === "info").length,
+      debug: logs.filter((l) => l.level === "debug").length,
+      containers: containers.length,
+    };
+  }, [filteredLogs, containers]);
 
   const handleRefresh = useCallback(() => {
-    if (activeTab === "unified") {
-      refetchUnified();
-    } else {
-      refetchNginx();
-    }
-  }, [activeTab, refetchUnified, refetchNginx]);
+    refetch();
+  }, [refetch]);
 
   const getLevelIcon = (logLevel: string) => {
     switch (logLevel) {
       case "error":
-        return <AlertCircle className="h-3.5 w-3.5 text-red-500" />;
+        return <XCircle className="h-4 w-4 text-red-500" />;
       case "warn":
-        return <AlertTriangle className="h-3.5 w-3.5 text-yellow-500" />;
+        return <AlertTriangle className="h-4 w-4 text-amber-500" />;
       case "debug":
-        return <Bug className="h-3.5 w-3.5 text-purple-500" />;
+        return <Bug className="h-4 w-4 text-purple-500" />;
       default:
-        return <Info className="h-3.5 w-3.5 text-blue-500" />;
+        return <Info className="h-4 w-4 text-blue-500" />;
     }
   };
 
-  const getLevelColor = (logLevel: string) => {
+  const getLevelBadgeVariant = (logLevel: string) => {
     switch (logLevel) {
       case "error":
-        return "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800";
+        return "destructive" as const;
       case "warn":
-        return "bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800";
+        return "warning" as const;
       case "debug":
-        return "bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800";
+        return "secondary" as const;
       default:
-        return "bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700";
+        return "default" as const;
     }
   };
 
@@ -132,29 +143,34 @@ export default function LogsPage() {
         hour: "2-digit",
         minute: "2-digit",
         second: "2-digit",
+        fractionalSecondDigits: 3,
       });
     } catch {
       return timestamp;
     }
   };
 
-  const formatDate = (timestamp: string) => {
+  const formatFullTimestamp = (timestamp: string) => {
     try {
       const date = new Date(timestamp);
-      return date.toLocaleDateString("en-US", {
+      return date.toLocaleString("en-US", {
+        year: "numeric",
         month: "short",
         day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
       });
     } catch {
-      return "";
+      return timestamp;
     }
   };
 
   const exportLogs = () => {
-    const logs = activeTab === "unified" ? unifiedLogs?.logs : nginxLogs?.logs;
-    if (!logs || logs.length === 0) return;
+    if (!filteredLogs || filteredLogs.length === 0) return;
 
-    const content = logs
+    const content = filteredLogs
       .map(
         (log) =>
           `[${log.timestamp}] [${log.level.toUpperCase()}] ${log.container_name ? `[${log.container_name}] ` : ""}${log.message}`
@@ -165,64 +181,106 @@ export default function LogsPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `logs-${activeTab}-${new Date().toISOString().split("T")[0]}.txt`;
+    a.download = `logs-${selectedContainer !== "all" ? selectedContainer + "-" : ""}${new Date().toISOString().split("T")[0]}.txt`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
 
-  const tabs = [
-    { id: "unified", label: "All Logs" },
-    { id: "nginx", label: "Nginx" },
-  ];
-
-  const currentLogs = activeTab === "unified" ? unifiedLogs?.logs : nginxLogs?.logs;
-  const isLoading = activeTab === "unified" ? unifiedLoading : nginxLoading;
-
   // Filter configuration
-  const filters: FilterGroup[] = [
+  const filterGroups = [
+    {
+      id: "container",
+      label: "Container",
+      type: "radio" as const,
+      value: selectedContainer,
+      onChange: (value: string | string[]) => setSelectedContainer(value as string),
+      options: [
+        { label: "All Containers", value: "all", count: metrics.total },
+        ...containers.map((c) => ({
+          label: c,
+          value: c,
+          count: unifiedLogs?.logs?.filter((l) => l.container_name === c).length || 0,
+        })),
+      ],
+    },
+    {
+      id: "level",
+      label: "Log Level",
+      type: "radio" as const,
+      value: level,
+      onChange: (value: string | string[]) => setLevel(value as LogLevel),
+      options: [
+        { label: "All Levels", value: "all" },
+        { label: "Error", value: "error", count: metrics.errors },
+        { label: "Warning", value: "warn", count: metrics.warnings },
+        { label: "Info", value: "info", count: metrics.info },
+        { label: "Debug", value: "debug", count: metrics.debug },
+      ],
+    },
     {
       id: "search",
       label: "Search",
-      type: "search",
+      type: "search" as const,
       value: search,
       onChange: (value: string | string[]) => setSearch(value as string),
     },
   ];
 
-  if (activeTab === "unified") {
-    filters.push({
-      id: "level",
-      label: "Log Level",
-      type: "radio",
-      value: level,
-      onChange: (value: string | string[]) => setLevel(value as LogLevel),
-      options: [
-        { label: "All", value: "all" },
-        { label: "Error", value: "error" },
-        { label: "Warning", value: "warn" },
-        { label: "Info", value: "info" },
-        { label: "Debug", value: "debug" },
-      ],
-    });
-  }
-
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Logs"
-        description="Consolidated logs from all containers and services"
+        title="Log Explorer"
+        description="Real-time log aggregation and analysis across all containers"
         breadcrumbs={
           <Breadcrumb
             items={[
               { label: "Run", href: "/" },
-              { label: "Logs", current: true },
+              { label: "Logs" },
             ]}
           />
         }
         action={
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+            {/* Agent Selector */}
+            <div className="flex items-center gap-2">
+              <Server className="h-4 w-4 text-gray-400" />
+              <select
+                value={selectedAgentId}
+                onChange={(e) => setSelectedAgentId(e.target.value)}
+                className="px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                disabled={agentsLoading || !agents?.length}
+              >
+                {agentsLoading ? (
+                  <option>Loading...</option>
+                ) : agents && agents.length > 0 ? (
+                  agents.map((agent) => (
+                    <option key={agent.id} value={agent.id}>
+                      {agent.name}
+                    </option>
+                  ))
+                ) : (
+                  <option>No agents</option>
+                )}
+              </select>
+            </div>
+
+            {/* Lines selector */}
+            <select
+              value={tail}
+              onChange={(e) => setTail(parseInt(e.target.value))}
+              className="px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500"
+            >
+              <option value={100}>100 lines</option>
+              <option value={200}>200 lines</option>
+              <option value={500}>500 lines</option>
+              <option value={1000}>1000 lines</option>
+              <option value={2000}>2000 lines</option>
+            </select>
+
+            <div className="h-6 w-px bg-gray-300 dark:bg-gray-700" />
+
             <Button
               variant={autoRefresh ? "primary" : "secondary"}
               size="sm"
@@ -244,7 +302,7 @@ export default function LogsPage() {
               size="sm"
               icon={Download}
               onClick={exportLogs}
-              disabled={!currentLogs || currentLogs.length === 0}
+              disabled={!filteredLogs || filteredLogs.length === 0}
             >
               Export
             </Button>
@@ -252,245 +310,254 @@ export default function LogsPage() {
         }
       />
 
-      {/* Agent selector and tabs */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-        <div className="flex items-center gap-2">
-          <Server className="h-4 w-4 text-gray-500" />
-          <select
-            value={selectedAgentId}
-            onChange={(e) => setSelectedAgentId(e.target.value)}
-            className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-            disabled={agentsLoading || !agents?.length}
-          >
-            {agentsLoading ? (
-              <option>Loading...</option>
-            ) : agents && agents.length > 0 ? (
-              agents.map((agent) => (
-                <option key={agent.id} value={agent.id}>
-                  {agent.name}
-                </option>
-              ))
-            ) : (
-              <option>No agents</option>
-            )}
-          </select>
-        </div>
-
-        <Tabs
-          tabs={tabs}
-          activeTab={activeTab}
-          onChange={(id) => setActiveTab(id as Tab)}
+      {/* Metrics Overview */}
+      <MetricsGrid columns={6}>
+        <StatCard
+          label="Total Logs"
+          value={metrics.total}
+          icon={FileText}
+          iconColor="text-gray-600"
         />
+        <StatCard
+          label="Errors"
+          value={metrics.errors}
+          icon={XCircle}
+          iconColor="text-red-600"
+          valueColor={metrics.errors > 0 ? "text-red-600 dark:text-red-400" : undefined}
+        />
+        <StatCard
+          label="Warnings"
+          value={metrics.warnings}
+          icon={AlertTriangle}
+          iconColor="text-amber-600"
+          valueColor={metrics.warnings > 0 ? "text-amber-600 dark:text-amber-400" : undefined}
+        />
+        <StatCard
+          label="Info"
+          value={metrics.info}
+          icon={Info}
+          iconColor="text-blue-600"
+        />
+        <StatCard
+          label="Debug"
+          value={metrics.debug}
+          icon={Bug}
+          iconColor="text-purple-600"
+        />
+        <StatCard
+          label="Containers"
+          value={metrics.containers}
+          icon={Container}
+          iconColor="text-cyan-600"
+        />
+      </MetricsGrid>
 
-        <div className="flex-1" />
-
-        {/* Filters toggle */}
-        <Button
-          variant="ghost"
-          size="sm"
-          icon={Filter}
-          onClick={() => setShowFilters(!showFilters)}
-          className={showFilters ? "bg-gray-100 dark:bg-gray-800" : ""}
-        >
-          Filters
-          <ChevronDown
-            className={cn(
-              "h-4 w-4 ml-1 transition-transform",
-              showFilters && "rotate-180"
-            )}
+      {/* Main Content */}
+      <div className="flex gap-6">
+        {/* Filters Sidebar */}
+        <div className="w-64 flex-shrink-0">
+          <FilterPanel
+            filters={filterGroups}
+            onReset={() => {
+              setSearch("");
+              setLevel("all");
+              setSelectedContainer("all");
+            }}
           />
-        </Button>
-      </div>
-
-      {/* Filters panel */}
-      {showFilters && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="md:col-span-1">
-            <FilterPanel
-              filters={filters}
-              onReset={() => {
-                setSearch("");
-                setLevel("all");
-              }}
-            />
-          </div>
-
-          <div className="md:col-span-3 space-y-4">
-            {/* Additional filters */}
-            <div className="flex flex-wrap items-center gap-4 p-4 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800">
-              {/* Nginx log type */}
-              {activeTab === "nginx" && (
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-500">Type:</span>
-                  <div className="flex items-center gap-1 p-1 bg-gray-100 dark:bg-gray-800 rounded-lg">
-                    {(["access", "error"] as const).map((t) => (
-                      <button
-                        key={t}
-                        onClick={() => setNginxType(t)}
-                        className={cn(
-                          "px-2.5 py-1 text-xs font-medium rounded-md transition-colors capitalize",
-                          nginxType === t
-                            ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
-                            : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
-                        )}
-                      >
-                        {t}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Tail limit */}
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-500">Lines:</span>
-                <select
-                  value={tail}
-                  onChange={(e) => setTail(parseInt(e.target.value))}
-                  className="px-2.5 py-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500"
-                >
-                  <option value={50}>50</option>
-                  <option value={100}>100</option>
-                  <option value={200}>200</option>
-                  <option value={500}>500</option>
-                  <option value={1000}>1000</option>
-                </select>
-              </div>
-            </div>
-          </div>
         </div>
-      )}
 
-      {/* Logs display */}
-      <Card>
-        {/* Header */}
-        <Card.Header>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-sm text-gray-500">
-              <FileText className="h-4 w-4" />
-              <span>
-                {currentLogs?.length || 0} log entries
+        {/* Logs Panel */}
+        <div className="flex-1 min-w-0">
+          <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
+            {/* Log Header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
+              <div className="flex items-center gap-3">
+                <Activity className="h-4 w-4 text-gray-500" />
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {filteredLogs?.length || 0} log entries
+                </span>
                 {autoRefresh && (
-                  <span className="ml-2 inline-flex items-center gap-1 text-green-600 dark:text-green-400">
+                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 text-xs font-medium rounded-full">
                     <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
                     Live
                   </span>
                 )}
-              </span>
+              </div>
+              {selectedContainer !== "all" && (
+                <Badge variant="secondary">
+                  <Container className="h-3 w-3 mr-1" />
+                  {selectedContainer}
+                </Badge>
+              )}
             </div>
-            {activeTab === "nginx" && (
-              <div className="flex items-center gap-1 text-xs text-gray-500">
-                <Globe className="h-3.5 w-3.5" />
-                {nginxType === "access" ? "Access Log" : "Error Log"}
-              </div>
-            )}
-          </div>
-        </Card.Header>
 
-        {/* Log entries */}
-        <Card.Body className="p-0">
-          <div className="h-[calc(100vh-380px)] min-h-[400px] overflow-auto font-mono text-xs">
-            {isLoading ? (
-              <div className="flex items-center justify-center h-32">
-                <Spinner />
-              </div>
-            ) : !selectedAgentId ? (
-              <div className="py-12">
-                <EmptyState
-                  icon={Server}
-                  title="No agent selected"
-                  description="Select an agent to view logs"
-                />
-              </div>
-            ) : currentLogs && currentLogs.length > 0 ? (
-              <div className="divide-y divide-gray-100 dark:divide-gray-800">
-                {currentLogs.map((log, index) => (
-                  <div
-                    key={`${log.timestamp}-${index}`}
-                    onClick={() => setSelectedLog(log)}
-                    className={cn(
-                      "flex items-start gap-3 px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors cursor-pointer",
-                      getLevelColor(log.level)
-                    )}
-                  >
-                    <div className="flex-shrink-0 pt-0.5">
-                      {getLevelIcon(log.level)}
+            {/* Log Entries */}
+            <div className="h-[calc(100vh-420px)] min-h-[400px] overflow-auto">
+              {isLoading ? (
+                <div className="flex items-center justify-center h-64">
+                  <Spinner size="lg" label="Loading logs..." />
+                </div>
+              ) : !selectedAgentId ? (
+                <div className="py-16">
+                  <EmptyState
+                    icon={Server}
+                    title="No agent selected"
+                    description="Select an agent to view logs"
+                  />
+                </div>
+              ) : filteredLogs && filteredLogs.length > 0 ? (
+                <div className="divide-y divide-gray-100 dark:divide-gray-800">
+                  {filteredLogs.map((log, index) => (
+                    <div
+                      key={`${log.timestamp}-${index}`}
+                      onClick={() => setSelectedLog(log)}
+                      className={cn(
+                        "group flex items-start gap-4 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer",
+                        log.level === "error" && "bg-red-50/50 dark:bg-red-900/10",
+                        log.level === "warn" && "bg-amber-50/50 dark:bg-amber-900/10"
+                      )}
+                    >
+                      {/* Level Icon */}
+                      <div className="flex-shrink-0 pt-0.5">
+                        {getLevelIcon(log.level)}
+                      </div>
+
+                      {/* Timestamp */}
+                      <div className="flex-shrink-0 w-24 text-right">
+                        <div className="text-xs font-mono text-gray-500 dark:text-gray-400">
+                          {formatTimestamp(log.timestamp)}
+                        </div>
+                      </div>
+
+                      {/* Level Badge */}
+                      <div className="flex-shrink-0 w-16">
+                        <Badge variant={getLevelBadgeVariant(log.level)} size="sm">
+                          {log.level.toUpperCase()}
+                        </Badge>
+                      </div>
+
+                      {/* Container */}
+                      <div className="flex-shrink-0 w-32">
+                        {log.container_name ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-xs font-medium rounded truncate max-w-full">
+                            <Container className="h-3 w-3 flex-shrink-0" />
+                            <span className="truncate">{log.container_name}</span>
+                          </span>
+                        ) : (
+                          <span className="text-xs text-gray-400">-</span>
+                        )}
+                      </div>
+
+                      {/* Message */}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-gray-900 dark:text-gray-100 font-mono break-all line-clamp-2 group-hover:line-clamp-none transition-all">
+                          {log.message}
+                        </p>
+                      </div>
                     </div>
-                    <div className="flex-shrink-0 text-gray-400 dark:text-gray-500 w-16 text-right">
-                      <div>{formatTimestamp(log.timestamp)}</div>
-                      <div className="text-[10px]">{formatDate(log.timestamp)}</div>
-                    </div>
-                    {log.container_name && (
-                      <Badge size="sm" className="flex-shrink-0 max-w-[120px] truncate">
-                        {log.container_name}
-                      </Badge>
-                    )}
-                    <div className="flex-1 text-gray-900 dark:text-gray-100 break-all whitespace-pre-wrap line-clamp-2">
-                      {log.message}
-                    </div>
-                  </div>
-                ))}
-                <div ref={logsEndRef} />
-              </div>
-            ) : (
-              <div className="py-12">
-                <EmptyState
-                  icon={FileText}
-                  title="No logs found"
-                  description={
-                    search
-                      ? "Try adjusting your search or filters"
-                      : "No log entries available"
-                  }
-                />
-              </div>
-            )}
+                  ))}
+                  <div ref={logsEndRef} />
+                </div>
+              ) : (
+                <div className="py-16">
+                  <EmptyState
+                    icon={FileText}
+                    title="No logs found"
+                    description={
+                      search || selectedContainer !== "all"
+                        ? "Try adjusting your filters"
+                        : "No log entries available"
+                    }
+                  />
+                </div>
+              )}
+            </div>
           </div>
-        </Card.Body>
-      </Card>
+        </div>
+      </div>
 
       {/* Log Details SlideOver */}
       <SlideOver isOpen={!!selectedLog} onClose={() => setSelectedLog(null)} size="lg">
         <SlideOver.Header onClose={() => setSelectedLog(null)}>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             {selectedLog && getLevelIcon(selectedLog.level)}
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-              Log Entry Details
-            </h2>
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                Log Entry Details
+              </h2>
+              {selectedLog && (
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+                  {formatFullTimestamp(selectedLog.timestamp)}
+                </p>
+              )}
+            </div>
           </div>
         </SlideOver.Header>
         <SlideOver.Body>
           {selectedLog && (
             <div className="space-y-6">
-              {/* Metadata */}
-              <div>
-                <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Metadata</h3>
-                <div className="space-y-3">
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">Timestamp</p>
-                    <p className="text-sm text-gray-900 dark:text-white">{new Date(selectedLog.timestamp).toLocaleString()}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">Level</p>
-                    <Badge>{selectedLog.level.toUpperCase()}</Badge>
-                  </div>
-                  {selectedLog.container_name && (
-                    <div>
-                      <p className="text-xs text-gray-500 mb-1">Container</p>
-                      <Badge>{selectedLog.container_name}</Badge>
+              {/* Metadata Grid */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
+                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
+                    Log Level
+                  </p>
+                  <Badge variant={getLevelBadgeVariant(selectedLog.level)} size="md">
+                    {selectedLog.level.toUpperCase()}
+                  </Badge>
+                </div>
+                <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
+                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
+                    Container
+                  </p>
+                  {selectedLog.container_name ? (
+                    <div className="flex items-center gap-2">
+                      <Container className="h-4 w-4 text-gray-500" />
+                      <span className="text-sm font-medium text-gray-900 dark:text-white">
+                        {selectedLog.container_name}
+                      </span>
                     </div>
+                  ) : (
+                    <span className="text-sm text-gray-400">N/A</span>
                   )}
+                </div>
+              </div>
+
+              {/* Timestamp */}
+              <div>
+                <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
+                  Timestamp
+                </p>
+                <div className="flex items-center gap-2 text-sm text-gray-900 dark:text-white">
+                  <Clock className="h-4 w-4 text-gray-400" />
+                  {formatFullTimestamp(selectedLog.timestamp)}
                 </div>
               </div>
 
               {/* Message */}
               <div>
-                <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Message</h3>
-                <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4">
-                  <pre className="text-sm text-gray-900 dark:text-white font-mono whitespace-pre-wrap break-all">
+                <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
+                  Message
+                </p>
+                <div className="bg-gray-900 dark:bg-black rounded-lg p-4 overflow-x-auto">
+                  <pre className="text-sm text-gray-100 font-mono whitespace-pre-wrap break-all">
                     {selectedLog.message}
                   </pre>
                 </div>
+              </div>
+
+              {/* Copy Button */}
+              <div className="pt-4 border-t border-gray-200 dark:border-gray-800">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    const content = `[${selectedLog.timestamp}] [${selectedLog.level.toUpperCase()}] ${selectedLog.container_name ? `[${selectedLog.container_name}] ` : ""}${selectedLog.message}`;
+                    navigator.clipboard.writeText(content);
+                  }}
+                >
+                  Copy Log Entry
+                </Button>
               </div>
             </div>
           )}

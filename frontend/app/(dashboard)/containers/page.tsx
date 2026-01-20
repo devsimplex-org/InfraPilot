@@ -366,9 +366,10 @@ export default function ContainersPage() {
             />
           </MetricsGrid>
 
-          {/* Filters */}
-          <div className="mb-6 flex gap-4">
-            <div className="flex-1">
+          {/* Filters and Table */}
+          <div className="flex gap-6">
+            {/* Filters Sidebar */}
+            <div className="w-64 flex-shrink-0">
               <FilterPanel
                 filters={[
                   {
@@ -397,35 +398,37 @@ export default function ContainersPage() {
                 }}
               />
             </div>
-          </div>
 
-          {/* Containers Table */}
-          {isLoading ? (
-            <div className="flex items-center justify-center h-32">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500" />
+            {/* Containers Table */}
+            <div className="flex-1 min-w-0">
+              {isLoading ? (
+                <div className="flex items-center justify-center h-32">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500" />
+                </div>
+              ) : filteredContainers.length > 0 ? (
+                <Table
+                  columns={columns}
+                  data={filteredContainers}
+                  keyExtractor={(row) => row.container_id}
+                  onRowClick={(row) => {
+                    setSelectedContainer(row);
+                    setPanelTab("details");
+                  }}
+                  selectedRows={selectedContainer ? new Set([selectedContainer.container_id]) : undefined}
+                  hoverable
+                />
+              ) : (
+                <EmptyState
+                  icon={ContainerIcon}
+                  title="No containers found"
+                  description={containers?.length === 0
+                    ? "Make sure Docker is running and containers are deployed"
+                    : "No containers match the current filters"
+                  }
+                />
+              )}
             </div>
-          ) : filteredContainers.length > 0 ? (
-            <Table
-              columns={columns}
-              data={filteredContainers}
-              keyExtractor={(row) => row.container_id}
-              onRowClick={(row) => {
-                setSelectedContainer(row);
-                setPanelTab("details");
-              }}
-              selectedRows={selectedContainer ? new Set([selectedContainer.container_id]) : undefined}
-              hoverable
-            />
-          ) : (
-            <EmptyState
-              icon={ContainerIcon}
-              title="No containers found"
-              description={containers?.length === 0
-                ? "Make sure Docker is running and containers are deployed"
-                : "No containers match the current filters"
-              }
-            />
-          )}
+          </div>
         </>
       )}
 
