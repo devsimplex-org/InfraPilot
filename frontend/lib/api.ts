@@ -2669,6 +2669,235 @@ export interface CreateExternalIncidentRequest {
   vendor_incident_url?: string;
 }
 
+// Epic 7: Research & Metrics Types
+export interface MetricDefinition {
+  id: string;
+  org_id: string;
+  name: string;
+  display_name?: string;
+  description?: string;
+  category: 'security' | 'performance' | 'compliance' | 'usage' | 'cost' | 'health';
+  subcategory?: string;
+  metric_type: 'counter' | 'gauge' | 'histogram' | 'summary';
+  unit?: string;
+  value_type: 'numeric' | 'boolean' | 'string';
+  collection_method: 'automatic' | 'manual' | 'calculated' | 'aggregated';
+  collection_interval_seconds: number;
+  source?: string;
+  query_template?: string;
+  aggregation_type?: 'sum' | 'avg' | 'min' | 'max' | 'count' | 'last' | 'p50' | 'p95' | 'p99';
+  aggregation_window_seconds?: number;
+  warning_threshold?: number;
+  critical_threshold?: number;
+  threshold_direction: 'above' | 'below';
+  is_primary: boolean;
+  display_order: number;
+  chart_type?: 'line' | 'bar' | 'pie' | 'gauge' | 'number';
+  color?: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MetricValue {
+  id: string;
+  org_id: string;
+  metric_id: string;
+  agent_id?: string;
+  deployment_id?: string;
+  resource_type?: string;
+  resource_id?: string;
+  labels?: Record<string, string>;
+  value_numeric?: number;
+  value_string?: string;
+  value_bool?: boolean;
+  collected_at: string;
+  period_start?: string;
+  period_end?: string;
+  source?: string;
+  metadata?: Record<string, unknown>;
+  metric_name?: string;
+  metric_category?: string;
+}
+
+export interface MetricSummary {
+  org_id: string;
+  category: string;
+  total_metrics: number;
+  enabled_metrics: number;
+  metrics_with_data: number;
+  last_data_collected?: string;
+}
+
+export interface Dashboard {
+  id: string;
+  org_id: string;
+  name: string;
+  description?: string;
+  slug?: string;
+  created_by?: string;
+  is_default: boolean;
+  is_shared: boolean;
+  layout?: Record<string, unknown>[];
+  settings?: Record<string, unknown>;
+  visibility: 'private' | 'team' | 'org' | 'public';
+  widget_count?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DashboardWidget {
+  id: string;
+  org_id: string;
+  dashboard_id: string;
+  widget_type: 'metric' | 'chart' | 'table' | 'text' | 'alert_summary';
+  title?: string;
+  metric_ids?: string[];
+  query?: Record<string, unknown>;
+  filters?: Record<string, unknown>;
+  chart_type?: 'line' | 'bar' | 'pie' | 'area' | 'gauge' | 'number' | 'table';
+  time_range?: 'last_hour' | 'last_24h' | 'last_7d' | 'last_30d' | 'custom';
+  refresh_interval_seconds: number;
+  position_x: number;
+  position_y: number;
+  width: number;
+  height: number;
+  settings?: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Report {
+  id: string;
+  org_id: string;
+  name: string;
+  description?: string;
+  report_type: 'security_summary' | 'compliance' | 'executive' | 'custom';
+  template?: string;
+  config?: Record<string, unknown>;
+  filters?: Record<string, unknown>;
+  schedule_enabled: boolean;
+  schedule_cron?: string;
+  schedule_timezone: string;
+  next_run_at?: string;
+  last_run_at?: string;
+  delivery_method?: 'email' | 'download' | 'webhook' | 's3';
+  delivery_config?: Record<string, unknown>;
+  recipients?: string[];
+  created_by?: string;
+  visibility: 'private' | 'team' | 'org' | 'public';
+  created_at: string;
+  updated_at: string;
+  last_execution_status?: string;
+}
+
+export interface ReportExecution {
+  id: string;
+  org_id: string;
+  report_id: string;
+  triggered_by: 'schedule' | 'manual' | 'api';
+  triggered_by_user?: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  started_at?: string;
+  completed_at?: string;
+  duration_seconds?: number;
+  output_format?: 'pdf' | 'html' | 'csv' | 'json';
+  output_path?: string;
+  output_size_bytes?: number;
+  delivered_at?: string;
+  delivery_status?: string;
+  delivery_error?: string;
+  data_start?: string;
+  data_end?: string;
+  error_message?: string;
+  retry_count: number;
+  created_at: string;
+  report_name?: string;
+  report_type?: string;
+}
+
+export interface TelemetrySettings {
+  id: string;
+  org_id: string;
+  collect_usage_metrics: boolean;
+  collect_performance_metrics: boolean;
+  collect_security_metrics: boolean;
+  collect_error_reports: boolean;
+  research_participation: boolean;
+  research_consent_date?: string;
+  research_consent_version?: string;
+  anonymize_data: boolean;
+  data_retention_days: number;
+  allow_data_export: boolean;
+  export_format: string;
+  updated_at: string;
+  updated_by?: string;
+}
+
+export interface CreateMetricDefinitionRequest {
+  name: string;
+  display_name?: string;
+  description?: string;
+  category: string;
+  subcategory?: string;
+  metric_type?: string;
+  unit?: string;
+  value_type?: string;
+  collection_method?: string;
+  collection_interval_seconds?: number;
+  source?: string;
+  query_template?: string;
+  aggregation_type?: string;
+  aggregation_window_seconds?: number;
+  warning_threshold?: number;
+  critical_threshold?: number;
+  threshold_direction?: string;
+  is_primary?: boolean;
+  display_order?: number;
+  chart_type?: string;
+  color?: string;
+}
+
+export interface CreateDashboardRequest {
+  name: string;
+  description?: string;
+  slug?: string;
+  is_default?: boolean;
+  is_shared?: boolean;
+  layout?: Record<string, unknown>[];
+  settings?: Record<string, unknown>;
+  visibility?: string;
+}
+
+export interface CreateReportRequest {
+  name: string;
+  description?: string;
+  report_type: string;
+  template?: string;
+  config?: Record<string, unknown>;
+  filters?: Record<string, unknown>;
+  schedule_enabled?: boolean;
+  schedule_cron?: string;
+  schedule_timezone?: string;
+  delivery_method?: string;
+  delivery_config?: Record<string, unknown>;
+  recipients?: string[];
+  visibility?: string;
+}
+
+export interface UpdateTelemetrySettingsRequest {
+  collect_usage_metrics?: boolean;
+  collect_performance_metrics?: boolean;
+  collect_security_metrics?: boolean;
+  collect_error_reports?: boolean;
+  research_participation?: boolean;
+  research_consent_version?: string;
+  anonymize_data?: boolean;
+  data_retention_days?: number;
+  allow_data_export?: boolean;
+  export_format?: string;
+}
+
 // API methods
 export const api = {
   // Setup (first-run)
@@ -4619,6 +4848,181 @@ export const api = {
 
   updateExternalIncidentStatus: (incidentId: string, data: { status: string; resolution_notes?: string; root_cause?: string }) =>
     fetchAPI<{ message: string }>(`/dependencies/incidents/${incidentId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  // Epic 7: Research & Metrics
+  listMetricDefinitions: (params?: {
+    category?: string;
+    enabled?: boolean;
+    is_primary?: boolean;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.category) searchParams.set("category", params.category);
+    if (params?.enabled !== undefined) searchParams.set("enabled", params.enabled.toString());
+    if (params?.is_primary !== undefined) searchParams.set("is_primary", params.is_primary.toString());
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    if (params?.offset) searchParams.set("offset", params.offset.toString());
+    const query = searchParams.toString();
+    return fetchAPI<{ metrics: MetricDefinition[]; total: number }>(
+      `/metrics${query ? `?${query}` : ""}`
+    );
+  },
+
+  getMetricDefinition: (metricId: string) =>
+    fetchAPI<MetricDefinition>(`/metrics/${metricId}`),
+
+  createMetricDefinition: (data: CreateMetricDefinitionRequest) =>
+    fetchAPI<{ id: string; message: string }>(`/metrics`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateMetricDefinition: (metricId: string, data: Partial<CreateMetricDefinitionRequest>) =>
+    fetchAPI<{ message: string }>(`/metrics/${metricId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  deleteMetricDefinition: (metricId: string) =>
+    fetchAPI<{ message: string }>(`/metrics/${metricId}`, {
+      method: "DELETE",
+    }),
+
+  getMetricValues: (metricId: string, params?: {
+    start_time?: string;
+    end_time?: string;
+    agent_id?: string;
+    resource_type?: string;
+    resource_id?: string;
+    limit?: number;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.start_time) searchParams.set("start_time", params.start_time);
+    if (params?.end_time) searchParams.set("end_time", params.end_time);
+    if (params?.agent_id) searchParams.set("agent_id", params.agent_id);
+    if (params?.resource_type) searchParams.set("resource_type", params.resource_type);
+    if (params?.resource_id) searchParams.set("resource_id", params.resource_id);
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    const query = searchParams.toString();
+    return fetchAPI<{ values: MetricValue[]; total: number }>(
+      `/metrics/${metricId}/values${query ? `?${query}` : ""}`
+    );
+  },
+
+  getMetricSummary: () =>
+    fetchAPI<MetricSummary[]>(`/metrics/summary`),
+
+  // Dashboards
+  listDashboards: (params?: {
+    visibility?: string;
+    is_default?: boolean;
+    created_by?: string;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.visibility) searchParams.set("visibility", params.visibility);
+    if (params?.is_default !== undefined) searchParams.set("is_default", params.is_default.toString());
+    if (params?.created_by) searchParams.set("created_by", params.created_by);
+    const query = searchParams.toString();
+    return fetchAPI<{ dashboards: Dashboard[]; total: number }>(
+      `/dashboards${query ? `?${query}` : ""}`
+    );
+  },
+
+  getDashboard: (dashboardId: string) =>
+    fetchAPI<Dashboard>(`/dashboards/${dashboardId}`),
+
+  createDashboard: (data: CreateDashboardRequest) =>
+    fetchAPI<{ id: string; message: string }>(`/dashboards`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateDashboard: (dashboardId: string, data: Partial<CreateDashboardRequest>) =>
+    fetchAPI<{ message: string }>(`/dashboards/${dashboardId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  deleteDashboard: (dashboardId: string) =>
+    fetchAPI<{ message: string }>(`/dashboards/${dashboardId}`, {
+      method: "DELETE",
+    }),
+
+  // Reports
+  listReports: (params?: {
+    report_type?: string;
+    schedule_enabled?: boolean;
+    visibility?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.report_type) searchParams.set("report_type", params.report_type);
+    if (params?.schedule_enabled !== undefined) searchParams.set("schedule_enabled", params.schedule_enabled.toString());
+    if (params?.visibility) searchParams.set("visibility", params.visibility);
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    if (params?.offset) searchParams.set("offset", params.offset.toString());
+    const query = searchParams.toString();
+    return fetchAPI<{ reports: Report[]; total: number }>(
+      `/reports${query ? `?${query}` : ""}`
+    );
+  },
+
+  getReport: (reportId: string) =>
+    fetchAPI<Report>(`/reports/${reportId}`),
+
+  createReport: (data: CreateReportRequest) =>
+    fetchAPI<{ id: string; message: string }>(`/reports`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateReport: (reportId: string, data: Partial<CreateReportRequest>) =>
+    fetchAPI<{ message: string }>(`/reports/${reportId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  deleteReport: (reportId: string) =>
+    fetchAPI<{ message: string }>(`/reports/${reportId}`, {
+      method: "DELETE",
+    }),
+
+  runReport: (reportId: string) =>
+    fetchAPI<{ execution_id: string; message: string }>(`/reports/${reportId}/run`, {
+      method: "POST",
+    }),
+
+  listReportExecutions: (params?: {
+    report_id?: string;
+    status?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.report_id) searchParams.set("report_id", params.report_id);
+    if (params?.status) searchParams.set("status", params.status);
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    if (params?.offset) searchParams.set("offset", params.offset.toString());
+    const query = searchParams.toString();
+    return fetchAPI<{ executions: ReportExecution[]; total: number }>(
+      `/reports/executions${query ? `?${query}` : ""}`
+    );
+  },
+
+  getReportExecution: (executionId: string) =>
+    fetchAPI<ReportExecution>(`/reports/executions/${executionId}`),
+
+  // Telemetry Settings
+  getTelemetrySettings: () =>
+    fetchAPI<TelemetrySettings>(`/telemetry/settings`),
+
+  updateTelemetrySettings: (data: UpdateTelemetrySettingsRequest) =>
+    fetchAPI<{ message: string }>(`/telemetry/settings`, {
       method: "PUT",
       body: JSON.stringify(data),
     }),

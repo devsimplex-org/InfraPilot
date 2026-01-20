@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 // ============================================================================
@@ -226,7 +227,7 @@ func (h *Handler) listJobs(c *gin.Context) {
 
 	rows, err := h.db.Query(c.Request.Context(), query, args...)
 	if err != nil {
-		h.logger.Error("Failed to list jobs", "error", err)
+		h.logger.Error("Failed to list jobs", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list jobs"})
 		return
 	}
@@ -245,7 +246,7 @@ func (h *Handler) listJobs(c *gin.Context) {
 			&job.WorkerID, &job.WorkerHostname, &job.CreatedAt, &job.UpdatedAt,
 		)
 		if err != nil {
-			h.logger.Error("Failed to scan job", "error", err)
+			h.logger.Error("Failed to scan job", zap.Error(err))
 			continue
 		}
 		jobs = append(jobs, job)
@@ -334,7 +335,7 @@ func (h *Handler) createJob(c *gin.Context) {
 	).Scan(&jobID)
 
 	if err != nil {
-		h.logger.Error("Failed to create job", "error", err)
+		h.logger.Error("Failed to create job", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create job"})
 		return
 	}
@@ -358,7 +359,7 @@ func (h *Handler) cancelJob(c *gin.Context) {
 		jobID, orgID,
 	)
 	if err != nil {
-		h.logger.Error("Failed to cancel job", "error", err)
+		h.logger.Error("Failed to cancel job", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to cancel job"})
 		return
 	}
@@ -388,7 +389,7 @@ func (h *Handler) retryJob(c *gin.Context) {
 		jobID, orgID,
 	)
 	if err != nil {
-		h.logger.Error("Failed to retry job", "error", err)
+		h.logger.Error("Failed to retry job", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retry job"})
 		return
 	}
@@ -418,7 +419,7 @@ func (h *Handler) getJobLogs(c *gin.Context) {
 		jobID, orgID,
 	)
 	if err != nil {
-		h.logger.Error("Failed to get job logs", "error", err)
+		h.logger.Error("Failed to get job logs", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get logs"})
 		return
 	}
@@ -452,7 +453,7 @@ func (h *Handler) getJobStatistics(c *gin.Context) {
 		orgID,
 	)
 	if err != nil {
-		h.logger.Error("Failed to get job statistics", "error", err)
+		h.logger.Error("Failed to get job statistics", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get statistics"})
 		return
 	}
@@ -491,7 +492,7 @@ func (h *Handler) listSchedules(c *gin.Context) {
 		orgID,
 	)
 	if err != nil {
-		h.logger.Error("Failed to list schedules", "error", err)
+		h.logger.Error("Failed to list schedules", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list schedules"})
 		return
 	}
@@ -509,7 +510,7 @@ func (h *Handler) listSchedules(c *gin.Context) {
 			&s.AlertAfterConsecFailures, &s.PauseAfterFailures, &s.CreatedAt, &s.UpdatedAt,
 		)
 		if err != nil {
-			h.logger.Error("Failed to scan schedule", "error", err)
+			h.logger.Error("Failed to scan schedule", zap.Error(err))
 			continue
 		}
 		schedules = append(schedules, s)
@@ -561,7 +562,7 @@ func (h *Handler) createSchedule(c *gin.Context) {
 	).Scan(&scheduleID)
 
 	if err != nil {
-		h.logger.Error("Failed to create schedule", "error", err)
+		h.logger.Error("Failed to create schedule", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create schedule"})
 		return
 	}
@@ -591,7 +592,7 @@ func (h *Handler) toggleSchedule(c *gin.Context) {
 		req.Enabled, scheduleID, orgID,
 	)
 	if err != nil {
-		h.logger.Error("Failed to update schedule", "error", err)
+		h.logger.Error("Failed to update schedule", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update schedule"})
 		return
 	}
@@ -618,7 +619,7 @@ func (h *Handler) deleteSchedule(c *gin.Context) {
 		scheduleID, orgID,
 	)
 	if err != nil {
-		h.logger.Error("Failed to delete schedule", "error", err)
+		h.logger.Error("Failed to delete schedule", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete schedule"})
 		return
 	}
@@ -647,7 +648,7 @@ func (h *Handler) listWorkers(c *gin.Context) {
 		orgID,
 	)
 	if err != nil {
-		h.logger.Error("Failed to list workers", "error", err)
+		h.logger.Error("Failed to list workers", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list workers"})
 		return
 	}
@@ -664,7 +665,7 @@ func (h *Handler) listWorkers(c *gin.Context) {
 			&w.CreatedAt, &w.UpdatedAt,
 		)
 		if err != nil {
-			h.logger.Error("Failed to scan worker", "error", err)
+			h.logger.Error("Failed to scan worker", zap.Error(err))
 			continue
 		}
 		workers = append(workers, w)

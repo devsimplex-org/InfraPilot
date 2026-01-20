@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 
 // New Component Library Imports
 import { PageHeader } from "@/components/ui/PageHeader";
-import { Breadcrumb, BreadcrumbItem } from "@/components/ui/Breadcrumb";
+import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
 import { Table, Column } from "@/components/ui/Table";
 import { SlideOver } from "@/components/ui/SlideOver";
@@ -239,7 +239,7 @@ export default function SBOMsPage() {
   };
 
   // Breadcrumb items
-  const breadcrumbItems: BreadcrumbItem[] = [
+  const breadcrumbItems = [
     { label: "Deploy", href: "/deploy" },
     { label: "SBOMs", current: true },
   ];

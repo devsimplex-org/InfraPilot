@@ -30,7 +30,7 @@ import {
   JobStatistics,
   WorkerSummary,
 } from "@/lib/api";
-import { Breadcrumb, BreadcrumbItem } from "@/components/ui/Breadcrumb";
+import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
 import { Tabs } from "@/components/ui/page-layout";
@@ -449,10 +449,12 @@ export default function JobsPage() {
 
   return (
     <div className="space-y-6">
-      <Breadcrumb>
-        <BreadcrumbItem href="/dashboard">Home</BreadcrumbItem>
-        <BreadcrumbItem href="/platform/jobs">Background Jobs</BreadcrumbItem>
-      </Breadcrumb>
+      <Breadcrumb
+        items={[
+          { label: "Platform", href: "/platform/jobs" },
+          { label: "Background Jobs" },
+        ]}
+      />
 
       <PageHeader
         title="Background Jobs"
