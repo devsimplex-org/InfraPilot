@@ -23,7 +23,7 @@ import {
   Settings,
   Loader2,
 } from "lucide-react";
-import { api, Container, SecurityHeaders, RateLimit } from "@/lib/api";
+import { api, Container, SecurityHeaders, RateLimit, ProxyHost } from "@/lib/api";
 import { formatRelativeTime, cn } from "@/lib/utils";
 import { SSLWizard } from "@/components/ssl-wizard";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -42,22 +42,6 @@ import {
   Tabs,
   Input,
 } from "@/components/ui/page-layout";
-
-interface ProxyHost {
-  id: string;
-  agent_id: string;
-  domain: string;
-  upstream_target: string;
-  ssl_enabled: boolean;
-  ssl_expires_at: string | null;
-  force_ssl: boolean;
-  http2_enabled: boolean;
-  include_www: boolean;
-  is_system_proxy: boolean;
-  status: string;
-  created_at: string;
-  updated_at: string;
-}
 
 type PanelTab = "details" | "security" | "ratelimits" | "config";
 type UpstreamMode = "manual" | "container";
