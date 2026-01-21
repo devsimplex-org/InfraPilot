@@ -152,10 +152,44 @@ export interface ProxyHost {
   force_ssl: boolean;
   http2_enabled: boolean;
   include_www: boolean;
+  basic_auth_enabled: boolean;
+  basic_auth_realm?: string;
   is_system_proxy: boolean;
   status: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface AuthUser {
+  id: string;
+  proxy_id: string;
+  username: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConfigPreviewRequest {
+  domain: string;
+  upstream_target: string;
+  ssl_enabled: boolean;
+  force_ssl: boolean;
+  http2_enabled: boolean;
+  include_www: boolean;
+  basic_auth_enabled: boolean;
+  basic_auth_realm: string;
+  hsts_enabled: boolean;
+  hsts_max_age: number;
+  x_frame_options: string;
+  x_content_type_options: boolean;
+  x_xss_protection: boolean;
+  content_security_policy?: string;
+}
+
+export interface ConfigTestResult {
+  valid: boolean;
+  message: string;
+  error?: string;
+  error_line?: number;
 }
 
 export interface LoginResponse {
@@ -3266,6 +3300,42 @@ export const api = {
       {
         method: "PUT",
         body: JSON.stringify(data),
+      }
+    ),
+
+  // Basic Auth Users
+  listAuthUsers: (agentId: string, proxyId: string) =>
+    fetchAPI<AuthUser[]>(`/agents/${agentId}/proxies/${proxyId}/auth-users`),
+
+  createAuthUser: (
+    agentId: string,
+    proxyId: string,
+    data: { username: string; password: string }
+  ) =>
+    fetchAPI<AuthUser>(`/agents/${agentId}/proxies/${proxyId}/auth-users`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  deleteAuthUser: (agentId: string, proxyId: string, userId: string) =>
+    fetchAPI<void>(
+      `/agents/${agentId}/proxies/${proxyId}/auth-users/${userId}`,
+      {
+        method: "DELETE",
+      }
+    ),
+
+  // Config Preview
+  previewProxyConfig: (
+    agentId: string,
+    proxyId: string,
+    config: ConfigPreviewRequest
+  ) =>
+    fetchAPI<{ config: string }>(
+      `/agents/${agentId}/proxies/${proxyId}/config/preview`,
+      {
+        method: "POST",
+        body: JSON.stringify(config),
       }
     ),
 

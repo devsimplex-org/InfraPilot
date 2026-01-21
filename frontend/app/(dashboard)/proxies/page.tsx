@@ -26,6 +26,7 @@ import {
 import { api, Container, SecurityHeaders, RateLimit, ProxyHost } from "@/lib/api";
 import { formatRelativeTime, cn } from "@/lib/utils";
 import { SSLWizard } from "@/components/ssl-wizard";
+import { ProxyConfigForm } from "@/components/ProxyConfigForm";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
@@ -649,18 +650,20 @@ export default function ProxiesPage() {
 
       case "config":
         return (
-          <div className="h-full">
-            {configLoading ? (
-              <div className="flex items-center justify-center h-32">
-                <Spinner />
-              </div>
-            ) : (
-              <div className="bg-gray-900 rounded-lg p-4 overflow-auto max-h-[500px]">
-                <pre className="text-xs text-gray-300 font-mono whitespace-pre-wrap">
-                  {configContent}
-                </pre>
-              </div>
-            )}
+          <div className="h-full overflow-auto">
+            <ProxyConfigForm
+              proxy={selectedProxy}
+              agentId={selectedAgent}
+              securityHeaders={securityHeaders}
+              onSave={async (proxyData, headerData) => {
+                // Update proxy
+                await api.updateProxyHost(selectedAgent, selectedProxy.id, proxyData);
+                // Update security headers
+                await api.updateSecurityHeaders(selectedAgent, selectedProxy.id, headerData);
+                // Refresh data
+                queryClient.invalidateQueries({ queryKey: ["proxies", selectedAgent] });
+              }}
+            />
           </div>
         );
 

@@ -140,6 +140,40 @@ func (c *Controller) WriteConfigFile(configPath, content string) error {
 	return nil
 }
 
+// WriteHtpasswdFile writes htpasswd content for basic auth
+func (c *Controller) WriteHtpasswdFile(htpasswdPath, content string) error {
+	// Ensure directory exists
+	dir := filepath.Dir(htpasswdPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create htpasswd directory: %w", err)
+	}
+
+	// Use atomic write: write to temp file then rename
+	tmpFile := htpasswdPath + ".tmp"
+
+	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to write temp htpasswd: %w", err)
+	}
+
+	if err := os.Rename(tmpFile, htpasswdPath); err != nil {
+		os.Remove(tmpFile)
+		return fmt.Errorf("failed to rename htpasswd: %w", err)
+	}
+
+	c.logger.Info("Wrote htpasswd file", zap.String("path", htpasswdPath))
+	return nil
+}
+
+// DeleteHtpasswdFile removes an htpasswd file
+func (c *Controller) DeleteHtpasswdFile(htpasswdPath string) error {
+	if err := os.Remove(htpasswdPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to delete htpasswd: %w", err)
+	}
+
+	c.logger.Info("Deleted htpasswd file", zap.String("path", htpasswdPath))
+	return nil
+}
+
 // TestConfig validates the nginx configuration by running nginx -t in the container
 func (c *Controller) TestConfig(ctx context.Context) error {
 	output, exitCode, err := c.execNginxCommand(ctx, []string{"nginx", "-t"})

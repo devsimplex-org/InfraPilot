@@ -675,6 +675,54 @@ func (h *CommandHandler) handleNginxCommand(ctx context.Context, cmd *agentgrpc.
 			Message: message,
 		}
 
+	case "write_htpasswd":
+		if !h.IsManagedProxy() {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: "cannot write htpasswd: proxy is in external mode",
+			}
+		}
+		if nginxCmd.HtpasswdPath == "" {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: "htpasswd_path is required",
+			}
+		}
+		if err := h.nginx.WriteHtpasswdFile(nginxCmd.HtpasswdPath, nginxCmd.HtpasswdContent); err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("failed to write htpasswd: %v", err),
+			}
+		}
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: "htpasswd file written",
+		}
+
+	case "delete_htpasswd":
+		if !h.IsManagedProxy() {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: "cannot delete htpasswd: proxy is in external mode",
+			}
+		}
+		if nginxCmd.HtpasswdPath == "" {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: "htpasswd_path is required",
+			}
+		}
+		if err := h.nginx.DeleteHtpasswdFile(nginxCmd.HtpasswdPath); err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("failed to delete htpasswd: %v", err),
+			}
+		}
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: "htpasswd file deleted",
+		}
+
 	default:
 		return &agentgrpc.CommandResult{
 			Success: false,
