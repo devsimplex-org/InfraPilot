@@ -471,6 +471,7 @@ type NginxCommand struct {
 	Domain        string `json:"domain,omitempty"`
 	Email         string `json:"email,omitempty"`
 	DNSProvider   string `json:"dns_provider,omitempty"`
+	IncludeWWW    bool   `json:"include_www,omitempty"`
 }
 
 // DockerCommand actions
@@ -648,6 +649,21 @@ func NewNginxSSLCommand(domain, email, dnsProvider string) *BackendMessage {
 			Domain:      domain,
 			Email:       email,
 			DNSProvider: dnsProvider,
+		}),
+	}
+}
+
+// NewNginxSSLCommandWithWWW creates a command to request SSL certificate with optional www subdomain
+func NewNginxSSLCommandWithWWW(domain, email, dnsProvider string, includeWWW bool) *BackendMessage {
+	return &BackendMessage{
+		RequestId: uuid.New().String(),
+		Type:      "nginx",
+		Command: mustMarshal(NginxCommand{
+			Action:      NginxActionRequestSSL,
+			Domain:      domain,
+			Email:       email,
+			DNSProvider: dnsProvider,
+			IncludeWWW:  includeWWW,
 		}),
 	}
 }

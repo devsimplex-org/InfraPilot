@@ -29,6 +29,7 @@ type ProxyHost struct {
 	SSLExpiresAt   *time.Time `json:"ssl_expires_at,omitempty"`
 	ForceSSL       bool       `json:"force_ssl"`
 	HTTP2Enabled   bool       `json:"http2_enabled"`
+	IncludeWWW     bool       `json:"include_www"`
 	ConfigHash     *string    `json:"config_hash,omitempty"`
 	Status         string     `json:"status"`
 	IsSystemProxy  bool       `json:"is_system_proxy"`
@@ -54,6 +55,7 @@ type CreateProxyRequest struct {
 	UpstreamTarget string `json:"upstream_target" binding:"required"`
 	ForceSSL       bool   `json:"force_ssl"`
 	HTTP2Enabled   bool   `json:"http2_enabled"`
+	IncludeWWW     bool   `json:"include_www"`
 }
 
 // UpdateProxyRequest is the request body for updating a proxy host
@@ -62,6 +64,7 @@ type UpdateProxyRequest struct {
 	UpstreamTarget *string `json:"upstream_target,omitempty"`
 	ForceSSL       *bool   `json:"force_ssl,omitempty"`
 	HTTP2Enabled   *bool   `json:"http2_enabled,omitempty"`
+	IncludeWWW     *bool   `json:"include_www,omitempty"`
 	Status         *string `json:"status,omitempty"`
 }
 
@@ -89,8 +92,8 @@ func (h *Handler) listProxyHosts(c *gin.Context) {
 
 	rows, err := h.db.Query(c.Request.Context(), `
 		SELECT id, agent_id, domain, upstream_target, ssl_enabled, ssl_cert_path,
-		       ssl_key_path, ssl_expires_at, force_ssl, http2_enabled, config_hash,
-		       status, is_system_proxy, created_at, updated_at
+		       ssl_key_path, ssl_expires_at, force_ssl, http2_enabled, include_www,
+		       config_hash, status, is_system_proxy, created_at, updated_at
 		FROM proxy_hosts
 		WHERE agent_id = $1
 		ORDER BY domain ASC
@@ -107,7 +110,7 @@ func (h *Handler) listProxyHosts(c *gin.Context) {
 		if err := rows.Scan(
 			&p.ID, &p.AgentID, &p.Domain, &p.UpstreamTarget, &p.SSLEnabled,
 			&p.SSLCertPath, &p.SSLKeyPath, &p.SSLExpiresAt, &p.ForceSSL,
-			&p.HTTP2Enabled, &p.ConfigHash, &p.Status, &p.IsSystemProxy, &p.CreatedAt, &p.UpdatedAt,
+			&p.HTTP2Enabled, &p.IncludeWWW, &p.ConfigHash, &p.Status, &p.IsSystemProxy, &p.CreatedAt, &p.UpdatedAt,
 		); err != nil {
 			continue
 		}
@@ -174,10 +177,10 @@ func (h *Handler) createProxyHost(c *gin.Context) {
 	// Insert proxy host
 	var proxyID uuid.UUID
 	err = h.db.QueryRow(c.Request.Context(), `
-		INSERT INTO proxy_hosts (agent_id, domain, upstream_target, force_ssl, http2_enabled, status)
-		VALUES ($1, $2, $3, $4, $5, 'active')
+		INSERT INTO proxy_hosts (agent_id, domain, upstream_target, force_ssl, http2_enabled, include_www, status)
+		VALUES ($1, $2, $3, $4, $5, $6, 'active')
 		RETURNING id
-	`, agentID, req.Domain, req.UpstreamTarget, req.ForceSSL, req.HTTP2Enabled).Scan(&proxyID)
+	`, agentID, req.Domain, req.UpstreamTarget, req.ForceSSL, req.HTTP2Enabled, req.IncludeWWW).Scan(&proxyID)
 
 	if err != nil {
 		h.logger.Error("Failed to create proxy host")
@@ -199,20 +202,20 @@ func (h *Handler) createProxyHost(c *gin.Context) {
 	h.auditLog(c, userID, orgID, "proxy.create", "proxy_host", proxyID, req)
 
 	// Push config to agent via gRPC
-	go h.dispatchProxyConfig(c.Request.Context(), agentID, proxyID, req.Domain, req.UpstreamTarget, req.ForceSSL, req.HTTP2Enabled, false)
+	go h.dispatchProxyConfig(c.Request.Context(), agentID, proxyID, req.Domain, req.UpstreamTarget, req.ForceSSL, req.HTTP2Enabled, req.IncludeWWW, false)
 
 	// Fetch and return the created proxy
 	var proxy ProxyHost
 	err = h.db.QueryRow(c.Request.Context(), `
 		SELECT id, agent_id, domain, upstream_target, ssl_enabled, ssl_cert_path,
-		       ssl_key_path, ssl_expires_at, force_ssl, http2_enabled, config_hash,
-		       status, created_at, updated_at
+		       ssl_key_path, ssl_expires_at, force_ssl, http2_enabled, include_www,
+		       config_hash, status, created_at, updated_at
 		FROM proxy_hosts
 		WHERE id = $1
 	`, proxyID).Scan(
 		&proxy.ID, &proxy.AgentID, &proxy.Domain, &proxy.UpstreamTarget, &proxy.SSLEnabled,
 		&proxy.SSLCertPath, &proxy.SSLKeyPath, &proxy.SSLExpiresAt, &proxy.ForceSSL,
-		&proxy.HTTP2Enabled, &proxy.ConfigHash, &proxy.Status, &proxy.CreatedAt, &proxy.UpdatedAt,
+		&proxy.HTTP2Enabled, &proxy.IncludeWWW, &proxy.ConfigHash, &proxy.Status, &proxy.CreatedAt, &proxy.UpdatedAt,
 	)
 
 	if err != nil {
@@ -255,14 +258,14 @@ func (h *Handler) getProxyHost(c *gin.Context) {
 	var proxy ProxyHost
 	err = h.db.QueryRow(c.Request.Context(), `
 		SELECT id, agent_id, domain, upstream_target, ssl_enabled, ssl_cert_path,
-		       ssl_key_path, ssl_expires_at, force_ssl, http2_enabled, config_hash,
-		       status, created_at, updated_at
+		       ssl_key_path, ssl_expires_at, force_ssl, http2_enabled, include_www,
+		       config_hash, status, created_at, updated_at
 		FROM proxy_hosts
 		WHERE id = $1 AND agent_id = $2
 	`, proxyID, agentID).Scan(
 		&proxy.ID, &proxy.AgentID, &proxy.Domain, &proxy.UpstreamTarget, &proxy.SSLEnabled,
 		&proxy.SSLCertPath, &proxy.SSLKeyPath, &proxy.SSLExpiresAt, &proxy.ForceSSL,
-		&proxy.HTTP2Enabled, &proxy.ConfigHash, &proxy.Status, &proxy.CreatedAt, &proxy.UpdatedAt,
+		&proxy.HTTP2Enabled, &proxy.IncludeWWW, &proxy.ConfigHash, &proxy.Status, &proxy.CreatedAt, &proxy.UpdatedAt,
 	)
 
 	if err != nil {
@@ -360,6 +363,11 @@ func (h *Handler) updateProxyHost(c *gin.Context) {
 		query += fmt.Sprintf(", http2_enabled = $%d", argCount)
 		args = append(args, *req.HTTP2Enabled)
 	}
+	if req.IncludeWWW != nil {
+		argCount++
+		query += fmt.Sprintf(", include_www = $%d", argCount)
+		args = append(args, *req.IncludeWWW)
+	}
 	if req.Status != nil {
 		argCount++
 		query += fmt.Sprintf(", status = $%d", argCount)
@@ -392,18 +400,18 @@ func (h *Handler) updateProxyHost(c *gin.Context) {
 	var proxy ProxyHost
 	err = h.db.QueryRow(c.Request.Context(), `
 		SELECT id, agent_id, domain, upstream_target, ssl_enabled, ssl_cert_path,
-		       ssl_key_path, ssl_expires_at, force_ssl, http2_enabled, config_hash,
-		       status, created_at, updated_at
+		       ssl_key_path, ssl_expires_at, force_ssl, http2_enabled, include_www,
+		       config_hash, status, created_at, updated_at
 		FROM proxy_hosts
 		WHERE id = $1
 	`, proxyID).Scan(
 		&proxy.ID, &proxy.AgentID, &proxy.Domain, &proxy.UpstreamTarget, &proxy.SSLEnabled,
 		&proxy.SSLCertPath, &proxy.SSLKeyPath, &proxy.SSLExpiresAt, &proxy.ForceSSL,
-		&proxy.HTTP2Enabled, &proxy.ConfigHash, &proxy.Status, &proxy.CreatedAt, &proxy.UpdatedAt,
+		&proxy.HTTP2Enabled, &proxy.IncludeWWW, &proxy.ConfigHash, &proxy.Status, &proxy.CreatedAt, &proxy.UpdatedAt,
 	)
 
 	// Push updated config to agent via gRPC
-	go h.dispatchProxyConfig(c.Request.Context(), agentID, proxyID, proxy.Domain, proxy.UpstreamTarget, proxy.ForceSSL, proxy.HTTP2Enabled, proxy.SSLEnabled)
+	go h.dispatchProxyConfig(c.Request.Context(), agentID, proxyID, proxy.Domain, proxy.UpstreamTarget, proxy.ForceSSL, proxy.HTTP2Enabled, proxy.IncludeWWW, proxy.SSLEnabled)
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch updated proxy"})
@@ -516,11 +524,12 @@ func (h *Handler) requestSSL(c *gin.Context) {
 		return
 	}
 
-	// Get proxy domain
+	// Get proxy domain and include_www setting
 	var domain string
+	var includeWWW bool
 	err = h.db.QueryRow(c.Request.Context(), `
-		SELECT domain FROM proxy_hosts WHERE id = $1 AND agent_id = $2
-	`, proxyID, agentID).Scan(&domain)
+		SELECT domain, include_www FROM proxy_hosts WHERE id = $1 AND agent_id = $2
+	`, proxyID, agentID).Scan(&domain, &includeWWW)
 
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "proxy host not found"})
@@ -536,7 +545,7 @@ func (h *Handler) requestSSL(c *gin.Context) {
 	sslEmail := "admin@" + domain
 
 	// Send SSL request command to agent via gRPC
-	go h.dispatchSSLRequest(agentID, domain, sslEmail, "")
+	go h.dispatchSSLRequest(agentID, domain, sslEmail, "", includeWWW)
 
 	// Audit log
 	h.auditLog(c, userID, orgID, "proxy.ssl_request", "proxy_host", proxyID, gin.H{"domain": domain})
@@ -676,14 +685,14 @@ func (h *Handler) getProxyConfig(c *gin.Context) {
 	var proxy ProxyHost
 	err = h.db.QueryRow(c.Request.Context(), `
 		SELECT id, agent_id, domain, upstream_target, ssl_enabled, ssl_cert_path,
-		       ssl_key_path, ssl_expires_at, force_ssl, http2_enabled, config_hash,
-		       status, created_at, updated_at
+		       ssl_key_path, ssl_expires_at, force_ssl, http2_enabled, include_www,
+		       config_hash, status, created_at, updated_at
 		FROM proxy_hosts
 		WHERE id = $1 AND agent_id = $2
 	`, proxyID, agentID).Scan(
 		&proxy.ID, &proxy.AgentID, &proxy.Domain, &proxy.UpstreamTarget, &proxy.SSLEnabled,
 		&proxy.SSLCertPath, &proxy.SSLKeyPath, &proxy.SSLExpiresAt, &proxy.ForceSSL,
-		&proxy.HTTP2Enabled, &proxy.ConfigHash, &proxy.Status, &proxy.CreatedAt, &proxy.UpdatedAt,
+		&proxy.HTTP2Enabled, &proxy.IncludeWWW, &proxy.ConfigHash, &proxy.Status, &proxy.CreatedAt, &proxy.UpdatedAt,
 	)
 
 	if err != nil {
@@ -940,11 +949,17 @@ func (h *Handler) updateSecurityHeaders(c *gin.Context) {
 func generateNginxConfig(proxy ProxyHost, headers SecurityHeaders) string {
 	var config string
 
+	// Build server_name with optional www
+	serverName := proxy.Domain
+	if proxy.IncludeWWW {
+		serverName = fmt.Sprintf("%s www.%s", proxy.Domain, proxy.Domain)
+	}
+
 	// HTTP server block
 	config += "server {\n"
 	config += "    listen 80;\n"
 	config += "    listen [::]:80;\n"
-	config += fmt.Sprintf("    server_name %s;\n\n", proxy.Domain)
+	config += fmt.Sprintf("    server_name %s;\n\n", serverName)
 
 	if proxy.SSLEnabled && proxy.ForceSSL {
 		config += "    return 301 https://$host$request_uri;\n"
@@ -964,7 +979,7 @@ func generateNginxConfig(proxy ProxyHost, headers SecurityHeaders) string {
 		config += "server {\n"
 		config += fmt.Sprintf("    listen %s;\n", listen)
 		config += fmt.Sprintf("    listen [::]:%s;\n", listen)
-		config += fmt.Sprintf("    server_name %s;\n\n", proxy.Domain)
+		config += fmt.Sprintf("    server_name %s;\n\n", serverName)
 
 		// SSL configuration - determine effective cert paths
 		var certPath, keyPath string
@@ -1181,7 +1196,7 @@ func (h *Handler) reloadNginx(c *gin.Context) {
 // ============ gRPC Dispatch Functions ============
 
 // dispatchProxyConfig sends nginx config to the agent
-func (h *Handler) dispatchProxyConfig(ctx context.Context, agentID, proxyID uuid.UUID, domain, upstream string, forceSSL, http2, sslEnabled bool) {
+func (h *Handler) dispatchProxyConfig(ctx context.Context, agentID, proxyID uuid.UUID, domain, upstream string, forceSSL, http2, includeWWW, sslEnabled bool) {
 	agentIDStr := agentID.String()
 
 	if !agentgrpc.IsAgentConnected(agentIDStr) {
@@ -1211,6 +1226,7 @@ func (h *Handler) dispatchProxyConfig(ctx context.Context, agentID, proxyID uuid
 		UpstreamTarget: upstream,
 		ForceSSL:       forceSSL,
 		HTTP2Enabled:   http2,
+		IncludeWWW:     includeWWW,
 		SSLEnabled:     sslEnabled,
 	}
 
@@ -1361,7 +1377,7 @@ func (h *Handler) dispatchDeleteProxy(agentID uuid.UUID, domain string) {
 }
 
 // dispatchSSLRequest sends SSL certificate request to the agent
-func (h *Handler) dispatchSSLRequest(agentID uuid.UUID, domain, email, dnsProvider string) {
+func (h *Handler) dispatchSSLRequest(agentID uuid.UUID, domain, email, dnsProvider string, includeWWW bool) {
 	agentIDStr := agentID.String()
 
 	if !agentgrpc.IsAgentConnected(agentIDStr) {
@@ -1372,7 +1388,7 @@ func (h *Handler) dispatchSSLRequest(agentID uuid.UUID, domain, email, dnsProvid
 		return
 	}
 
-	cmd := agentgrpc.NewNginxSSLCommand(domain, email, dnsProvider)
+	cmd := agentgrpc.NewNginxSSLCommandWithWWW(domain, email, dnsProvider, includeWWW)
 
 	// Send command (non-blocking for now, but we should track the result)
 	if err := agentgrpc.SendCommandAsync(agentIDStr, cmd); err != nil {
@@ -1387,5 +1403,6 @@ func (h *Handler) dispatchSSLRequest(agentID uuid.UUID, domain, email, dnsProvid
 		zap.String("agent_id", agentIDStr),
 		zap.String("domain", domain),
 		zap.String("email", email),
+		zap.Bool("include_www", includeWWW),
 	)
 }

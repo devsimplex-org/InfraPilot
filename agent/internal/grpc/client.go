@@ -54,6 +54,7 @@ type NginxCommand struct {
 	Domain        string `json:"domain"`
 	Email         string `json:"email"`
 	DNSProvider   string `json:"dns_provider"`
+	IncludeWWW    bool   `json:"include_www"`
 }
 
 type NetworkCommand struct {
