@@ -1038,8 +1038,15 @@ func (h *Handler) updateSecurityHeaders(c *gin.Context) {
 		req.HSTSMaxAge = 31536000 // Default to 1 year
 	}
 
+	// Handle nil content_security_policy by converting to empty string for database
+	var csp *string
+	if req.ContentSecurityPolicy != nil {
+		csp = req.ContentSecurityPolicy
+	}
+
 	// Update or insert security headers
 	var headers SecurityHeaders
+	var cspResult *string
 	err = h.db.QueryRow(c.Request.Context(), `
 		INSERT INTO proxy_security_headers (proxy_host_id, hsts_enabled, hsts_max_age, x_frame_options,
 		                                    x_content_type_options, x_xss_protection, content_security_policy)
@@ -1055,11 +1062,12 @@ func (h *Handler) updateSecurityHeaders(c *gin.Context) {
 		RETURNING id, proxy_host_id, hsts_enabled, hsts_max_age, x_frame_options,
 		          x_content_type_options, x_xss_protection, content_security_policy
 	`, proxyID, req.HSTSEnabled, req.HSTSMaxAge, req.XFrameOptions,
-		req.XContentTypeOptions, req.XXSSProtection, req.ContentSecurityPolicy).Scan(
+		req.XContentTypeOptions, req.XXSSProtection, csp).Scan(
 		&headers.ID, &headers.ProxyHostID, &headers.HSTSEnabled, &headers.HSTSMaxAge,
 		&headers.XFrameOptions, &headers.XContentTypeOptions, &headers.XXSSProtection,
-		&headers.ContentSecurityPolicy,
+		&cspResult,
 	)
+	headers.ContentSecurityPolicy = cspResult
 
 	if err != nil {
 		h.logger.Error("Failed to update security headers", zap.Error(err))
