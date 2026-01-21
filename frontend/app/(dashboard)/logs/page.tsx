@@ -122,16 +122,16 @@ export default function LogsPage() {
     }
   };
 
-  const getLevelBadgeVariant = (logLevel: string) => {
+  const getLevelBadgeColor = (logLevel: string) => {
     switch (logLevel) {
       case "error":
-        return "destructive" as const;
+        return "red" as const;
       case "warn":
-        return "warning" as const;
+        return "yellow" as const;
       case "debug":
-        return "secondary" as const;
+        return "gray" as const;
       default:
-        return "default" as const;
+        return "blue" as const;
     }
   };
 
@@ -384,7 +384,7 @@ export default function LogsPage() {
                 )}
               </div>
               {selectedContainer !== "all" && (
-                <Badge variant="secondary">
+                <Badge>
                   <Container className="h-3 w-3 mr-1" />
                   {selectedContainer}
                 </Badge>
@@ -431,7 +431,7 @@ export default function LogsPage() {
 
                       {/* Level Badge */}
                       <div className="flex-shrink-0 w-16">
-                        <Badge variant={getLevelBadgeVariant(log.level)} size="sm">
+                        <Badge color={getLevelBadgeColor(log.level)} size="sm">
                           {log.level.toUpperCase()}
                         </Badge>
                       </div>
@@ -502,7 +502,7 @@ export default function LogsPage() {
                   <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
                     Log Level
                   </p>
-                  <Badge variant={getLevelBadgeVariant(selectedLog.level)} size="md">
+                  <Badge color={getLevelBadgeColor(selectedLog.level)} size="md">
                     {selectedLog.level.toUpperCase()}
                   </Badge>
                 </div>

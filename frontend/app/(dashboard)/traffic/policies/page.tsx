@@ -102,7 +102,7 @@ export default function TrafficPoliciesPage() {
     });
   };
 
-  const formatConfigSummary = (type: string, config: Record<string, unknown>) => {
+  const formatConfigSummary = (type: string, config: Record<string, unknown>): string => {
     switch (type) {
       case "rate_limit":
         return config.requests_per_second
@@ -115,7 +115,7 @@ export default function TrafficPoliciesPage() {
       case "ip_filtering":
         return `${(config.rules as unknown[])?.length || 0} rules`;
       case "bot_protection":
-        return config.mode || "Configured";
+        return typeof config.mode === "string" ? config.mode : "Configured";
       default:
         return "Configured";
     }

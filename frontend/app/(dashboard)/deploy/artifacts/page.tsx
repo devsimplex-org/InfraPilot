@@ -88,7 +88,7 @@ export default function ArtifactsPage() {
 
   // Tab configuration with counts
   const tabs = [
-    { id: "images", label: "Images", count: imagesData?.images?.length || 0 },
+    { id: "images", label: "Images", count: imagesData?.length || 0 },
     { id: "scans", label: "Scans", count: scansData?.length || 0 },
     { id: "sboms", label: "SBOMs", count: sbomsData?.length || 0 },
     { id: "registries", label: "Registries", count: registriesData?.length || 0 },
@@ -295,12 +295,12 @@ export default function ArtifactsPage() {
 
     switch (activeTab) {
       case "images":
-        const images = imagesData?.images || [];
+        const images = imagesData || [];
         return images.length > 0 ? (
           <Table
             columns={imageColumns}
             data={images}
-            keyExtractor={(row) => row.Id}
+            keyExtractor={(row) => row.id}
             hoverable
           />
         ) : (
@@ -389,7 +389,7 @@ export default function ArtifactsPage() {
       <MetricsGrid columns={4}>
         <StatCard
           label="Images"
-          value={imagesData?.images?.length || 0}
+          value={imagesData?.length || 0}
           icon={Image}
           iconColor="text-blue-600"
         />
