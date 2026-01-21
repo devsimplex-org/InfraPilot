@@ -152,6 +152,7 @@ export interface ProxyHost {
   force_ssl: boolean;
   http2_enabled: boolean;
   include_www: boolean;
+  is_system_proxy: boolean;
   status: string;
   created_at: string;
   updated_at: string;
