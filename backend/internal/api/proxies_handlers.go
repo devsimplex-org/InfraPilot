@@ -1596,6 +1596,13 @@ func (h *Handler) dispatchHtpasswd(ctx context.Context, agentID, proxyID uuid.UU
 		return
 	}
 
+	h.logger.Info("dispatchHtpasswd: fetched proxy details",
+		zap.String("proxy_id", proxyID.String()),
+		zap.String("domain", domain),
+		zap.Bool("basic_auth_enabled", basicAuthEnabled),
+		zap.Bool("is_system_proxy", isSystemProxy),
+	)
+
 	// Build htpasswd file path
 	htpasswdPath := filepath.Join("/data/nginx/conf.d", ".htpasswd_"+sanitizeFilename(domain))
 
