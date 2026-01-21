@@ -58,6 +58,7 @@ export function ProxyConfigForm({
     include_www: proxy.include_www,
     basic_auth_enabled: proxy.basic_auth_enabled || false,
     basic_auth_realm: proxy.basic_auth_realm || "Restricted",
+    basic_auth_excluded_paths: proxy.basic_auth_excluded_paths || [],
   });
 
   const [headers, setHeaders] = useState({
@@ -112,6 +113,7 @@ export function ProxyConfigForm({
       include_www: proxy.include_www,
       basic_auth_enabled: proxy.basic_auth_enabled || false,
       basic_auth_realm: proxy.basic_auth_realm || "Restricted",
+      basic_auth_excluded_paths: proxy.basic_auth_excluded_paths || [],
     });
   }, [proxy]);
 
@@ -395,6 +397,28 @@ export function ProxyConfigForm({
                   />
                   <p className="text-xs text-gray-500 mt-1">
                     The message shown in the browser&apos;s login dialog
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Excluded Paths
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.basic_auth_excluded_paths.join(", ")}
+                    onChange={(e) => {
+                      const paths = e.target.value
+                        .split(",")
+                        .map((p) => p.trim())
+                        .filter((p) => p.length > 0);
+                      setFormData({ ...formData, basic_auth_excluded_paths: paths });
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                    placeholder="/api/, /health, /public/"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Comma-separated paths that bypass basic auth (e.g., /api/, /health)
                   </p>
                 </div>
 
