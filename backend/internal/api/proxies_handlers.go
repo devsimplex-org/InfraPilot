@@ -1379,14 +1379,24 @@ func (h *Handler) dispatchProxyConfig(ctx context.Context, agentID, proxyID uuid
 		&headers.ContentSecurityPolicy,
 	)
 
+	// Fetch basic auth settings
+	var basicAuthEnabled bool
+	var basicAuthRealm string
+	h.db.QueryRow(ctx, `
+		SELECT COALESCE(basic_auth_enabled, false), COALESCE(basic_auth_realm, 'Restricted')
+		FROM proxy_hosts WHERE id = $1
+	`, proxyID).Scan(&basicAuthEnabled, &basicAuthRealm)
+
 	// Build proxy host for config generation
 	proxy := ProxyHost{
-		Domain:         domain,
-		UpstreamTarget: upstream,
-		ForceSSL:       forceSSL,
-		HTTP2Enabled:   http2,
-		IncludeWWW:     includeWWW,
-		SSLEnabled:     sslEnabled,
+		Domain:           domain,
+		UpstreamTarget:   upstream,
+		ForceSSL:         forceSSL,
+		HTTP2Enabled:     http2,
+		IncludeWWW:       includeWWW,
+		SSLEnabled:       sslEnabled,
+		BasicAuthEnabled: basicAuthEnabled,
+		BasicAuthRealm:   basicAuthRealm,
 	}
 
 	// Generate nginx config
@@ -1579,17 +1589,18 @@ func (h *Handler) dispatchHtpasswd(ctx context.Context, agentID, proxyID uuid.UU
 
 	// Get proxy details for htpasswd filename
 	var domain string
+	var upstreamTarget string
 	var basicAuthEnabled bool
 	var basicAuthRealm string
 	var isSystemProxy bool
-	var sslEnabled, forceSSL, http2Enabled bool
+	var sslEnabled, forceSSL, http2Enabled, includeWWW bool
 	var sslCertPath, sslKeyPath *string
 	err := h.db.QueryRow(ctx, `
-		SELECT domain, COALESCE(basic_auth_enabled, false), COALESCE(basic_auth_realm, 'Restricted'),
-		       COALESCE(is_system_proxy, false), ssl_enabled, force_ssl, http2_enabled, ssl_cert_path, ssl_key_path
+		SELECT domain, upstream_target, COALESCE(basic_auth_enabled, false), COALESCE(basic_auth_realm, 'Restricted'),
+		       COALESCE(is_system_proxy, false), ssl_enabled, force_ssl, http2_enabled, COALESCE(include_www, false), ssl_cert_path, ssl_key_path
 		FROM proxy_hosts
 		WHERE id = $1
-	`, proxyID).Scan(&domain, &basicAuthEnabled, &basicAuthRealm, &isSystemProxy, &sslEnabled, &forceSSL, &http2Enabled, &sslCertPath, &sslKeyPath)
+	`, proxyID).Scan(&domain, &upstreamTarget, &basicAuthEnabled, &basicAuthRealm, &isSystemProxy, &sslEnabled, &forceSSL, &http2Enabled, &includeWWW, &sslCertPath, &sslKeyPath)
 
 	if err != nil {
 		h.logger.Error("Failed to fetch proxy for htpasswd dispatch", zap.Error(err))
@@ -1627,6 +1638,12 @@ func (h *Handler) dispatchHtpasswd(ctx context.Context, agentID, proxyID uuid.UU
 			}
 			h.dispatchInfraPilotProxyConfigWithCert(ctx, agentID, proxyID, domain, forceSSL, http2Enabled, sslEnabled, certPath, keyPath, false, "", "")
 			h.logger.Info("Regenerated system proxy nginx config without basic auth",
+				zap.String("domain", domain),
+			)
+		} else {
+			// For regular proxies, regenerate nginx config without basic auth
+			h.dispatchProxyConfig(ctx, agentID, proxyID, domain, upstreamTarget, forceSSL, http2Enabled, includeWWW, sslEnabled)
+			h.logger.Info("Regenerated regular proxy nginx config without basic auth",
 				zap.String("domain", domain),
 			)
 		}
@@ -1679,6 +1696,13 @@ func (h *Handler) dispatchHtpasswd(ctx context.Context, agentID, proxyID uuid.UU
 		}
 		h.dispatchInfraPilotProxyConfigWithCert(ctx, agentID, proxyID, domain, forceSSL, http2Enabled, sslEnabled, certPath, keyPath, basicAuthEnabled, basicAuthRealm, htpasswdPath)
 		h.logger.Info("Regenerated system proxy nginx config with basic auth",
+			zap.String("domain", domain),
+			zap.Bool("basic_auth_enabled", basicAuthEnabled),
+		)
+	} else {
+		// For regular proxies, regenerate nginx config with basic auth
+		h.dispatchProxyConfig(ctx, agentID, proxyID, domain, upstreamTarget, forceSSL, http2Enabled, includeWWW, sslEnabled)
+		h.logger.Info("Regenerated regular proxy nginx config with basic auth",
 			zap.String("domain", domain),
 			zap.Bool("basic_auth_enabled", basicAuthEnabled),
 		)
