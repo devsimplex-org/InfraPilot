@@ -117,9 +117,15 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				agents.POST("/:id/proxies/:pid/ssl", h.RequireModifyProxy(), h.requestSSL)
 				agents.POST("/:id/proxies/:pid/ssl/wildcard", h.RequireModifyProxy(), h.applyWildcardSSL)
 				agents.GET("/:id/proxies/:pid/config", h.getProxyConfig)
+				agents.POST("/:id/proxies/:pid/config/preview", h.RequireModifyProxy(), h.previewProxyConfig)
 				agents.POST("/:id/proxies/:pid/test", h.RequireModifyProxy(), h.testProxyConfig)
 				agents.GET("/:id/proxies/:pid/security-headers", h.getSecurityHeaders)
 				agents.PUT("/:id/proxies/:pid/security-headers", h.RequireModifyProxy(), h.updateSecurityHeaders)
+
+				// Basic auth users
+				agents.GET("/:id/proxies/:pid/auth-users", h.listAuthUsers)
+				agents.POST("/:id/proxies/:pid/auth-users", h.RequireModifyProxy(), h.createAuthUser)
+				agents.DELETE("/:id/proxies/:pid/auth-users/:uid", h.RequireModifyProxy(), h.deleteAuthUser)
 
 				// Nginx management
 				agents.POST("/:id/nginx/test", h.RequireModifyProxy(), h.testNginxConfig)

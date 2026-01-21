@@ -19,22 +19,24 @@ import (
 
 // ProxyHost represents an nginx reverse proxy configuration
 type ProxyHost struct {
-	ID             uuid.UUID  `json:"id"`
-	AgentID        uuid.UUID  `json:"agent_id"`
-	Domain         string     `json:"domain"`
-	UpstreamTarget string     `json:"upstream_target"`
-	SSLEnabled     bool       `json:"ssl_enabled"`
-	SSLCertPath    *string    `json:"ssl_cert_path,omitempty"`
-	SSLKeyPath     *string    `json:"ssl_key_path,omitempty"`
-	SSLExpiresAt   *time.Time `json:"ssl_expires_at,omitempty"`
-	ForceSSL       bool       `json:"force_ssl"`
-	HTTP2Enabled   bool       `json:"http2_enabled"`
-	IncludeWWW     bool       `json:"include_www"`
-	ConfigHash     *string    `json:"config_hash,omitempty"`
-	Status         string     `json:"status"`
-	IsSystemProxy  bool       `json:"is_system_proxy"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	ID               uuid.UUID  `json:"id"`
+	AgentID          uuid.UUID  `json:"agent_id"`
+	Domain           string     `json:"domain"`
+	UpstreamTarget   string     `json:"upstream_target"`
+	SSLEnabled       bool       `json:"ssl_enabled"`
+	SSLCertPath      *string    `json:"ssl_cert_path,omitempty"`
+	SSLKeyPath       *string    `json:"ssl_key_path,omitempty"`
+	SSLExpiresAt     *time.Time `json:"ssl_expires_at,omitempty"`
+	ForceSSL         bool       `json:"force_ssl"`
+	HTTP2Enabled     bool       `json:"http2_enabled"`
+	IncludeWWW       bool       `json:"include_www"`
+	BasicAuthEnabled bool       `json:"basic_auth_enabled"`
+	BasicAuthRealm   string     `json:"basic_auth_realm,omitempty"`
+	ConfigHash       *string    `json:"config_hash,omitempty"`
+	Status           string     `json:"status"`
+	IsSystemProxy    bool       `json:"is_system_proxy"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
 // SecurityHeaders represents nginx security headers configuration
@@ -51,21 +53,25 @@ type SecurityHeaders struct {
 
 // CreateProxyRequest is the request body for creating a proxy host
 type CreateProxyRequest struct {
-	Domain         string `json:"domain" binding:"required"`
-	UpstreamTarget string `json:"upstream_target" binding:"required"`
-	ForceSSL       bool   `json:"force_ssl"`
-	HTTP2Enabled   bool   `json:"http2_enabled"`
-	IncludeWWW     bool   `json:"include_www"`
+	Domain           string `json:"domain" binding:"required"`
+	UpstreamTarget   string `json:"upstream_target" binding:"required"`
+	ForceSSL         bool   `json:"force_ssl"`
+	HTTP2Enabled     bool   `json:"http2_enabled"`
+	IncludeWWW       bool   `json:"include_www"`
+	BasicAuthEnabled bool   `json:"basic_auth_enabled"`
+	BasicAuthRealm   string `json:"basic_auth_realm,omitempty"`
 }
 
 // UpdateProxyRequest is the request body for updating a proxy host
 type UpdateProxyRequest struct {
-	Domain         *string `json:"domain,omitempty"`
-	UpstreamTarget *string `json:"upstream_target,omitempty"`
-	ForceSSL       *bool   `json:"force_ssl,omitempty"`
-	HTTP2Enabled   *bool   `json:"http2_enabled,omitempty"`
-	IncludeWWW     *bool   `json:"include_www,omitempty"`
-	Status         *string `json:"status,omitempty"`
+	Domain           *string `json:"domain,omitempty"`
+	UpstreamTarget   *string `json:"upstream_target,omitempty"`
+	ForceSSL         *bool   `json:"force_ssl,omitempty"`
+	HTTP2Enabled     *bool   `json:"http2_enabled,omitempty"`
+	IncludeWWW       *bool   `json:"include_www,omitempty"`
+	BasicAuthEnabled *bool   `json:"basic_auth_enabled,omitempty"`
+	BasicAuthRealm   *string `json:"basic_auth_realm,omitempty"`
+	Status           *string `json:"status,omitempty"`
 }
 
 // listProxyHosts returns all proxy hosts for an agent
@@ -93,6 +99,7 @@ func (h *Handler) listProxyHosts(c *gin.Context) {
 	rows, err := h.db.Query(c.Request.Context(), `
 		SELECT id, agent_id, domain, upstream_target, ssl_enabled, ssl_cert_path,
 		       ssl_key_path, ssl_expires_at, force_ssl, http2_enabled, include_www,
+		       COALESCE(basic_auth_enabled, false), COALESCE(basic_auth_realm, 'Restricted'),
 		       config_hash, status, is_system_proxy, created_at, updated_at
 		FROM proxy_hosts
 		WHERE agent_id = $1
@@ -110,7 +117,8 @@ func (h *Handler) listProxyHosts(c *gin.Context) {
 		if err := rows.Scan(
 			&p.ID, &p.AgentID, &p.Domain, &p.UpstreamTarget, &p.SSLEnabled,
 			&p.SSLCertPath, &p.SSLKeyPath, &p.SSLExpiresAt, &p.ForceSSL,
-			&p.HTTP2Enabled, &p.IncludeWWW, &p.ConfigHash, &p.Status, &p.IsSystemProxy, &p.CreatedAt, &p.UpdatedAt,
+			&p.HTTP2Enabled, &p.IncludeWWW, &p.BasicAuthEnabled, &p.BasicAuthRealm,
+			&p.ConfigHash, &p.Status, &p.IsSystemProxy, &p.CreatedAt, &p.UpdatedAt,
 		); err != nil {
 			continue
 		}
@@ -175,12 +183,16 @@ func (h *Handler) createProxyHost(c *gin.Context) {
 	}
 
 	// Insert proxy host
+	basicAuthRealm := req.BasicAuthRealm
+	if basicAuthRealm == "" {
+		basicAuthRealm = "Restricted"
+	}
 	var proxyID uuid.UUID
 	err = h.db.QueryRow(c.Request.Context(), `
-		INSERT INTO proxy_hosts (agent_id, domain, upstream_target, force_ssl, http2_enabled, include_www, status)
-		VALUES ($1, $2, $3, $4, $5, $6, 'active')
+		INSERT INTO proxy_hosts (agent_id, domain, upstream_target, force_ssl, http2_enabled, include_www, basic_auth_enabled, basic_auth_realm, status)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active')
 		RETURNING id
-	`, agentID, req.Domain, req.UpstreamTarget, req.ForceSSL, req.HTTP2Enabled, req.IncludeWWW).Scan(&proxyID)
+	`, agentID, req.Domain, req.UpstreamTarget, req.ForceSSL, req.HTTP2Enabled, req.IncludeWWW, req.BasicAuthEnabled, basicAuthRealm).Scan(&proxyID)
 
 	if err != nil {
 		h.logger.Error("Failed to create proxy host")
@@ -209,13 +221,15 @@ func (h *Handler) createProxyHost(c *gin.Context) {
 	err = h.db.QueryRow(c.Request.Context(), `
 		SELECT id, agent_id, domain, upstream_target, ssl_enabled, ssl_cert_path,
 		       ssl_key_path, ssl_expires_at, force_ssl, http2_enabled, include_www,
+		       COALESCE(basic_auth_enabled, false), COALESCE(basic_auth_realm, 'Restricted'),
 		       config_hash, status, created_at, updated_at
 		FROM proxy_hosts
 		WHERE id = $1
 	`, proxyID).Scan(
 		&proxy.ID, &proxy.AgentID, &proxy.Domain, &proxy.UpstreamTarget, &proxy.SSLEnabled,
 		&proxy.SSLCertPath, &proxy.SSLKeyPath, &proxy.SSLExpiresAt, &proxy.ForceSSL,
-		&proxy.HTTP2Enabled, &proxy.IncludeWWW, &proxy.ConfigHash, &proxy.Status, &proxy.CreatedAt, &proxy.UpdatedAt,
+		&proxy.HTTP2Enabled, &proxy.IncludeWWW, &proxy.BasicAuthEnabled, &proxy.BasicAuthRealm,
+		&proxy.ConfigHash, &proxy.Status, &proxy.CreatedAt, &proxy.UpdatedAt,
 	)
 
 	if err != nil {
@@ -259,13 +273,15 @@ func (h *Handler) getProxyHost(c *gin.Context) {
 	err = h.db.QueryRow(c.Request.Context(), `
 		SELECT id, agent_id, domain, upstream_target, ssl_enabled, ssl_cert_path,
 		       ssl_key_path, ssl_expires_at, force_ssl, http2_enabled, include_www,
+		       COALESCE(basic_auth_enabled, false), COALESCE(basic_auth_realm, 'Restricted'),
 		       config_hash, status, created_at, updated_at
 		FROM proxy_hosts
 		WHERE id = $1 AND agent_id = $2
 	`, proxyID, agentID).Scan(
 		&proxy.ID, &proxy.AgentID, &proxy.Domain, &proxy.UpstreamTarget, &proxy.SSLEnabled,
 		&proxy.SSLCertPath, &proxy.SSLKeyPath, &proxy.SSLExpiresAt, &proxy.ForceSSL,
-		&proxy.HTTP2Enabled, &proxy.IncludeWWW, &proxy.ConfigHash, &proxy.Status, &proxy.CreatedAt, &proxy.UpdatedAt,
+		&proxy.HTTP2Enabled, &proxy.IncludeWWW, &proxy.BasicAuthEnabled, &proxy.BasicAuthRealm,
+		&proxy.ConfigHash, &proxy.Status, &proxy.CreatedAt, &proxy.UpdatedAt,
 	)
 
 	if err != nil {
@@ -368,6 +384,16 @@ func (h *Handler) updateProxyHost(c *gin.Context) {
 		query += fmt.Sprintf(", include_www = $%d", argCount)
 		args = append(args, *req.IncludeWWW)
 	}
+	if req.BasicAuthEnabled != nil {
+		argCount++
+		query += fmt.Sprintf(", basic_auth_enabled = $%d", argCount)
+		args = append(args, *req.BasicAuthEnabled)
+	}
+	if req.BasicAuthRealm != nil {
+		argCount++
+		query += fmt.Sprintf(", basic_auth_realm = $%d", argCount)
+		args = append(args, *req.BasicAuthRealm)
+	}
 	if req.Status != nil {
 		argCount++
 		query += fmt.Sprintf(", status = $%d", argCount)
@@ -401,13 +427,15 @@ func (h *Handler) updateProxyHost(c *gin.Context) {
 	err = h.db.QueryRow(c.Request.Context(), `
 		SELECT id, agent_id, domain, upstream_target, ssl_enabled, ssl_cert_path,
 		       ssl_key_path, ssl_expires_at, force_ssl, http2_enabled, include_www,
+		       COALESCE(basic_auth_enabled, false), COALESCE(basic_auth_realm, 'Restricted'),
 		       config_hash, status, created_at, updated_at
 		FROM proxy_hosts
 		WHERE id = $1
 	`, proxyID).Scan(
 		&proxy.ID, &proxy.AgentID, &proxy.Domain, &proxy.UpstreamTarget, &proxy.SSLEnabled,
 		&proxy.SSLCertPath, &proxy.SSLKeyPath, &proxy.SSLExpiresAt, &proxy.ForceSSL,
-		&proxy.HTTP2Enabled, &proxy.IncludeWWW, &proxy.ConfigHash, &proxy.Status, &proxy.CreatedAt, &proxy.UpdatedAt,
+		&proxy.HTTP2Enabled, &proxy.IncludeWWW, &proxy.BasicAuthEnabled, &proxy.BasicAuthRealm,
+		&proxy.ConfigHash, &proxy.Status, &proxy.CreatedAt, &proxy.UpdatedAt,
 	)
 
 	// Push updated config to agent via gRPC
@@ -686,13 +714,15 @@ func (h *Handler) getProxyConfig(c *gin.Context) {
 	err = h.db.QueryRow(c.Request.Context(), `
 		SELECT id, agent_id, domain, upstream_target, ssl_enabled, ssl_cert_path,
 		       ssl_key_path, ssl_expires_at, force_ssl, http2_enabled, include_www,
+		       COALESCE(basic_auth_enabled, false), COALESCE(basic_auth_realm, 'Restricted'),
 		       config_hash, status, created_at, updated_at
 		FROM proxy_hosts
 		WHERE id = $1 AND agent_id = $2
 	`, proxyID, agentID).Scan(
 		&proxy.ID, &proxy.AgentID, &proxy.Domain, &proxy.UpstreamTarget, &proxy.SSLEnabled,
 		&proxy.SSLCertPath, &proxy.SSLKeyPath, &proxy.SSLExpiresAt, &proxy.ForceSSL,
-		&proxy.HTTP2Enabled, &proxy.IncludeWWW, &proxy.ConfigHash, &proxy.Status, &proxy.CreatedAt, &proxy.UpdatedAt,
+		&proxy.HTTP2Enabled, &proxy.IncludeWWW, &proxy.BasicAuthEnabled, &proxy.BasicAuthRealm,
+		&proxy.ConfigHash, &proxy.Status, &proxy.CreatedAt, &proxy.UpdatedAt,
 	)
 
 	if err != nil {
@@ -787,6 +817,101 @@ func (h *Handler) testProxyConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"valid":   true,
 		"message": "Configuration test completed",
+	})
+}
+
+// ConfigPreviewRequest is the request body for generating nginx config preview
+type ConfigPreviewRequest struct {
+	Domain           string  `json:"domain" binding:"required"`
+	UpstreamTarget   string  `json:"upstream_target" binding:"required"`
+	SSLEnabled       bool    `json:"ssl_enabled"`
+	ForceSSL         bool    `json:"force_ssl"`
+	HTTP2Enabled     bool    `json:"http2_enabled"`
+	IncludeWWW       bool    `json:"include_www"`
+	BasicAuthEnabled bool    `json:"basic_auth_enabled"`
+	BasicAuthRealm   string  `json:"basic_auth_realm"`
+	HSTSEnabled      bool    `json:"hsts_enabled"`
+	HSTSMaxAge       int     `json:"hsts_max_age"`
+	XFrameOptions    string  `json:"x_frame_options"`
+	XContentTypeOptions bool `json:"x_content_type_options"`
+	XXSSProtection   bool    `json:"x_xss_protection"`
+	ContentSecurityPolicy *string `json:"content_security_policy,omitempty"`
+}
+
+// previewProxyConfig generates nginx config from form values without saving
+func (h *Handler) previewProxyConfig(c *gin.Context) {
+	orgID := c.MustGet("org_id").(uuid.UUID)
+	agentIDStr := c.Param("id")
+	proxyIDStr := c.Param("pid")
+
+	agentID, err := uuid.Parse(agentIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid agent ID"})
+		return
+	}
+
+	proxyID, err := uuid.Parse(proxyIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid proxy ID"})
+		return
+	}
+
+	// Verify agent belongs to org and proxy exists
+	var exists bool
+	err = h.db.QueryRow(c.Request.Context(), `
+		SELECT EXISTS(
+			SELECT 1 FROM proxy_hosts p
+			JOIN agents a ON p.agent_id = a.id
+			WHERE p.id = $1 AND p.agent_id = $2 AND a.org_id = $3
+		)
+	`, proxyID, agentID, orgID).Scan(&exists)
+
+	if err != nil || !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "proxy host not found"})
+		return
+	}
+
+	var req ConfigPreviewRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Set default values
+	if req.BasicAuthRealm == "" {
+		req.BasicAuthRealm = "Restricted"
+	}
+	if req.HSTSMaxAge == 0 {
+		req.HSTSMaxAge = 31536000
+	}
+
+	// Build proxy host for config generation
+	proxy := ProxyHost{
+		Domain:           req.Domain,
+		UpstreamTarget:   req.UpstreamTarget,
+		SSLEnabled:       req.SSLEnabled,
+		ForceSSL:         req.ForceSSL,
+		HTTP2Enabled:     req.HTTP2Enabled,
+		IncludeWWW:       req.IncludeWWW,
+		BasicAuthEnabled: req.BasicAuthEnabled,
+		BasicAuthRealm:   req.BasicAuthRealm,
+	}
+
+	// Build security headers for config generation
+	headers := SecurityHeaders{
+		HSTSEnabled:           req.HSTSEnabled,
+		HSTSMaxAge:            req.HSTSMaxAge,
+		XFrameOptions:         req.XFrameOptions,
+		XContentTypeOptions:   req.XContentTypeOptions,
+		XXSSProtection:        req.XXSSProtection,
+		ContentSecurityPolicy: req.ContentSecurityPolicy,
+	}
+
+	// Generate nginx config
+	config := generateNginxConfig(proxy, headers)
+
+	c.JSON(http.StatusOK, gin.H{
+		"config": config,
 	})
 }
 
@@ -975,7 +1100,7 @@ func generateNginxConfig(proxy ProxyHost, headers SecurityHeaders) string {
 		config += "    }\n"
 		config += "}\n\n"
 	} else {
-		config += generateLocationBlock(proxy.UpstreamTarget)
+		config += generateLocationBlockWithAuth(proxy.UpstreamTarget, proxy.BasicAuthEnabled, proxy.BasicAuthRealm, proxy.Domain)
 		config += "}\n\n"
 	}
 
@@ -1029,7 +1154,7 @@ func generateNginxConfig(proxy ProxyHost, headers SecurityHeaders) string {
 		// Security headers
 		config += generateSecurityHeaders(headers)
 
-		config += generateLocationBlock(proxy.UpstreamTarget)
+		config += generateLocationBlockWithAuth(proxy.UpstreamTarget, proxy.BasicAuthEnabled, proxy.BasicAuthRealm, proxy.Domain)
 		config += "}\n"
 	}
 
@@ -1067,20 +1192,36 @@ func generateSecurityHeaders(headers SecurityHeaders) string {
 }
 
 func generateLocationBlock(upstream string) string {
-	return fmt.Sprintf(`    location / {
-        proxy_pass %s;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
-    }
-`, upstream)
+	return generateLocationBlockWithAuth(upstream, false, "", "")
+}
+
+func generateLocationBlockWithAuth(upstream string, basicAuthEnabled bool, basicAuthRealm, domain string) string {
+	var config string
+	config += "    location / {\n"
+
+	// Add basic auth if enabled
+	if basicAuthEnabled {
+		realm := basicAuthRealm
+		if realm == "" {
+			realm = "Restricted"
+		}
+		config += fmt.Sprintf("        auth_basic \"%s\";\n", realm)
+		config += fmt.Sprintf("        auth_basic_user_file /etc/nginx/conf.d/.htpasswd_%s;\n\n", sanitizeFilename(domain))
+	}
+
+	config += fmt.Sprintf("        proxy_pass %s;\n", upstream)
+	config += "        proxy_http_version 1.1;\n"
+	config += "        proxy_set_header Host $host;\n"
+	config += "        proxy_set_header X-Real-IP $remote_addr;\n"
+	config += "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
+	config += "        proxy_set_header X-Forwarded-Proto $scheme;\n"
+	config += "        proxy_set_header Upgrade $http_upgrade;\n"
+	config += "        proxy_set_header Connection \"upgrade\";\n"
+	config += "        proxy_connect_timeout 60s;\n"
+	config += "        proxy_send_timeout 60s;\n"
+	config += "        proxy_read_timeout 60s;\n"
+	config += "    }\n"
+	return config
 }
 
 // ============ Nginx Management ============
@@ -1415,4 +1556,84 @@ func (h *Handler) dispatchSSLRequest(agentID uuid.UUID, domain, email, dnsProvid
 		zap.String("email", email),
 		zap.Bool("include_www", includeWWW),
 	)
+}
+
+// dispatchHtpasswd sends htpasswd file update to the agent
+func (h *Handler) dispatchHtpasswd(ctx context.Context, agentID, proxyID uuid.UUID) {
+	agentIDStr := agentID.String()
+
+	if !agentgrpc.IsAgentConnected(agentIDStr) {
+		h.logger.Warn("Agent not connected, cannot dispatch htpasswd",
+			zap.String("agent_id", agentIDStr),
+		)
+		return
+	}
+
+	// Get proxy domain for htpasswd filename
+	var domain string
+	var basicAuthEnabled bool
+	err := h.db.QueryRow(ctx, `
+		SELECT domain, COALESCE(basic_auth_enabled, false)
+		FROM proxy_hosts
+		WHERE id = $1
+	`, proxyID).Scan(&domain, &basicAuthEnabled)
+
+	if err != nil {
+		h.logger.Error("Failed to fetch proxy for htpasswd dispatch", zap.Error(err))
+		return
+	}
+
+	// Build htpasswd file path
+	htpasswdPath := filepath.Join("/etc/nginx/conf.d", ".htpasswd_"+sanitizeFilename(domain))
+
+	// If basic auth is disabled or no users, delete htpasswd file
+	if !basicAuthEnabled {
+		cmd := agentgrpc.NewNginxDeleteHtpasswdCommand(htpasswdPath)
+		if err := agentgrpc.SendCommandAsync(agentIDStr, cmd); err != nil {
+			h.logger.Error("Failed to dispatch htpasswd delete",
+				zap.Error(err),
+				zap.String("domain", domain),
+			)
+		}
+		return
+	}
+
+	// Generate htpasswd content
+	htpasswdContent, err := h.generateHtpasswd(ctx, proxyID)
+	if err != nil {
+		h.logger.Error("Failed to generate htpasswd", zap.Error(err))
+		return
+	}
+
+	// If no users, delete htpasswd file
+	if htpasswdContent == "" {
+		cmd := agentgrpc.NewNginxDeleteHtpasswdCommand(htpasswdPath)
+		if err := agentgrpc.SendCommandAsync(agentIDStr, cmd); err != nil {
+			h.logger.Error("Failed to dispatch htpasswd delete",
+				zap.Error(err),
+				zap.String("domain", domain),
+			)
+		}
+		return
+	}
+
+	// Send htpasswd write command
+	cmd := agentgrpc.NewNginxWriteHtpasswdCommand(htpasswdContent, htpasswdPath)
+	if err := agentgrpc.SendCommandAsync(agentIDStr, cmd); err != nil {
+		h.logger.Error("Failed to dispatch htpasswd write",
+			zap.Error(err),
+			zap.String("domain", domain),
+		)
+		return
+	}
+
+	h.logger.Info("Dispatched htpasswd to agent",
+		zap.String("agent_id", agentIDStr),
+		zap.String("domain", domain),
+	)
+}
+
+// sanitizeFilename sanitizes a domain name for use in a filename
+func sanitizeFilename(domain string) string {
+	return strings.ReplaceAll(domain, ".", "_")
 }
