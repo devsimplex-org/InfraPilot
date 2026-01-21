@@ -1214,7 +1214,7 @@ func generateLocationBlockWithAuth(upstream string, basicAuthEnabled bool, basic
 			realm = "Restricted"
 		}
 		config += fmt.Sprintf("        auth_basic \"%s\";\n", realm)
-		config += fmt.Sprintf("        auth_basic_user_file /etc/nginx/conf.d/.htpasswd_%s;\n\n", sanitizeFilename(domain))
+		config += fmt.Sprintf("        auth_basic_user_file /data/nginx/conf.d/.htpasswd_%s;\n\n", sanitizeFilename(domain))
 	}
 
 	config += fmt.Sprintf("        proxy_pass %s;\n", upstream)
@@ -1597,7 +1597,7 @@ func (h *Handler) dispatchHtpasswd(ctx context.Context, agentID, proxyID uuid.UU
 	}
 
 	// Build htpasswd file path
-	htpasswdPath := filepath.Join("/etc/nginx/conf.d", ".htpasswd_"+sanitizeFilename(domain))
+	htpasswdPath := filepath.Join("/data/nginx/conf.d", ".htpasswd_"+sanitizeFilename(domain))
 
 	// If basic auth is disabled or no users, delete htpasswd file
 	if !basicAuthEnabled {

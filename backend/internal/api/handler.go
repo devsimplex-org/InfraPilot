@@ -741,7 +741,7 @@ func (h *Handler) dispatchDefaultPageConfigOnStartup(ctx context.Context) {
 			// Determine htpasswd path for this proxy (use sanitized domain)
 			htpasswdPath := ""
 			if basicAuthEnabled {
-				htpasswdPath = fmt.Sprintf("/etc/nginx/conf.d/.htpasswd_%s", strings.ReplaceAll(domain, ".", "_"))
+				htpasswdPath = fmt.Sprintf("/data/nginx/conf.d/.htpasswd_%s", strings.ReplaceAll(domain, ".", "_"))
 			}
 
 			// Dispatch the InfraPilot system proxy config (routes /api to backend)
