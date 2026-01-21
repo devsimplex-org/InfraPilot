@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -261,7 +262,7 @@ func (h *Handler) deleteAuthUser(c *gin.Context) {
 }
 
 // generateHtpasswd generates htpasswd file content for a proxy
-func (h *Handler) generateHtpasswd(ctx interface{ Done() <-chan struct{} }, proxyID uuid.UUID) (string, error) {
+func (h *Handler) generateHtpasswd(ctx context.Context, proxyID uuid.UUID) (string, error) {
 	rows, err := h.db.Query(ctx, `
 		SELECT username, password_hash
 		FROM proxy_auth_users
