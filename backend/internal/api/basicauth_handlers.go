@@ -263,6 +263,10 @@ func (h *Handler) deleteAuthUser(c *gin.Context) {
 
 // generateHtpasswd generates htpasswd file content for a proxy
 func (h *Handler) generateHtpasswd(ctx context.Context, proxyID uuid.UUID) (string, error) {
+	h.logger.Info("generateHtpasswd: querying users",
+		zap.String("proxy_id", proxyID.String()),
+	)
+
 	rows, err := h.db.Query(ctx, `
 		SELECT username, password_hash
 		FROM proxy_auth_users
@@ -270,6 +274,7 @@ func (h *Handler) generateHtpasswd(ctx context.Context, proxyID uuid.UUID) (stri
 		ORDER BY username ASC
 	`, proxyID)
 	if err != nil {
+		h.logger.Error("generateHtpasswd: query failed", zap.Error(err))
 		return "", err
 	}
 	defer rows.Close()
@@ -278,10 +283,17 @@ func (h *Handler) generateHtpasswd(ctx context.Context, proxyID uuid.UUID) (stri
 	for rows.Next() {
 		var username, passwordHash string
 		if err := rows.Scan(&username, &passwordHash); err != nil {
+			h.logger.Error("generateHtpasswd: scan failed", zap.Error(err))
 			continue
 		}
+		h.logger.Info("generateHtpasswd: found user", zap.String("username", username))
 		lines = append(lines, fmt.Sprintf("%s:%s", username, passwordHash))
 	}
+
+	h.logger.Info("generateHtpasswd: result",
+		zap.String("proxy_id", proxyID.String()),
+		zap.Int("user_count", len(lines)),
+	)
 
 	return strings.Join(lines, "\n"), nil
 }
