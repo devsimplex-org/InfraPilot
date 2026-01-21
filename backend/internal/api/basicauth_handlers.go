@@ -167,7 +167,11 @@ func (h *Handler) createAuthUser(c *gin.Context) {
 	h.auditLog(c, userID, orgID, "proxy.auth_user.create", "proxy_auth_user", authUserID, gin.H{"username": req.Username})
 
 	// Dispatch updated htpasswd to agent (use background context since this runs in goroutine)
-	go h.dispatchHtpasswd(context.Background(), agentID, proxyID)
+	// Add small delay to ensure INSERT is fully committed before querying
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		h.dispatchHtpasswd(context.Background(), agentID, proxyID)
+	}()
 
 	// Fetch and return the created user
 	var user AuthUser
@@ -256,7 +260,11 @@ func (h *Handler) deleteAuthUser(c *gin.Context) {
 	h.auditLog(c, userID, orgID, "proxy.auth_user.delete", "proxy_auth_user", authUserID, gin.H{"username": username})
 
 	// Dispatch updated htpasswd to agent (use background context since this runs in goroutine)
-	go h.dispatchHtpasswd(context.Background(), agentID, proxyID)
+	// Add small delay to ensure DELETE is fully committed before querying
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		h.dispatchHtpasswd(context.Background(), agentID, proxyID)
+	}()
 
 	c.JSON(http.StatusOK, gin.H{"message": "auth user deleted"})
 }
