@@ -4,6 +4,7 @@ import { LucideIcon } from 'lucide-react';
 
 export type BadgeVariant = 'default' | 'severity' | 'status';
 export type BadgeSize = 'sm' | 'md' | 'lg';
+export type BadgeColor = 'gray' | 'red' | 'yellow' | 'green' | 'blue' | 'purple' | 'orange';
 
 export interface BadgeProps {
   /**
@@ -20,6 +21,11 @@ export interface BadgeProps {
    * Status level (when variant="status")
    */
   status?: StatusLevel;
+
+  /**
+   * Direct color specification (legacy support)
+   */
+  color?: BadgeColor;
 
   /**
    * Badge size
@@ -54,27 +60,41 @@ const iconSizes = {
   lg: 'h-5 w-5',
 };
 
+const colorClasses: Record<BadgeColor, string> = {
+  gray: 'bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700',
+  red: 'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800',
+  yellow: 'bg-yellow-100 text-yellow-700 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400 dark:border-yellow-800',
+  green: 'bg-green-100 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800',
+  blue: 'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-800',
+  purple: 'bg-purple-100 text-purple-700 border-purple-200 dark:bg-purple-900/30 dark:text-purple-400 dark:border-purple-800',
+  orange: 'bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-900/30 dark:text-orange-400 dark:border-orange-800',
+};
+
 export function Badge({
   variant = 'default',
   severity,
   status,
+  color,
   size = 'md',
   icon: Icon,
   children,
   className,
 }: BadgeProps) {
-  // Determine color classes based on variant
-  let colorClasses = '';
+  // Determine color classes based on variant or color prop
+  let badgeColorClasses = '';
 
-  if (variant === 'severity' && severity) {
+  if (color) {
+    // Direct color specification takes precedence
+    badgeColorClasses = colorClasses[color];
+  } else if (variant === 'severity' && severity) {
     const colors = getSeverityColor(severity);
-    colorClasses = `${colors.bg} ${colors.text} ${colors.border}`;
+    badgeColorClasses = `${colors.bg} ${colors.text} ${colors.border}`;
   } else if (variant === 'status' && status) {
     const colors = getStatusColor(status);
-    colorClasses = `${colors.bg} ${colors.text} ${colors.border}`;
+    badgeColorClasses = `${colors.bg} ${colors.text} ${colors.border}`;
   } else {
     // Default variant
-    colorClasses = 'bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700';
+    badgeColorClasses = colorClasses.gray;
   }
 
   return (
@@ -82,7 +102,7 @@ export function Badge({
       className={cn(
         'inline-flex items-center gap-1 rounded-md font-medium border',
         sizeClasses[size],
-        colorClasses,
+        badgeColorClasses,
         className
       )}
     >

@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -117,9 +119,15 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				agents.POST("/:id/proxies/:pid/ssl", h.RequireModifyProxy(), h.requestSSL)
 				agents.POST("/:id/proxies/:pid/ssl/wildcard", h.RequireModifyProxy(), h.applyWildcardSSL)
 				agents.GET("/:id/proxies/:pid/config", h.getProxyConfig)
+				agents.POST("/:id/proxies/:pid/config/preview", h.RequireModifyProxy(), h.previewProxyConfig)
 				agents.POST("/:id/proxies/:pid/test", h.RequireModifyProxy(), h.testProxyConfig)
 				agents.GET("/:id/proxies/:pid/security-headers", h.getSecurityHeaders)
 				agents.PUT("/:id/proxies/:pid/security-headers", h.RequireModifyProxy(), h.updateSecurityHeaders)
+
+				// Basic auth users
+				agents.GET("/:id/proxies/:pid/auth-users", h.listAuthUsers)
+				agents.POST("/:id/proxies/:pid/auth-users", h.RequireModifyProxy(), h.createAuthUser)
+				agents.DELETE("/:id/proxies/:pid/auth-users/:uid", h.RequireModifyProxy(), h.deleteAuthUser)
 
 				// Nginx management
 				agents.POST("/:id/nginx/test", h.RequireModifyProxy(), h.testNginxConfig)
@@ -379,6 +387,37 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				tls.GET("/scans", h.listTLSScans)
 				tls.GET("/config", h.getTLSAlertConfig)
 				tls.PUT("/config", h.RequireManageAlerts(), h.updateTLSAlertConfig)
+			}
+
+			// Traffic Resources & Policies (Epic 13 v2)
+			traffic := protected.Group("/traffic")
+			{
+				// Traffic summary
+				traffic.GET("/summary", h.getTrafficSummary)
+
+				// Traffic Resources
+				traffic.GET("/resources", h.listTrafficResources)
+				traffic.GET("/resources/:id", h.getTrafficResource)
+				traffic.POST("/resources", h.RequireManageAlerts(), h.createTrafficResource)
+				traffic.PUT("/resources/:id", h.RequireManageAlerts(), h.updateTrafficResource)
+				traffic.DELETE("/resources/:id", h.RequireManageAlerts(), h.deleteTrafficResource)
+
+				// Traffic Resource Upstreams
+				traffic.GET("/resources/:id/upstreams", h.listTrafficUpstreams)
+				traffic.POST("/resources/:id/upstreams", h.RequireManageAlerts(), h.createTrafficUpstream)
+
+				// Traffic Resource History
+				traffic.GET("/resources/:id/history", h.getTrafficApplyHistory)
+
+				// Traffic Policies
+				traffic.GET("/policies", h.listTrafficPolicies)
+				traffic.GET("/policies/:id", h.getTrafficPolicy)
+				traffic.POST("/policies", h.RequireManageAlerts(), h.createTrafficPolicy)
+				traffic.PUT("/policies/:id", h.RequireManageAlerts(), h.updateTrafficPolicy)
+				traffic.DELETE("/policies/:id", h.RequireManageAlerts(), h.deleteTrafficPolicy)
+
+				// Policy Assignment
+				traffic.POST("/policies/:id/assign", h.RequireManageAlerts(), h.assignTrafficPolicy)
 			}
 
 			// Database & Data Governance (Epic 14)
@@ -657,15 +696,18 @@ func (h *Handler) dispatchDefaultPageConfigOnStartup(ctx context.Context) {
 			var domain string
 			var sslEnabled, forceSSL, http2 bool
 			var sslCertPath, sslKeyPath *string
+			var basicAuthEnabled bool
+			var basicAuthRealm string
 
 			err := h.db.QueryRow(ctx, `
 				SELECT ph.id, ph.agent_id, a.org_id, ph.domain, ph.ssl_enabled, ph.force_ssl, ph.http2_enabled,
-				       ph.ssl_cert_path, ph.ssl_key_path
+				       ph.ssl_cert_path, ph.ssl_key_path,
+				       COALESCE(ph.basic_auth_enabled, false), COALESCE(ph.basic_auth_realm, 'Restricted')
 				FROM proxy_hosts ph
 				JOIN agents a ON a.id = ph.agent_id
 				WHERE ph.is_system_proxy = TRUE
 				LIMIT 1
-			`).Scan(&proxyID, &agentID, &orgID, &domain, &sslEnabled, &forceSSL, &http2, &sslCertPath, &sslKeyPath)
+			`).Scan(&proxyID, &agentID, &orgID, &domain, &sslEnabled, &forceSSL, &http2, &sslCertPath, &sslKeyPath, &basicAuthEnabled, &basicAuthRealm)
 
 			if err != nil {
 				// No domain configured, nothing to do
@@ -696,8 +738,14 @@ func (h *Handler) dispatchDefaultPageConfigOnStartup(ctx context.Context) {
 				keyPath = *sslKeyPath
 			}
 
+			// Determine htpasswd path for this proxy (use sanitized domain)
+			htpasswdPath := ""
+			if basicAuthEnabled {
+				htpasswdPath = fmt.Sprintf("/etc/nginx/conf.d/.htpasswd_%s", strings.ReplaceAll(domain, ".", "_"))
+			}
+
 			// Dispatch the InfraPilot system proxy config (routes /api to backend)
-			h.dispatchInfraPilotProxyConfigWithCert(ctx, agentID, proxyID, domain, forceSSL, http2, sslEnabled, certPath, keyPath)
+			h.dispatchInfraPilotProxyConfigWithCert(ctx, agentID, proxyID, domain, forceSSL, http2, sslEnabled, certPath, keyPath, basicAuthEnabled, basicAuthRealm, htpasswdPath)
 
 			// Dispatch the default page config (welcome page for IP access)
 			h.dispatchDefaultPageConfig(agentID, orgID, true)

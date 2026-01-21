@@ -31,13 +31,14 @@ type Controller struct {
 
 // ProxyConfig represents a reverse proxy configuration
 type ProxyConfig struct {
-	Domain         string
-	Upstream       string
-	SSLEnabled     bool
-	SSLCertPath    string
-	SSLKeyPath     string
-	ForceSSL       bool
-	HTTP2Enabled   bool
+	Domain          string
+	Upstream        string
+	SSLEnabled      bool
+	SSLCertPath     string
+	SSLKeyPath      string
+	ForceSSL        bool
+	HTTP2Enabled    bool
+	IncludeWWW      bool
 	SecurityHeaders SecurityHeadersConfig
 }
 
@@ -136,6 +137,40 @@ func (c *Controller) WriteConfigFile(configPath, content string) error {
 	}
 
 	c.logger.Info("Wrote nginx config file", zap.String("path", configPath))
+	return nil
+}
+
+// WriteHtpasswdFile writes htpasswd content for basic auth
+func (c *Controller) WriteHtpasswdFile(htpasswdPath, content string) error {
+	// Ensure directory exists
+	dir := filepath.Dir(htpasswdPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create htpasswd directory: %w", err)
+	}
+
+	// Use atomic write: write to temp file then rename
+	tmpFile := htpasswdPath + ".tmp"
+
+	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to write temp htpasswd: %w", err)
+	}
+
+	if err := os.Rename(tmpFile, htpasswdPath); err != nil {
+		os.Remove(tmpFile)
+		return fmt.Errorf("failed to rename htpasswd: %w", err)
+	}
+
+	c.logger.Info("Wrote htpasswd file", zap.String("path", htpasswdPath))
+	return nil
+}
+
+// DeleteHtpasswdFile removes an htpasswd file
+func (c *Controller) DeleteHtpasswdFile(htpasswdPath string) error {
+	if err := os.Remove(htpasswdPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to delete htpasswd: %w", err)
+	}
+
+	c.logger.Info("Deleted htpasswd file", zap.String("path", htpasswdPath))
 	return nil
 }
 
@@ -396,8 +431,9 @@ const nginxTemplate = `# Managed by InfraPilot - Do not edit manually
 server {
     listen 80;
     listen [::]:80;
-    server_name {{ .Domain }};
-
+{{ if .IncludeWWW }}    server_name {{ .Domain }} www.{{ .Domain }};
+{{ else }}    server_name {{ .Domain }};
+{{ end }}
     # ACME challenge for Let's Encrypt certificate renewal
     location /.well-known/acme-challenge/ {
         root /var/www/acme-challenge;
@@ -413,8 +449,9 @@ server {
 server {
     listen 80;
     listen [::]:80;
-    server_name {{ .Domain }};
-
+{{ if .IncludeWWW }}    server_name {{ .Domain }} www.{{ .Domain }};
+{{ else }}    server_name {{ .Domain }};
+{{ end }}
     # ACME challenge for Let's Encrypt certificate issuance
     location /.well-known/acme-challenge/ {
         root /var/www/acme-challenge;
@@ -443,7 +480,9 @@ server {
     listen 443 ssl;
     listen [::]:443 ssl;
 {{ if .HTTP2Enabled }}    http2 on;
-{{ end }}    server_name {{ .Domain }};
+{{ end }}{{ if .IncludeWWW }}    server_name {{ .Domain }} www.{{ .Domain }};
+{{ else }}    server_name {{ .Domain }};
+{{ end }}
 
 {{ if and .SSLCertPath .SSLKeyPath }}
     # Custom certificate paths

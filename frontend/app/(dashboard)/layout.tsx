@@ -46,6 +46,7 @@ import { Navigation, NavigationSection } from "@/components/ui/Navigation";
 import { CommandPalette } from "@/components/ui/CommandPalette";
 
 // DevSecOps Lifecycle Navigation Structure
+// Streamlined: ~32 items → ~16 visible items (intent-centric, not tool-centric)
 const navigationSections: NavigationSection[] = [
   {
     id: "overview",
@@ -75,11 +76,8 @@ const navigationSections: NavigationSection[] = [
     color: "text-orange-600 dark:text-orange-400",
     items: [
       { name: "Deployments", href: "/deployments", icon: Package },
-      { name: "Registries", href: "/registries", icon: Box },
-      { name: "Scans", href: "/scans", icon: Shield },
+      { name: "Artifacts", href: "/deploy/artifacts", icon: Box }, // Consolidated: Images, Scans, SBOMs, Registries
       { name: "Vulnerabilities", href: "/vulnerabilities", icon: AlertTriangle },
-      { name: "SBOMs", href: "/sboms", icon: Package },
-      { name: "Images", href: "/docker/images", icon: Image },
     ],
   },
   {
@@ -90,6 +88,7 @@ const navigationSections: NavigationSection[] = [
     items: [
       { name: "Runtime Security", href: "/runtime-security", icon: ShieldCheck },
       { name: "Exposure", href: "/run/exposure", icon: Globe },
+      { name: "Traffic", href: "/traffic", icon: Network }, // Single entry for traffic management
       { name: "Containers", href: "/containers", icon: Container },
       { name: "Logs", href: "/logs", icon: FileText },
       { name: "Alerts", href: "/alerts", icon: Bell },
@@ -115,8 +114,7 @@ const navigationSections: NavigationSection[] = [
       { name: "Risk Exceptions", href: "/exceptions", icon: ShieldAlert },
       { name: "Teams & Ownership", href: "/ownership", icon: Users },
       { name: "Security Maturity", href: "/maturity", icon: Trophy },
-      { name: "External Dependencies", href: "/dependencies", icon: Globe },
-      { name: "Webhooks", href: "/webhooks", icon: Activity },
+      { name: "Dependencies", href: "/dependencies", icon: Globe },
     ],
   },
   {
@@ -128,10 +126,7 @@ const navigationSections: NavigationSection[] = [
       { name: "Platform Security", href: "/platform-security", icon: ShieldCheck },
       { name: "Background Jobs", href: "/platform/jobs", icon: Activity },
       { name: "Metrics & Reports", href: "/platform/metrics", icon: BarChart3 },
-      { name: "Proxies", href: "/proxies", icon: Globe },
-      { name: "Networks", href: "/docker/networks", icon: Network },
-      { name: "Volumes", href: "/docker/volumes", icon: HardDrive },
-      { name: "Health", href: "/system-health", icon: Activity },
+      { name: "Infrastructure", href: "/platform/infrastructure", icon: HardDrive }, // Consolidated: Proxies, Networks, Volumes, Health
       { name: "Users", href: "/users", icon: Users },
       { name: "Settings", href: "/settings", icon: Settings },
     ],
@@ -315,7 +310,7 @@ export default function DashboardLayout({
             <AlertBar
               variant="warning"
               message="You're accessing InfraPilot via IP address. Configure a domain for better security and SSL support."
-              action={{ label: "Set Up Domain", href: "/proxies" }}
+              action={{ label: "Set Up Domain", href: "/settings" }}
               dismissible
               onDismiss={handleDismissWarning}
             />

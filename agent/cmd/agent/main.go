@@ -640,10 +640,17 @@ func (h *CommandHandler) handleNginxCommand(ctx context.Context, cmd *agentgrpc.
 			}
 		}
 
-		// Request certificate
-		if err := h.certManager.RequestCertificate(domain); err != nil {
+		// Build domains list (include www if requested)
+		domains := []string{domain}
+		if nginxCmd.IncludeWWW {
+			domains = append(domains, "www."+domain)
+		}
+
+		// Request certificate for all domains
+		if err := h.certManager.RequestCertificateMulti(domains); err != nil {
 			h.logger.Error("SSL certificate request failed",
 				zap.String("domain", domain),
+				zap.Bool("include_www", nginxCmd.IncludeWWW),
 				zap.Error(err),
 			)
 			return &agentgrpc.CommandResult{
@@ -659,9 +666,61 @@ func (h *CommandHandler) handleNginxCommand(ctx context.Context, cmd *agentgrpc.
 			)
 		}
 
+		message := fmt.Sprintf("SSL certificate obtained for %s", domain)
+		if nginxCmd.IncludeWWW {
+			message = fmt.Sprintf("SSL certificate obtained for %s and www.%s", domain, domain)
+		}
 		return &agentgrpc.CommandResult{
 			Success: true,
-			Message: fmt.Sprintf("SSL certificate obtained for %s", domain),
+			Message: message,
+		}
+
+	case "write_htpasswd":
+		if !h.IsManagedProxy() {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: "cannot write htpasswd: proxy is in external mode",
+			}
+		}
+		if nginxCmd.HtpasswdPath == "" {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: "htpasswd_path is required",
+			}
+		}
+		if err := h.nginx.WriteHtpasswdFile(nginxCmd.HtpasswdPath, nginxCmd.HtpasswdContent); err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("failed to write htpasswd: %v", err),
+			}
+		}
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: "htpasswd file written",
+		}
+
+	case "delete_htpasswd":
+		if !h.IsManagedProxy() {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: "cannot delete htpasswd: proxy is in external mode",
+			}
+		}
+		if nginxCmd.HtpasswdPath == "" {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: "htpasswd_path is required",
+			}
+		}
+		if err := h.nginx.DeleteHtpasswdFile(nginxCmd.HtpasswdPath); err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("failed to delete htpasswd: %v", err),
+			}
+		}
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: "htpasswd file deleted",
 		}
 
 	default:
@@ -771,6 +830,7 @@ type SSLCommand struct {
 	Staging       bool   `json:"staging,omitempty"`
 	ForceRenew    bool   `json:"force_renew,omitempty"`
 	ChallengeType string `json:"challenge_type,omitempty"` // "http" or "dns" (default: http)
+	IncludeWWW    bool   `json:"include_www,omitempty"`
 }
 
 func (h *CommandHandler) handleSSLCommand(ctx context.Context, cmd *agentgrpc.BackendMessage) *agentgrpc.CommandResult {
@@ -811,10 +871,17 @@ func (h *CommandHandler) handleSSLCommand(ctx context.Context, cmd *agentgrpc.Ba
 			}
 		}
 
-		// Request the certificate
-		if err := h.certManager.RequestCertificate(sslCmd.Domain); err != nil {
+		// Build domains list (include www if requested)
+		domains := []string{sslCmd.Domain}
+		if sslCmd.IncludeWWW {
+			domains = append(domains, "www."+sslCmd.Domain)
+		}
+
+		// Request the certificate for all domains
+		if err := h.certManager.RequestCertificateMulti(domains); err != nil {
 			h.logger.Error("Failed to request certificate",
 				zap.String("domain", sslCmd.Domain),
+				zap.Bool("include_www", sslCmd.IncludeWWW),
 				zap.Error(err),
 			)
 			return &agentgrpc.CommandResult{
@@ -830,9 +897,13 @@ func (h *CommandHandler) handleSSLCommand(ctx context.Context, cmd *agentgrpc.Ba
 			}
 		}
 
+		message := fmt.Sprintf("SSL certificate requested for %s", sslCmd.Domain)
+		if sslCmd.IncludeWWW {
+			message = fmt.Sprintf("SSL certificate requested for %s and www.%s", sslCmd.Domain, sslCmd.Domain)
+		}
 		return &agentgrpc.CommandResult{
 			Success: true,
-			Message: fmt.Sprintf("SSL certificate requested for %s", sslCmd.Domain),
+			Message: message,
 		}
 
 	case "renew_cert":
