@@ -782,6 +782,7 @@ type SSLCommand struct {
 	Staging       bool   `json:"staging,omitempty"`
 	ForceRenew    bool   `json:"force_renew,omitempty"`
 	ChallengeType string `json:"challenge_type,omitempty"` // "http" or "dns" (default: http)
+	IncludeWWW    bool   `json:"include_www,omitempty"`
 }
 
 func (h *CommandHandler) handleSSLCommand(ctx context.Context, cmd *agentgrpc.BackendMessage) *agentgrpc.CommandResult {
@@ -822,10 +823,17 @@ func (h *CommandHandler) handleSSLCommand(ctx context.Context, cmd *agentgrpc.Ba
 			}
 		}
 
-		// Request the certificate
-		if err := h.certManager.RequestCertificate(sslCmd.Domain); err != nil {
+		// Build domains list (include www if requested)
+		domains := []string{sslCmd.Domain}
+		if sslCmd.IncludeWWW {
+			domains = append(domains, "www."+sslCmd.Domain)
+		}
+
+		// Request the certificate for all domains
+		if err := h.certManager.RequestCertificateMulti(domains); err != nil {
 			h.logger.Error("Failed to request certificate",
 				zap.String("domain", sslCmd.Domain),
+				zap.Bool("include_www", sslCmd.IncludeWWW),
 				zap.Error(err),
 			)
 			return &agentgrpc.CommandResult{
@@ -841,9 +849,13 @@ func (h *CommandHandler) handleSSLCommand(ctx context.Context, cmd *agentgrpc.Ba
 			}
 		}
 
+		message := fmt.Sprintf("SSL certificate requested for %s", sslCmd.Domain)
+		if sslCmd.IncludeWWW {
+			message = fmt.Sprintf("SSL certificate requested for %s and www.%s", sslCmd.Domain, sslCmd.Domain)
+		}
 		return &agentgrpc.CommandResult{
 			Success: true,
-			Message: fmt.Sprintf("SSL certificate requested for %s", sslCmd.Domain),
+			Message: message,
 		}
 
 	case "renew_cert":

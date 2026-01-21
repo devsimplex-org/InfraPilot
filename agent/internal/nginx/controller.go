@@ -31,13 +31,14 @@ type Controller struct {
 
 // ProxyConfig represents a reverse proxy configuration
 type ProxyConfig struct {
-	Domain         string
-	Upstream       string
-	SSLEnabled     bool
-	SSLCertPath    string
-	SSLKeyPath     string
-	ForceSSL       bool
-	HTTP2Enabled   bool
+	Domain          string
+	Upstream        string
+	SSLEnabled      bool
+	SSLCertPath     string
+	SSLKeyPath      string
+	ForceSSL        bool
+	HTTP2Enabled    bool
+	IncludeWWW      bool
 	SecurityHeaders SecurityHeadersConfig
 }
 
@@ -396,8 +397,9 @@ const nginxTemplate = `# Managed by InfraPilot - Do not edit manually
 server {
     listen 80;
     listen [::]:80;
-    server_name {{ .Domain }};
-
+{{ if .IncludeWWW }}    server_name {{ .Domain }} www.{{ .Domain }};
+{{ else }}    server_name {{ .Domain }};
+{{ end }}
     # ACME challenge for Let's Encrypt certificate renewal
     location /.well-known/acme-challenge/ {
         root /var/www/acme-challenge;
@@ -413,8 +415,9 @@ server {
 server {
     listen 80;
     listen [::]:80;
-    server_name {{ .Domain }};
-
+{{ if .IncludeWWW }}    server_name {{ .Domain }} www.{{ .Domain }};
+{{ else }}    server_name {{ .Domain }};
+{{ end }}
     # ACME challenge for Let's Encrypt certificate issuance
     location /.well-known/acme-challenge/ {
         root /var/www/acme-challenge;
@@ -443,7 +446,9 @@ server {
     listen 443 ssl;
     listen [::]:443 ssl;
 {{ if .HTTP2Enabled }}    http2 on;
-{{ end }}    server_name {{ .Domain }};
+{{ end }}{{ if .IncludeWWW }}    server_name {{ .Domain }} www.{{ .Domain }};
+{{ else }}    server_name {{ .Domain }};
+{{ end }}
 
 {{ if and .SSLCertPath .SSLKeyPath }}
     # Custom certificate paths

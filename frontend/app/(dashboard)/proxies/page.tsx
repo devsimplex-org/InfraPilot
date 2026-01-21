@@ -53,6 +53,7 @@ interface ProxyHost {
   force_ssl: boolean;
   http2_enabled: boolean;
   include_www: boolean;
+  is_system_proxy: boolean;
   status: string;
   created_at: string;
   updated_at: string;
@@ -317,6 +318,15 @@ export default function ProxiesPage() {
     onSuccess: (_, deletedId) => {
       setRateLimits(rateLimits.filter((rl) => rl.id !== deletedId));
     },
+  });
+
+  // Nginx operations
+  const testNginxMutation = useMutation({
+    mutationFn: () => (selectedAgent ? api.testNginxConfig(selectedAgent) : Promise.reject("No agent")),
+  });
+
+  const reloadNginxMutation = useMutation({
+    mutationFn: () => (selectedAgent ? api.reloadNginx(selectedAgent) : Promise.reject("No agent")),
   });
 
   // Helper functions
@@ -866,6 +876,9 @@ export default function ProxiesPage() {
         <div className="flex items-center gap-2">
           <Globe className="h-4 w-4 text-gray-400" />
           <span className="font-medium">{value}</span>
+          {row.is_system_proxy && (
+            <Badge variant="info" size="xs">InfraPilot</Badge>
+          )}
           <StatusIndicator status={getSSLStatus(row)} showLabel={false} size="sm" />
         </div>
       ),
@@ -911,16 +924,91 @@ export default function ProxiesPage() {
           />
         }
         action={
-          <Button
-            variant="primary"
-            icon={Plus}
-            onClick={() => setShowCreateModal(true)}
-            disabled={!selectedAgent}
-          >
-            Add Proxy Host
-          </Button>
+          <div className="flex items-center gap-2">
+            {/* Nginx Operations */}
+            <button
+              onClick={() => testNginxMutation.mutate()}
+              disabled={!selectedAgent || testNginxMutation.isPending}
+              className={cn(
+                "px-3 py-2 text-sm rounded-lg transition-colors flex items-center gap-1.5",
+                testNginxMutation.isSuccess && testNginxMutation.data?.success
+                  ? "bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/30"
+                  : testNginxMutation.isError || (testNginxMutation.isSuccess && !testNginxMutation.data?.success)
+                  ? "bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/30"
+                  : "bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50"
+              )}
+              title={testNginxMutation.data?.message || "Test nginx configuration"}
+            >
+              {testNginxMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : testNginxMutation.isSuccess && testNginxMutation.data?.success ? (
+                <Check className="h-4 w-4" />
+              ) : (
+                <AlertTriangle className="h-4 w-4" />
+              )}
+              {testNginxMutation.isPending ? "Testing..." : "Test Config"}
+            </button>
+            <button
+              onClick={() => reloadNginxMutation.mutate()}
+              disabled={!selectedAgent || reloadNginxMutation.isPending}
+              className={cn(
+                "px-3 py-2 text-sm rounded-lg transition-colors flex items-center gap-1.5",
+                reloadNginxMutation.isSuccess && reloadNginxMutation.data?.success
+                  ? "bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/30"
+                  : reloadNginxMutation.isError
+                  ? "bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/30"
+                  : "bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50"
+              )}
+              title={reloadNginxMutation.data?.message || "Reload nginx"}
+            >
+              {reloadNginxMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              {reloadNginxMutation.isPending ? "Reloading..." : "Reload Nginx"}
+            </button>
+            <Button
+              variant="primary"
+              icon={Plus}
+              onClick={() => setShowCreateModal(true)}
+              disabled={!selectedAgent}
+            >
+              Add Proxy Host
+            </Button>
+          </div>
         }
       />
+
+      {/* Nginx operation status messages */}
+      {(testNginxMutation.isSuccess || testNginxMutation.isError || reloadNginxMutation.isSuccess || reloadNginxMutation.isError) && (
+        <div
+          className={cn(
+            "p-3 rounded-lg text-sm flex items-center justify-between",
+            (testNginxMutation.data?.success || reloadNginxMutation.data?.success)
+              ? "bg-green-500/10 border border-green-500/30 text-green-700 dark:text-green-400"
+              : "bg-red-500/10 border border-red-500/30 text-red-700 dark:text-red-400"
+          )}
+        >
+          <div className="flex items-center gap-2">
+            {(testNginxMutation.data?.success || reloadNginxMutation.data?.success) ? (
+              <Check className="h-4 w-4" />
+            ) : (
+              <AlertTriangle className="h-4 w-4" />
+            )}
+            <span>{testNginxMutation.data?.message || reloadNginxMutation.data?.message || "Operation failed"}</span>
+          </div>
+          <button
+            onClick={() => {
+              testNginxMutation.reset();
+              reloadNginxMutation.reset();
+            }}
+            className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       {/* Metrics */}
       {selectedAgent && (
@@ -1017,9 +1105,14 @@ export default function ProxiesPage() {
       <SlideOver isOpen={!!selectedProxy} onClose={() => setSelectedProxy(null)} size="lg">
         <SlideOver.Header onClose={() => setSelectedProxy(null)}>
           <div>
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-              {selectedProxy?.domain}
-            </h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                {selectedProxy?.domain}
+              </h2>
+              {selectedProxy?.is_system_proxy && (
+                <Badge variant="info" size="sm">InfraPilot</Badge>
+              )}
+            </div>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               {selectedProxy?.upstream_target}
             </p>

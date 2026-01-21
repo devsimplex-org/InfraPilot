@@ -310,7 +310,7 @@ export default function DashboardLayout({
             <AlertBar
               variant="warning"
               message="You're accessing InfraPilot via IP address. Configure a domain for better security and SSL support."
-              action={{ label: "Set Up Domain", href: "/proxies" }}
+              action={{ label: "Set Up Domain", href: "/settings" }}
               dismissible
               onDismiss={handleDismissWarning}
             />
