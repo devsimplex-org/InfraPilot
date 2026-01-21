@@ -411,14 +411,22 @@ func (h *Handler) requestSSLCertificate(c *gin.Context) {
 		return
 	}
 
+	// Check if the proxy has include_www enabled
+	var includeWWW bool
+	h.db.QueryRow(c.Request.Context(), `
+		SELECT COALESCE(include_www, false) FROM proxy_hosts
+		WHERE agent_id = $1 AND domain = $2
+	`, agentID, req.Domain).Scan(&includeWWW)
+
 	// Send SSL request to agent and wait for response (up to 2 minutes for ACME challenge)
-	cmd := agentgrpc.NewSSLRequestCommand(req.Domain, req.Email, req.DNSProvider, req.Staging)
+	cmd := agentgrpc.NewSSLRequestCommand(req.Domain, req.Email, req.DNSProvider, req.Staging, includeWWW)
 
 	h.logger.Info("Sending SSL request to agent",
 		zap.String("agent_id", agentIDStr),
 		zap.String("domain", req.Domain),
 		zap.String("email", req.Email),
 		zap.Bool("staging", req.Staging),
+		zap.Bool("include_www", includeWWW),
 	)
 
 	resp, err := agentgrpc.SendCommand(agentIDStr, cmd, 120*time.Second)
@@ -495,7 +503,7 @@ func (h *Handler) requestSSLCertificate(c *gin.Context) {
 }
 
 // dispatchSSLRequestWithOptions sends SSL request with full options
-func (h *Handler) dispatchSSLRequestWithOptions(agentID uuid.UUID, domain, email, dnsProvider string, staging bool) {
+func (h *Handler) dispatchSSLRequestWithOptions(agentID uuid.UUID, domain, email, dnsProvider string, staging, includeWWW bool) {
 	agentIDStr := agentID.String()
 
 	if !agentgrpc.IsAgentConnected(agentIDStr) {
@@ -506,7 +514,7 @@ func (h *Handler) dispatchSSLRequestWithOptions(agentID uuid.UUID, domain, email
 		return
 	}
 
-	cmd := agentgrpc.NewSSLRequestCommand(domain, email, dnsProvider, staging)
+	cmd := agentgrpc.NewSSLRequestCommand(domain, email, dnsProvider, staging, includeWWW)
 
 	if err := agentgrpc.SendCommandAsync(agentIDStr, cmd); err != nil {
 		h.logger.Error("Failed to dispatch SSL request",
@@ -521,6 +529,7 @@ func (h *Handler) dispatchSSLRequestWithOptions(agentID uuid.UUID, domain, email
 		zap.String("domain", domain),
 		zap.String("email", email),
 		zap.Bool("staging", staging),
+		zap.Bool("include_www", includeWWW),
 	)
 }
 

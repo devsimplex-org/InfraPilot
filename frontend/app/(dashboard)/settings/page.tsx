@@ -1229,6 +1229,9 @@ export default function SettingsPage() {
         }
       />
 
+      {/* InfraPilot Domain Setup */}
+      <InfraPilotDomainSection />
+
       {/* License Section */}
       <LicenseSection />
 

@@ -707,6 +707,7 @@ type SSLCommand struct {
 	DNSProvider string `json:"dns_provider,omitempty"`
 	Staging     bool   `json:"staging,omitempty"`
 	ForceRenew  bool   `json:"force_renew,omitempty"`
+	IncludeWWW  bool   `json:"include_www,omitempty"`
 }
 
 // SSLCheckResult represents the result of an SSL check
@@ -746,7 +747,7 @@ func NewSSLCheckCommand(domain string) *BackendMessage {
 }
 
 // NewSSLRequestCommand creates a command to request an SSL certificate
-func NewSSLRequestCommand(domain, email, dnsProvider string, staging bool) *BackendMessage {
+func NewSSLRequestCommand(domain, email, dnsProvider string, staging, includeWWW bool) *BackendMessage {
 	return &BackendMessage{
 		RequestId: uuid.New().String(),
 		Type:      "ssl",
@@ -756,6 +757,7 @@ func NewSSLRequestCommand(domain, email, dnsProvider string, staging bool) *Back
 			Email:       email,
 			DNSProvider: dnsProvider,
 			Staging:     staging,
+			IncludeWWW:  includeWWW,
 		}),
 	}
 }
