@@ -386,8 +386,8 @@ func (h *Handler) dispatchInfraPilotProxyConfigWithCert(ctx interface{}, agentID
 	// Generate special InfraPilot nginx config that routes /api to backend
 	config := generateInfraPilotNginxConfig(domain, forceSSL, http2, sslEnabled, certPath, keyPath, basicAuthEnabled, basicAuthRealm, htpasswdPath)
 
-	// Build config path
-	configPath := filepath.Join("/etc/nginx/sites", domain+".conf")
+	// Build config path (same location as regular proxies)
+	configPath := filepath.Join("/data/nginx/conf.d", domain+".conf")
 
 	// Create command with config content
 	cmdPayload, _ := json.Marshal(agentgrpc.NginxCommand{

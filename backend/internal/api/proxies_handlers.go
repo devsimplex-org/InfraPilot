@@ -439,7 +439,12 @@ func (h *Handler) updateProxyHost(c *gin.Context) {
 	)
 
 	// Push updated config to agent via gRPC
-	go h.dispatchProxyConfig(c.Request.Context(), agentID, proxyID, proxy.Domain, proxy.UpstreamTarget, proxy.ForceSSL, proxy.HTTP2Enabled, proxy.IncludeWWW, proxy.SSLEnabled)
+	go h.dispatchProxyConfig(context.Background(), agentID, proxyID, proxy.Domain, proxy.UpstreamTarget, proxy.ForceSSL, proxy.HTTP2Enabled, proxy.IncludeWWW, proxy.SSLEnabled)
+
+	// If basic auth settings changed, dispatch htpasswd update (handles both system and regular proxies)
+	if req.BasicAuthEnabled != nil || req.BasicAuthRealm != nil {
+		go h.dispatchHtpasswd(context.Background(), agentID, proxyID)
+	}
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch updated proxy"})
