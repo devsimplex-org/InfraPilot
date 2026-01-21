@@ -147,6 +147,9 @@ export interface ProxyHost {
   agent_id: string;
   domain: string;
   upstream_target: string;
+  proxy_type: 'upstream' | 'redirect';
+  redirect_url?: string;
+  redirect_code?: number;
   ssl_enabled: boolean;
   ssl_expires_at: string | null;
   force_ssl: boolean;
@@ -159,6 +162,17 @@ export interface ProxyHost {
   status: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface TestNetworkRequest {
+  container_name: string;
+  port: number;
+}
+
+export interface TestNetworkResponse {
+  reachable: boolean;
+  message: string;
+  available_ports?: number[];
 }
 
 export interface AuthUser {
@@ -3228,12 +3242,25 @@ export const api = {
     agentId: string,
     data: {
       domain: string;
-      upstream_target: string;
+      upstream_target?: string;
+      proxy_type?: 'upstream' | 'redirect';
+      redirect_url?: string;
+      redirect_code?: number;
       force_ssl?: boolean;
       http2_enabled?: boolean;
+      include_www?: boolean;
     }
   ) =>
     fetchAPI<ProxyHost>(`/agents/${agentId}/proxies`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  testNetworkConnectivity: (
+    agentId: string,
+    data: TestNetworkRequest
+  ) =>
+    fetchAPI<TestNetworkResponse>(`/agents/${agentId}/proxies/test-network`, {
       method: "POST",
       body: JSON.stringify(data),
     }),
@@ -3244,6 +3271,9 @@ export const api = {
     data: Partial<{
       domain: string;
       upstream_target: string;
+      proxy_type: 'upstream' | 'redirect';
+      redirect_url: string;
+      redirect_code: number;
       force_ssl: boolean;
       http2_enabled: boolean;
       include_www: boolean;

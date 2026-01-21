@@ -23,7 +23,8 @@ import {
   Settings,
   Loader2,
 } from "lucide-react";
-import { api, Container, SecurityHeaders, RateLimit, ProxyHost } from "@/lib/api";
+import { api, Container, SecurityHeaders, RateLimit, ProxyHost, TestNetworkResponse } from "@/lib/api";
+import { Link2, ArrowRight } from "lucide-react";
 import { formatRelativeTime, cn } from "@/lib/utils";
 import { SSLWizard } from "@/components/ssl-wizard";
 import { ProxyConfigForm } from "@/components/ProxyConfigForm";
@@ -46,6 +47,7 @@ import {
 
 type PanelTab = "details" | "security" | "ratelimits" | "config";
 type UpstreamMode = "manual" | "container";
+type ProxyTypeMode = "upstream" | "redirect";
 
 export default function ProxiesPage() {
   const queryClient = useQueryClient();
@@ -56,9 +58,14 @@ export default function ProxiesPage() {
   const [isEditing, setIsEditing] = useState(false);
 
   // Form state for create
+  const [proxyType, setProxyType] = useState<ProxyTypeMode>("upstream");
   const [upstreamMode, setUpstreamMode] = useState<UpstreamMode>("manual");
   const [selectedContainer, setSelectedContainer] = useState<string | null>(null);
   const [containerPort, setContainerPort] = useState<string>("80");
+  const [redirectUrl, setRedirectUrl] = useState("");
+  const [redirectCode, setRedirectCode] = useState(301);
+  const [networkTestResult, setNetworkTestResult] = useState<TestNetworkResponse | null>(null);
+  const [testingNetwork, setTestingNetwork] = useState(false);
   const [newProxy, setNewProxy] = useState({
     domain: "",
     upstream_target: "",

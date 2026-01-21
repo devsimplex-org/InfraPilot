@@ -511,6 +511,73 @@ func (h *CommandHandler) HandleDetachNginxNetwork(ctx context.Context, networkID
 	return nil
 }
 
+// NetworkTestResult represents the result of a network connectivity test
+type NetworkTestResult struct {
+	Reachable      bool  `json:"reachable"`
+	Message        string `json:"message"`
+	AvailablePorts []int  `json:"available_ports,omitempty"`
+}
+
+// HandleNetworkTest tests if a container:port is accessible from the agent
+func (h *CommandHandler) HandleNetworkTest(ctx context.Context, containerName string, port int) (*NetworkTestResult, error) {
+	h.logger.Info("Testing network connectivity",
+		zap.String("container", containerName),
+		zap.Int("port", port),
+	)
+
+	// Resolve container name to IP address via Docker
+	containerIP, err := h.docker.GetContainerIP(ctx, containerName)
+	if err != nil {
+		h.logger.Warn("Could not resolve container IP, trying direct name",
+			zap.String("container", containerName),
+			zap.Error(err),
+		)
+		// Fall back to using the container name directly (Docker DNS)
+		containerIP = containerName
+	}
+
+	// Test TCP connection to the specified port
+	reachable, err := h.docker.TestTCPConnection(ctx, containerIP, port, 5*time.Second)
+	if err != nil {
+		return &NetworkTestResult{
+			Reachable: false,
+			Message:   fmt.Sprintf("Connection test failed: %v", err),
+		}, nil
+	}
+
+	if reachable {
+		return &NetworkTestResult{
+			Reachable: true,
+			Message:   fmt.Sprintf("Port %d on %s is accessible", port, containerName),
+		}, nil
+	}
+
+	// Port is not reachable - scan for available ports
+	commonPorts := []int{80, 443, 3000, 3001, 4000, 5000, 8000, 8080, 8443, 9000}
+	availablePorts := []int{}
+
+	for _, p := range commonPorts {
+		if p == port {
+			continue // Skip the port we already tested
+		}
+		reachable, _ := h.docker.TestTCPConnection(ctx, containerIP, p, 2*time.Second)
+		if reachable {
+			availablePorts = append(availablePorts, p)
+		}
+	}
+
+	message := fmt.Sprintf("Port %d on %s is not accessible", port, containerName)
+	if len(availablePorts) > 0 {
+		message += fmt.Sprintf(". Found open ports: %v", availablePorts)
+	}
+
+	return &NetworkTestResult{
+		Reachable:      false,
+		Message:        message,
+		AvailablePorts: availablePorts,
+	}, nil
+}
+
 // HandleCommand implements the grpc.CommandHandler interface
 // Routes incoming commands to the appropriate handler
 func (h *CommandHandler) HandleCommand(ctx context.Context, cmd *agentgrpc.BackendMessage) *agentgrpc.CommandResult {
@@ -811,6 +878,33 @@ func (h *CommandHandler) handleNetworkCommand(ctx context.Context, cmd *agentgrp
 		return &agentgrpc.CommandResult{
 			Success: true,
 			Message: "nginx detached from network",
+		}
+
+	case "network_test":
+		// Parse additional parameters for network test
+		var testCmd struct {
+			Action        string `json:"action"`
+			ContainerName string `json:"container_name"`
+			Port          int    `json:"port"`
+		}
+		if err := json.Unmarshal(cmd.Command, &testCmd); err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("failed to parse network test command: %v", err),
+			}
+		}
+		result, err := h.HandleNetworkTest(ctx, testCmd.ContainerName, testCmd.Port)
+		if err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: err.Error(),
+			}
+		}
+		data, _ := json.Marshal(result)
+		return &agentgrpc.CommandResult{
+			Success: result.Reachable,
+			Message: result.Message,
+			Data:    data,
 		}
 
 	default:

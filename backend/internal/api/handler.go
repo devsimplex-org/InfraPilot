@@ -113,6 +113,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				// Proxy hosts
 				agents.GET("/:id/proxies", h.listProxyHosts)
 				agents.POST("/:id/proxies", h.RequireModifyProxy(), h.createProxyHost)
+				agents.POST("/:id/proxies/test-network", h.RequireModifyProxy(), h.testNetworkConnectivity)
 				agents.GET("/:id/proxies/:pid", h.getProxyHost)
 				agents.PUT("/:id/proxies/:pid", h.RequireModifyProxy(), h.updateProxyHost)
 				agents.DELETE("/:id/proxies/:pid", h.RequireModifyProxy(), h.deleteProxyHost)
