@@ -1569,14 +1569,19 @@ func (h *Handler) dispatchHtpasswd(ctx context.Context, agentID, proxyID uuid.UU
 		return
 	}
 
-	// Get proxy domain for htpasswd filename
+	// Get proxy details for htpasswd filename
 	var domain string
 	var basicAuthEnabled bool
+	var basicAuthRealm string
+	var isSystemProxy bool
+	var sslEnabled, forceSSL, http2Enabled bool
+	var sslCertPath, sslKeyPath *string
 	err := h.db.QueryRow(ctx, `
-		SELECT domain, COALESCE(basic_auth_enabled, false)
+		SELECT domain, COALESCE(basic_auth_enabled, false), COALESCE(basic_auth_realm, 'Restricted'),
+		       COALESCE(is_system_proxy, false), ssl_enabled, force_ssl, http2_enabled, ssl_cert_path, ssl_key_path
 		FROM proxy_hosts
 		WHERE id = $1
-	`, proxyID).Scan(&domain, &basicAuthEnabled)
+	`, proxyID).Scan(&domain, &basicAuthEnabled, &basicAuthRealm, &isSystemProxy, &sslEnabled, &forceSSL, &http2Enabled, &sslCertPath, &sslKeyPath)
 
 	if err != nil {
 		h.logger.Error("Failed to fetch proxy for htpasswd dispatch", zap.Error(err))
@@ -1592,6 +1597,21 @@ func (h *Handler) dispatchHtpasswd(ctx context.Context, agentID, proxyID uuid.UU
 		if err := agentgrpc.SendCommandAsync(agentIDStr, cmd); err != nil {
 			h.logger.Error("Failed to dispatch htpasswd delete",
 				zap.Error(err),
+				zap.String("domain", domain),
+			)
+		}
+		// For system proxies, regenerate the nginx config without basic auth
+		if isSystemProxy {
+			certPath := ""
+			keyPath := ""
+			if sslCertPath != nil {
+				certPath = *sslCertPath
+			}
+			if sslKeyPath != nil {
+				keyPath = *sslKeyPath
+			}
+			h.dispatchInfraPilotProxyConfigWithCert(ctx, agentID, proxyID, domain, forceSSL, http2Enabled, sslEnabled, certPath, keyPath, false, "", "")
+			h.logger.Info("Regenerated system proxy nginx config without basic auth",
 				zap.String("domain", domain),
 			)
 		}
@@ -1631,6 +1651,23 @@ func (h *Handler) dispatchHtpasswd(ctx context.Context, agentID, proxyID uuid.UU
 		zap.String("agent_id", agentIDStr),
 		zap.String("domain", domain),
 	)
+
+	// For system proxies, also regenerate the nginx config to include/update basic auth directives
+	if isSystemProxy {
+		certPath := ""
+		keyPath := ""
+		if sslCertPath != nil {
+			certPath = *sslCertPath
+		}
+		if sslKeyPath != nil {
+			keyPath = *sslKeyPath
+		}
+		h.dispatchInfraPilotProxyConfigWithCert(ctx, agentID, proxyID, domain, forceSSL, http2Enabled, sslEnabled, certPath, keyPath, basicAuthEnabled, basicAuthRealm, htpasswdPath)
+		h.logger.Info("Regenerated system proxy nginx config with basic auth",
+			zap.String("domain", domain),
+			zap.Bool("basic_auth_enabled", basicAuthEnabled),
+		)
+	}
 }
 
 // sanitizeFilename sanitizes a domain name for use in a filename

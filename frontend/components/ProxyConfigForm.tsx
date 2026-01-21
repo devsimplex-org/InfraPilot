@@ -598,7 +598,7 @@ export function ProxyConfigForm({
               )}
               <div className="bg-gray-900 rounded-lg overflow-hidden">
                 <div className="flex items-center justify-between px-4 py-2 bg-gray-800 border-b border-gray-700">
-                  <span className="text-xs text-gray-400 font-mono">nginx.conf</span>
+                  <span className="text-xs text-gray-400 font-mono">{formData.domain}.conf</span>
                   <button
                     onClick={() => copyToClipboard(configPreview)}
                     className="p-1 text-gray-400 hover:text-white rounded"
