@@ -472,7 +472,8 @@ export default function JobsPage() {
               title="Running Jobs"
               value={runningJobs}
               icon={Activity}
-              trend={pendingJobs > 0 ? { direction: "neutral", label: `${pendingJobs} pending` } : undefined}
+              trend={pendingJobs > 0 ? "neutral" : undefined}
+              trendValue={pendingJobs > 0 ? `${pendingJobs} pending` : undefined}
             />
             <StatCard
               title="Completed Today"
@@ -490,7 +491,8 @@ export default function JobsPage() {
               title="Active Workers"
               value={activeWorkers}
               icon={Server}
-              trend={unhealthyWorkers > 0 ? { direction: "down", label: `${unhealthyWorkers} unhealthy` } : undefined}
+              trend={unhealthyWorkers > 0 ? "down" : undefined}
+              trendValue={unhealthyWorkers > 0 ? `${unhealthyWorkers} unhealthy` : undefined}
             />
           </MetricsGrid>
 
@@ -628,9 +630,10 @@ export default function JobsPage() {
           <Table
             data={jobs || []}
             columns={jobColumns}
-            isLoading={loadingJobs}
+            loading={loadingJobs}
             onRowClick={setSelectedJob}
-            emptyMessage="No background jobs found"
+            emptyState="No background jobs found"
+            keyExtractor={(row) => row.id}
           />
         </div>
       )}
@@ -641,9 +644,10 @@ export default function JobsPage() {
           <Table
             data={schedules || []}
             columns={scheduleColumns}
-            isLoading={loadingSchedules}
+            loading={loadingSchedules}
             onRowClick={setSelectedSchedule}
-            emptyMessage="No job schedules configured"
+            emptyState="No job schedules configured"
+            keyExtractor={(row) => row.id}
           />
         </div>
       )}
@@ -668,9 +672,10 @@ export default function JobsPage() {
             <Table
               data={workers || []}
               columns={workerColumns}
-              isLoading={loadingWorkers}
+              loading={loadingWorkers}
               onRowClick={setSelectedWorker}
-              emptyMessage="No workers registered"
+              emptyState="No workers registered"
+              keyExtractor={(row) => row.id}
             />
           </div>
         </div>
@@ -682,8 +687,9 @@ export default function JobsPage() {
           <Table
             data={statistics || []}
             columns={statsColumns}
-            isLoading={loadingStats}
-            emptyMessage="No job statistics available"
+            loading={loadingStats}
+            emptyState="No job statistics available"
+            keyExtractor={(row) => row.job_type}
           />
         </div>
       )}

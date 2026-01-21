@@ -578,10 +578,10 @@ export default function ExposurePage() {
               <div className="flex items-center justify-center h-64">
                 <Spinner size="lg" label="Loading endpoints..." />
               </div>
-            ) : endpointsData?.endpoints?.length > 0 ? (
+            ) : (endpointsData?.endpoints?.length ?? 0) > 0 ? (
               <Table
                 columns={endpointColumns}
-                data={endpointsData.endpoints}
+                data={endpointsData!.endpoints}
                 keyExtractor={(row) => row.id}
                 onRowClick={(row) => setSelectedEndpoint(row)}
                 hoverable
@@ -606,10 +606,10 @@ export default function ExposurePage() {
               <div className="flex items-center justify-center h-64">
                 <Spinner size="lg" label="Loading rate limit profiles..." />
               </div>
-            ) : profilesData?.profiles?.length > 0 ? (
+            ) : (profilesData?.profiles?.length ?? 0) > 0 ? (
               <Table
                 columns={profileColumns}
-                data={profilesData.profiles}
+                data={profilesData!.profiles}
                 keyExtractor={(row) => row.id}
                 hoverable
               />

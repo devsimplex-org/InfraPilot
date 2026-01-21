@@ -87,15 +87,15 @@ export default function InfrastructurePage() {
 
   // Tab configuration with counts
   const tabs = [
-    { id: "networks", label: "Networks", count: networksData?.networks?.length || 0 },
-    { id: "volumes", label: "Volumes", count: volumesData?.volumes?.length || 0 },
+    { id: "networks", label: "Networks", count: networksData?.length || 0 },
+    { id: "volumes", label: "Volumes", count: volumesData?.length || 0 },
     { id: "health", label: "Health" },
   ];
 
   // Networks columns
   const networkColumns = [
     {
-      key: "Name",
+      key: "name",
       header: "Network",
       render: (value: string, row: any) => (
         <div className="flex items-center gap-3">
@@ -105,30 +105,30 @@ export default function InfrastructurePage() {
           <div>
             <div className="font-medium text-gray-900 dark:text-white">{value}</div>
             <div className="text-sm text-gray-500 dark:text-gray-400 font-mono">
-              {row.Id?.substring(0, 12)}
+              {row.id?.substring(0, 12)}
             </div>
           </div>
         </div>
       ),
     },
     {
-      key: "Driver",
+      key: "driver",
       header: "Driver",
       render: (value: string) => <Badge color="gray">{value}</Badge>,
     },
     {
-      key: "Scope",
+      key: "scope",
       header: "Scope",
       render: (value: string) => (
         <span className="text-sm text-gray-600 dark:text-gray-400">{value}</span>
       ),
     },
     {
-      key: "Created",
-      header: "Created",
-      render: (value: string) => (
+      key: "internal",
+      header: "Internal",
+      render: (value: boolean) => (
         <span className="text-sm text-gray-500 dark:text-gray-400">
-          {value ? formatTimestamp(value) : "-"}
+          {value ? "Yes" : "No"}
         </span>
       ),
     },
@@ -137,7 +137,7 @@ export default function InfrastructurePage() {
   // Volumes columns
   const volumeColumns = [
     {
-      key: "Name",
+      key: "name",
       header: "Volume",
       render: (value: string, row: any) => (
         <div className="flex items-center gap-3">
@@ -149,19 +149,19 @@ export default function InfrastructurePage() {
               {value}
             </div>
             <div className="text-sm text-gray-500 dark:text-gray-400">
-              {row.Driver}
+              {row.driver}
             </div>
           </div>
         </div>
       ),
     },
     {
-      key: "Driver",
+      key: "driver",
       header: "Driver",
       render: (value: string) => <Badge color="gray">{value}</Badge>,
     },
     {
-      key: "Mountpoint",
+      key: "mountpoint",
       header: "Mount Point",
       render: (value: string) => (
         <span className="text-sm text-gray-500 dark:text-gray-400 font-mono truncate max-w-xs block">
@@ -170,7 +170,7 @@ export default function InfrastructurePage() {
       ),
     },
     {
-      key: "CreatedAt",
+      key: "created_at",
       header: "Created",
       render: (value: string) => (
         <span className="text-sm text-gray-500 dark:text-gray-400">
@@ -204,25 +204,25 @@ export default function InfrastructurePage() {
           <div className="grid grid-cols-4 gap-4">
             <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
               <div className="text-2xl font-bold text-gray-900 dark:text-white">
-                {tlsHealth?.total_certificates || 0}
+                {tlsHealth?.certificates?.length || 0}
               </div>
               <div className="text-sm text-gray-500 dark:text-gray-400">Total Certificates</div>
             </div>
             <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
               <div className="text-2xl font-bold text-green-600 dark:text-green-400">
-                {tlsHealth?.valid_certificates || 0}
+                {tlsHealth?.healthy || 0}
               </div>
               <div className="text-sm text-gray-500 dark:text-gray-400">Valid</div>
             </div>
             <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
               <div className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
-                {tlsHealth?.expiring_soon || 0}
+                {tlsHealth?.warning || 0}
               </div>
               <div className="text-sm text-gray-500 dark:text-gray-400">Expiring Soon</div>
             </div>
             <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg">
               <div className="text-2xl font-bold text-red-600 dark:text-red-400">
-                {tlsHealth?.expired_certificates || 0}
+                {tlsHealth?.expired || 0}
               </div>
               <div className="text-sm text-gray-500 dark:text-gray-400">Expired</div>
             </div>
@@ -267,7 +267,7 @@ export default function InfrastructurePage() {
                 <span className="text-sm font-medium text-gray-900 dark:text-white">Size</span>
               </div>
               <div className="text-xl font-bold text-gray-900 dark:text-white">
-                {formatSize(dbHealth?.database_size || 0)}
+                {dbHealth?.database_size || "N/A"}
               </div>
             </div>
           </div>
@@ -280,28 +280,28 @@ export default function InfrastructurePage() {
             <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
               <div className="flex items-center gap-2 mb-2">
                 <Cpu className="h-4 w-4 text-gray-600 dark:text-gray-400" />
-                <span className="text-sm font-medium text-gray-900 dark:text-white">CPU Usage</span>
+                <span className="text-sm font-medium text-gray-900 dark:text-white">CPU Cores</span>
               </div>
               <div className="text-xl font-bold text-gray-900 dark:text-white">
-                {systemHealth?.cpu_usage?.toFixed(1) || 0}%
+                {systemHealth?.cpu_cores || 0}
               </div>
             </div>
             <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
               <div className="flex items-center gap-2 mb-2">
                 <MemoryStick className="h-4 w-4 text-gray-600 dark:text-gray-400" />
-                <span className="text-sm font-medium text-gray-900 dark:text-white">Memory Usage</span>
+                <span className="text-sm font-medium text-gray-900 dark:text-white">Memory</span>
               </div>
               <div className="text-xl font-bold text-gray-900 dark:text-white">
-                {systemHealth?.memory_usage?.toFixed(1) || 0}%
+                {systemHealth?.memory_mb || 0} MB
               </div>
             </div>
             <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
               <div className="flex items-center gap-2 mb-2">
-                <HardDrive className="h-4 w-4 text-gray-600 dark:text-gray-400" />
-                <span className="text-sm font-medium text-gray-900 dark:text-white">Disk Usage</span>
+                <Activity className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                <span className="text-sm font-medium text-gray-900 dark:text-white">Uptime</span>
               </div>
               <div className="text-xl font-bold text-gray-900 dark:text-white">
-                {systemHealth?.disk_usage?.toFixed(1) || 0}%
+                {systemHealth?.uptime || "N/A"}
               </div>
             </div>
           </div>
@@ -321,12 +321,12 @@ export default function InfrastructurePage() {
 
     switch (activeTab) {
       case "networks":
-        const networks = networksData?.networks || [];
+        const networks = networksData || [];
         return networks.length > 0 ? (
           <Table
             columns={networkColumns}
             data={networks}
-            keyExtractor={(row) => row.Id}
+            keyExtractor={(row) => row.id}
             hoverable
           />
         ) : (
@@ -339,12 +339,12 @@ export default function InfrastructurePage() {
         );
 
       case "volumes":
-        const volumes = volumesData?.volumes || [];
+        const volumes = volumesData || [];
         return volumes.length > 0 ? (
           <Table
             columns={volumeColumns}
             data={volumes}
-            keyExtractor={(row) => row.Name}
+            keyExtractor={(row) => row.name}
             hoverable
           />
         ) : (
@@ -374,13 +374,13 @@ export default function InfrastructurePage() {
       <MetricsGrid columns={3}>
         <StatCard
           label="Networks"
-          value={networksData?.networks?.length || 0}
+          value={networksData?.length || 0}
           icon={Network}
           iconColor="text-blue-600"
         />
         <StatCard
           label="Volumes"
-          value={volumesData?.volumes?.length || 0}
+          value={volumesData?.length || 0}
           icon={HardDrive}
           iconColor="text-purple-600"
         />

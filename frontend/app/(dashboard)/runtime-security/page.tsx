@@ -622,10 +622,10 @@ export default function RuntimeSecurityPage() {
               <div className="flex items-center justify-center h-64">
                 <Spinner size="lg" label="Loading drift events..." />
               </div>
-            ) : driftData?.drift_events?.length > 0 ? (
+            ) : (driftData?.drift_events?.length ?? 0) > 0 ? (
               <Table
                 columns={driftColumns}
-                data={driftData.drift_events}
+                data={driftData!.drift_events}
                 keyExtractor={(row) => row.id}
                 onRowClick={(row) => setSelectedDrift(row)}
                 hoverable
@@ -665,10 +665,10 @@ export default function RuntimeSecurityPage() {
               <div className="flex items-center justify-center h-64">
                 <Spinner size="lg" label="Loading anomalies..." />
               </div>
-            ) : anomalyData?.anomalies?.length > 0 ? (
+            ) : (anomalyData?.anomalies?.length ?? 0) > 0 ? (
               <Table
                 columns={anomalyColumns}
-                data={anomalyData.anomalies}
+                data={anomalyData!.anomalies}
                 keyExtractor={(row) => row.id}
                 onRowClick={(row) => setSelectedAnomaly(row)}
                 hoverable
