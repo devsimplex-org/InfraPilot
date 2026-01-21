@@ -861,7 +861,7 @@ export default function ProxiesPage() {
           <Globe className="h-4 w-4 text-gray-400" />
           <span className="font-medium">{value}</span>
           {row.is_system_proxy && (
-            <Badge variant="info" size="xs">InfraPilot</Badge>
+            <Badge color="blue" size="sm">InfraPilot</Badge>
           )}
           <StatusIndicator status={getSSLStatus(row)} showLabel={false} size="sm" />
         </div>
@@ -1094,7 +1094,7 @@ export default function ProxiesPage() {
                 {selectedProxy?.domain}
               </h2>
               {selectedProxy?.is_system_proxy && (
-                <Badge variant="info" size="sm">InfraPilot</Badge>
+                <Badge color="blue" size="sm">InfraPilot</Badge>
               )}
             </div>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
