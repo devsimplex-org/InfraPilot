@@ -194,6 +194,7 @@ export function ProxyConfigForm({
         include_www: formData.include_www,
         basic_auth_enabled: formData.basic_auth_enabled,
         basic_auth_realm: formData.basic_auth_realm,
+        basic_auth_excluded_paths: formData.basic_auth_excluded_paths,
       };
 
       const headerData = {
