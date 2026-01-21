@@ -640,10 +640,17 @@ func (h *CommandHandler) handleNginxCommand(ctx context.Context, cmd *agentgrpc.
 			}
 		}
 
-		// Request certificate
-		if err := h.certManager.RequestCertificate(domain); err != nil {
+		// Build domains list (include www if requested)
+		domains := []string{domain}
+		if nginxCmd.IncludeWWW {
+			domains = append(domains, "www."+domain)
+		}
+
+		// Request certificate for all domains
+		if err := h.certManager.RequestCertificateMulti(domains); err != nil {
 			h.logger.Error("SSL certificate request failed",
 				zap.String("domain", domain),
+				zap.Bool("include_www", nginxCmd.IncludeWWW),
 				zap.Error(err),
 			)
 			return &agentgrpc.CommandResult{
@@ -659,9 +666,13 @@ func (h *CommandHandler) handleNginxCommand(ctx context.Context, cmd *agentgrpc.
 			)
 		}
 
+		message := fmt.Sprintf("SSL certificate obtained for %s", domain)
+		if nginxCmd.IncludeWWW {
+			message = fmt.Sprintf("SSL certificate obtained for %s and www.%s", domain, domain)
+		}
 		return &agentgrpc.CommandResult{
 			Success: true,
-			Message: fmt.Sprintf("SSL certificate obtained for %s", domain),
+			Message: message,
 		}
 
 	default:
