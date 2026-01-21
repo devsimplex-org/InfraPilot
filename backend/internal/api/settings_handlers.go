@@ -290,7 +290,7 @@ func (h *Handler) updateInfraPilotDomain(c *gin.Context) {
 	// Determine htpasswd path for this proxy (use sanitized domain)
 	htpasswdPath := ""
 	if basicAuthEnabled {
-		htpasswdPath = fmt.Sprintf("/etc/nginx/conf.d/.htpasswd_%s", strings.ReplaceAll(req.Domain, ".", "_"))
+		htpasswdPath = fmt.Sprintf("/data/nginx/conf.d/.htpasswd_%s", strings.ReplaceAll(req.Domain, ".", "_"))
 	}
 
 	// Dispatch the special InfraPilot nginx config to the agent
