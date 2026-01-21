@@ -200,7 +200,7 @@ export function ProxyConfigForm({
         x_frame_options: headers.x_frame_options,
         x_content_type_options: headers.x_content_type_options,
         x_xss_protection: headers.x_xss_protection,
-        content_security_policy: headers.content_security_policy || null,
+        content_security_policy: headers.content_security_policy || undefined,
       };
 
       await onSave(proxyData, headerData);
