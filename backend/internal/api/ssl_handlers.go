@@ -447,12 +447,12 @@ func (h *Handler) requestSSLCertificate(c *gin.Context) {
 	if success {
 		// Update proxy_hosts to enable SSL and regenerate nginx config
 		var proxyID uuid.UUID
-		var forceSSL, http2Enabled, isSystemProxy bool
+		var forceSSL, http2Enabled, isSystemProxy, includeWWW bool
 		err := h.db.QueryRow(c.Request.Context(), `
 			UPDATE proxy_hosts SET ssl_enabled = true, force_ssl = true, status = 'active', updated_at = NOW()
 			WHERE agent_id = $1 AND domain = $2
-			RETURNING id, force_ssl, http2_enabled, is_system_proxy
-		`, agentID, req.Domain).Scan(&proxyID, &forceSSL, &http2Enabled, &isSystemProxy)
+			RETURNING id, force_ssl, http2_enabled, is_system_proxy, include_www
+		`, agentID, req.Domain).Scan(&proxyID, &forceSSL, &http2Enabled, &isSystemProxy, &includeWWW)
 
 		if err == nil {
 			h.logger.Info("Updated proxy_hosts for SSL",
@@ -468,7 +468,7 @@ func (h *Handler) requestSSLCertificate(c *gin.Context) {
 				var upstream string
 				h.db.QueryRow(c.Request.Context(), `SELECT upstream_target FROM proxy_hosts WHERE id = $1`, proxyID).Scan(&upstream)
 				if upstream != "" {
-					go h.dispatchProxyConfig(c.Request.Context(), agentID, proxyID, req.Domain, upstream, true, http2Enabled, true)
+					go h.dispatchProxyConfig(c.Request.Context(), agentID, proxyID, req.Domain, upstream, true, http2Enabled, includeWWW, true)
 				}
 			}
 		} else {
@@ -600,7 +600,7 @@ To configure SSL for %s:
 }
 
 // verifyDNS checks if DNS is properly configured for a domain
-// GET /api/v1/ssl/verify-dns/:domain
+// GET /api/v1/ssl/verify-dns/:domain?include_www=true
 func (h *Handler) verifyDNS(c *gin.Context) {
 	domain := c.Param("domain")
 	if domain == "" {
@@ -608,37 +608,88 @@ func (h *Handler) verifyDNS(c *gin.Context) {
 		return
 	}
 
-	// Lookup A records
-	ips, err := net.LookupIP(domain)
-	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"domain":     domain,
-			"configured": false,
-			"error":      fmt.Sprintf("DNS lookup failed: %v", err),
-		})
-		return
-	}
+	includeWWW := c.Query("include_www") == "true"
 
 	// Get expected IP
 	expectedIP := getPublicIP()
 
-	// Check if any IP matches
-	ipStrings := []string{}
-	matches := false
-	for _, ip := range ips {
-		ipStr := ip.String()
-		ipStrings = append(ipStrings, ipStr)
-		if ipStr == expectedIP {
-			matches = true
-		}
+	// Helper to check a single domain
+	type domainResult struct {
+		Domain      string   `json:"domain"`
+		Configured  bool     `json:"configured"`
+		ResolvedIPs []string `json:"resolved_ips"`
+		Matches     bool     `json:"matches"`
+		Error       string   `json:"error,omitempty"`
 	}
 
+	checkDomain := func(d string) domainResult {
+		result := domainResult{Domain: d}
+		ips, err := net.LookupIP(d)
+		if err != nil {
+			result.Error = fmt.Sprintf("DNS lookup failed: %v", err)
+			return result
+		}
+
+		result.Configured = len(ips) > 0
+		result.ResolvedIPs = []string{}
+		for _, ip := range ips {
+			ipStr := ip.String()
+			result.ResolvedIPs = append(result.ResolvedIPs, ipStr)
+			if ipStr == expectedIP {
+				result.Matches = true
+			}
+		}
+		return result
+	}
+
+	// Check main domain
+	mainResult := checkDomain(domain)
+
+	// If include_www is enabled, also check www subdomain
+	if includeWWW {
+		wwwDomain := "www." + domain
+		wwwResult := checkDomain(wwwDomain)
+
+		// Both domains must be configured and match for overall success
+		allConfigured := mainResult.Configured && wwwResult.Configured
+		allMatches := mainResult.Matches && wwwResult.Matches
+
+		// Combine resolved IPs for display
+		allIPs := mainResult.ResolvedIPs
+		for _, ip := range wwwResult.ResolvedIPs {
+			// Add only if not already present
+			found := false
+			for _, existingIP := range allIPs {
+				if existingIP == ip {
+					found = true
+					break
+				}
+			}
+			if !found {
+				allIPs = append(allIPs, ip)
+			}
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"domain":       domain,
+			"configured":   allConfigured,
+			"resolved_ips": allIPs,
+			"expected_ip":  expectedIP,
+			"matches":      allMatches,
+			"include_www":  true,
+			"www_result":   wwwResult,
+			"main_result":  mainResult,
+		})
+		return
+	}
+
+	// Standard single-domain response
 	c.JSON(http.StatusOK, gin.H{
 		"domain":       domain,
-		"configured":   len(ips) > 0,
-		"resolved_ips": ipStrings,
+		"configured":   mainResult.Configured,
+		"resolved_ips": mainResult.ResolvedIPs,
 		"expected_ip":  expectedIP,
-		"matches":      matches,
+		"matches":      mainResult.Matches,
 	})
 }
 

@@ -961,8 +961,18 @@ func generateNginxConfig(proxy ProxyHost, headers SecurityHeaders) string {
 	config += "    listen [::]:80;\n"
 	config += fmt.Sprintf("    server_name %s;\n\n", serverName)
 
+	// Always include ACME challenge location for Let's Encrypt certificate issuance/renewal
+	config += "    # ACME challenge for Let's Encrypt\n"
+	config += "    location /.well-known/acme-challenge/ {\n"
+	config += "        root /var/www/acme-challenge;\n"
+	config += "        try_files $uri =404;\n"
+	config += "    }\n\n"
+
 	if proxy.SSLEnabled && proxy.ForceSSL {
-		config += "    return 301 https://$host$request_uri;\n"
+		config += "    # Redirect all other HTTP to HTTPS\n"
+		config += "    location / {\n"
+		config += "        return 301 https://$host$request_uri;\n"
+		config += "    }\n"
 		config += "}\n\n"
 	} else {
 		config += generateLocationBlock(proxy.UpstreamTarget)

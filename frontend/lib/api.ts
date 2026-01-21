@@ -3644,8 +3644,8 @@ export const api = {
   getDNSInstructions: (domain: string) =>
     fetchAPI<DNSInstructions>(`/ssl/dns-instructions/${encodeURIComponent(domain)}`),
 
-  verifyDNS: (domain: string) =>
-    fetchAPI<DNSVerifyResult>(`/ssl/verify-dns/${encodeURIComponent(domain)}`),
+  verifyDNS: (domain: string, includeWWW?: boolean) =>
+    fetchAPI<DNSVerifyResult>(`/ssl/verify-dns/${encodeURIComponent(domain)}${includeWWW ? '?include_www=true' : ''}`),
 
   // DNS-01 Challenge (for wildcard certificates)
   startDNSChallenge: async (options: { domain: string; email?: string; staging?: boolean }): Promise<{
