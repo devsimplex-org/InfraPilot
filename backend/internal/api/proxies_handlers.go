@@ -1456,6 +1456,7 @@ func (h *Handler) dispatchProxyConfig(ctx context.Context, agentID, proxyID uuid
 
 	cmd := &agentgrpc.BackendMessage{
 		RequestId: uuid.New().String(),
+		Type:      "nginx",
 		Command:   cmdPayload,
 	}
 
@@ -1525,6 +1526,7 @@ func (h *Handler) dispatchProxyConfigWithCert(ctx context.Context, agentID, prox
 
 	cmd := &agentgrpc.BackendMessage{
 		RequestId: uuid.New().String(),
+		Type:      "nginx",
 		Command:   cmdPayload,
 	}
 
@@ -1569,6 +1571,7 @@ func (h *Handler) dispatchDeleteProxy(agentID uuid.UUID, domain string) {
 
 	cmd := &agentgrpc.BackendMessage{
 		RequestId: uuid.New().String(),
+		Type:      "nginx",
 		Command:   cmdPayload,
 	}
 
