@@ -653,13 +653,13 @@ export default function ProxiesPage() {
           <div className="h-full overflow-auto">
             <ProxyConfigForm
               proxy={selectedProxy}
-              agentId={selectedAgent}
+              agentId={selectedAgent!}
               securityHeaders={securityHeaders}
               onSave={async (proxyData, headerData) => {
                 // Update proxy
-                await api.updateProxyHost(selectedAgent, selectedProxy.id, proxyData);
+                await api.updateProxyHost(selectedAgent!, selectedProxy.id, proxyData);
                 // Update security headers
-                await api.updateSecurityHeaders(selectedAgent, selectedProxy.id, headerData);
+                await api.updateSecurityHeaders(selectedAgent!, selectedProxy.id, headerData);
                 // Refresh data
                 queryClient.invalidateQueries({ queryKey: ["proxies", selectedAgent] });
               }}

@@ -3245,6 +3245,9 @@ export const api = {
       upstream_target: string;
       force_ssl: boolean;
       http2_enabled: boolean;
+      include_www: boolean;
+      basic_auth_enabled: boolean;
+      basic_auth_realm: string;
       status: string;
     }>
   ) =>
@@ -3336,6 +3339,15 @@ export const api = {
       {
         method: "POST",
         body: JSON.stringify(config),
+      }
+    ),
+
+  // Config Test
+  testProxyConfig: (agentId: string, proxyId: string) =>
+    fetchAPI<{ valid: boolean; message: string }>(
+      `/agents/${agentId}/proxies/${proxyId}/test`,
+      {
+        method: "POST",
       }
     ),
 
