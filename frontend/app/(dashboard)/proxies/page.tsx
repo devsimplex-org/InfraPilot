@@ -52,6 +52,7 @@ interface ProxyHost {
   ssl_expires_at: string | null;
   force_ssl: boolean;
   http2_enabled: boolean;
+  include_www: boolean;
   status: string;
   created_at: string;
   updated_at: string;
@@ -77,6 +78,7 @@ export default function ProxiesPage() {
     upstream_target: "",
     force_ssl: true,
     http2_enabled: true,
+    include_www: false,
   });
 
   // Edit form state
@@ -85,6 +87,7 @@ export default function ProxiesPage() {
     upstream_target: "",
     force_ssl: true,
     http2_enabled: true,
+    include_www: false,
   });
 
   // Network warning state
@@ -181,6 +184,7 @@ export default function ProxiesPage() {
         upstream_target: selectedProxy.upstream_target,
         force_ssl: selectedProxy.force_ssl,
         http2_enabled: selectedProxy.http2_enabled,
+        include_www: selectedProxy.include_www,
       });
 
       // Load security headers
@@ -316,7 +320,7 @@ export default function ProxiesPage() {
 
   // Helper functions
   const resetForm = () => {
-    setNewProxy({ domain: "", upstream_target: "", force_ssl: true, http2_enabled: true });
+    setNewProxy({ domain: "", upstream_target: "", force_ssl: true, http2_enabled: true, include_www: false });
     setUpstreamMode("manual");
     setSelectedContainer(null);
     setContainerPort("80");
@@ -688,7 +692,7 @@ export default function ProxiesPage() {
                   onChange={(e) => setEditProxy({ ...editProxy, upstream_target: e.target.value })}
                   required
                 />
-                <div className="flex items-center gap-4">
+                <div className="flex flex-wrap items-center gap-4">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
@@ -706,6 +710,15 @@ export default function ProxiesPage() {
                       className="w-4 h-4 rounded"
                     />
                     <span className="text-sm">HTTP/2</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editProxy.include_www}
+                      onChange={(e) => setEditProxy({ ...editProxy, include_www: e.target.checked })}
+                      className="w-4 h-4 rounded"
+                    />
+                    <span className="text-sm">Include www</span>
                   </label>
                 </div>
                 <div className="flex gap-2">
@@ -806,6 +819,9 @@ export default function ProxiesPage() {
                       )}
                       {selectedProxy.http2_enabled && (
                         <Badge>HTTP/2</Badge>
+                      )}
+                      {selectedProxy.include_www && (
+                        <Badge>Include www</Badge>
                       )}
                     </div>
                     {!selectedProxy.ssl_enabled && selectedProxy.status !== "ssl_pending" && (
@@ -1154,7 +1170,7 @@ export default function ProxiesPage() {
                 </>
               )}
 
-              <div className="flex items-center gap-4">
+              <div className="flex flex-wrap items-center gap-4">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
@@ -1172,6 +1188,15 @@ export default function ProxiesPage() {
                     className="w-4 h-4 rounded"
                   />
                   <span className="text-sm text-gray-700 dark:text-gray-300">HTTP/2</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newProxy.include_www}
+                    onChange={(e) => setNewProxy({ ...newProxy, include_www: e.target.checked })}
+                    className="w-4 h-4 rounded"
+                  />
+                  <span className="text-sm text-gray-700 dark:text-gray-300">Include www</span>
                 </label>
               </div>
 
