@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"strings"
 	"time"
 
@@ -1028,4 +1029,67 @@ func (c *Client) RunContainer(ctx context.Context, cfg ContainerRunConfig) (*Con
 		Name:        cfg.Name,
 		Status:      "running",
 	}, nil
+}
+
+// ============ Network Connectivity Testing ============
+
+// GetContainerIP returns the IP address of a container
+// It tries to find the container by name or ID and returns its first network IP
+func (c *Client) GetContainerIP(ctx context.Context, containerNameOrID string) (string, error) {
+	// Try to inspect the container directly
+	info, err := c.cli.ContainerInspect(ctx, containerNameOrID)
+	if err != nil {
+		// Try listing containers and matching by name
+		containers, err := c.cli.ContainerList(ctx, container.ListOptions{All: true})
+		if err != nil {
+			return "", fmt.Errorf("failed to list containers: %w", err)
+		}
+
+		for _, cont := range containers {
+			name := ""
+			if len(cont.Names) > 0 {
+				name = strings.TrimPrefix(cont.Names[0], "/")
+			}
+			if name == containerNameOrID || strings.HasPrefix(cont.ID, containerNameOrID) {
+				info, err = c.cli.ContainerInspect(ctx, cont.ID)
+				if err != nil {
+					return "", fmt.Errorf("failed to inspect container: %w", err)
+				}
+				break
+			}
+		}
+		if info.ID == "" {
+			return "", fmt.Errorf("container not found: %s", containerNameOrID)
+		}
+	}
+
+	// Get IP from network settings
+	if info.NetworkSettings != nil && info.NetworkSettings.Networks != nil {
+		for _, netSettings := range info.NetworkSettings.Networks {
+			if netSettings.IPAddress != "" {
+				return netSettings.IPAddress, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("container has no IP address")
+}
+
+// TestTCPConnection tests if a TCP connection can be established to host:port
+func (c *Client) TestTCPConnection(ctx context.Context, host string, port int, timeout time.Duration) (bool, error) {
+	address := fmt.Sprintf("%s:%d", host, port)
+
+	// Create a context with timeout
+	dialCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	// Use a dialer with the context
+	var d net.Dialer
+	conn, err := d.DialContext(dialCtx, "tcp", address)
+	if err != nil {
+		// Connection failed - this is expected for unreachable ports
+		return false, nil
+	}
+	conn.Close()
+	return true, nil
 }

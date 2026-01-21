@@ -23,6 +23,9 @@ type ProxyHost struct {
 	AgentID          uuid.UUID  `json:"agent_id"`
 	Domain           string     `json:"domain"`
 	UpstreamTarget   string     `json:"upstream_target"`
+	ProxyType        string     `json:"proxy_type"`                     // "upstream" or "redirect"
+	RedirectURL      *string    `json:"redirect_url,omitempty"`         // URL to redirect to (for redirect type)
+	RedirectCode     int        `json:"redirect_code,omitempty"`        // 301, 302, 307, 308 (for redirect type)
 	SSLEnabled       bool       `json:"ssl_enabled"`
 	SSLCertPath      *string    `json:"ssl_cert_path,omitempty"`
 	SSLKeyPath       *string    `json:"ssl_key_path,omitempty"`
@@ -54,19 +57,25 @@ type SecurityHeaders struct {
 
 // CreateProxyRequest is the request body for creating a proxy host
 type CreateProxyRequest struct {
-	Domain           string `json:"domain" binding:"required"`
-	UpstreamTarget   string `json:"upstream_target" binding:"required"`
-	ForceSSL         bool   `json:"force_ssl"`
-	HTTP2Enabled     bool   `json:"http2_enabled"`
-	IncludeWWW       bool   `json:"include_www"`
-	BasicAuthEnabled bool   `json:"basic_auth_enabled"`
-	BasicAuthRealm   string `json:"basic_auth_realm,omitempty"`
+	Domain           string  `json:"domain" binding:"required"`
+	UpstreamTarget   string  `json:"upstream_target"`                 // Required if proxy_type is "upstream"
+	ProxyType        string  `json:"proxy_type"`                      // "upstream" (default) or "redirect"
+	RedirectURL      string  `json:"redirect_url"`                    // Required if proxy_type is "redirect"
+	RedirectCode     int     `json:"redirect_code"`                   // 301, 302, 307, 308 (default 301)
+	ForceSSL         bool    `json:"force_ssl"`
+	HTTP2Enabled     bool    `json:"http2_enabled"`
+	IncludeWWW       bool    `json:"include_www"`
+	BasicAuthEnabled bool    `json:"basic_auth_enabled"`
+	BasicAuthRealm   string  `json:"basic_auth_realm,omitempty"`
 }
 
 // UpdateProxyRequest is the request body for updating a proxy host
 type UpdateProxyRequest struct {
 	Domain                 *string   `json:"domain,omitempty"`
 	UpstreamTarget         *string   `json:"upstream_target,omitempty"`
+	ProxyType              *string   `json:"proxy_type,omitempty"`       // "upstream" or "redirect"
+	RedirectURL            *string   `json:"redirect_url,omitempty"`     // URL to redirect to
+	RedirectCode           *int      `json:"redirect_code,omitempty"`    // 301, 302, 307, 308
 	ForceSSL               *bool     `json:"force_ssl,omitempty"`
 	HTTP2Enabled           *bool     `json:"http2_enabled,omitempty"`
 	IncludeWWW             *bool     `json:"include_www,omitempty"`
@@ -74,6 +83,19 @@ type UpdateProxyRequest struct {
 	BasicAuthRealm         *string   `json:"basic_auth_realm,omitempty"`
 	BasicAuthExcludedPaths *[]string `json:"basic_auth_excluded_paths,omitempty"`
 	Status                 *string   `json:"status,omitempty"`
+}
+
+// TestNetworkRequest is the request body for testing network connectivity
+type TestNetworkRequest struct {
+	ContainerName string `json:"container_name" binding:"required"`
+	Port          int    `json:"port" binding:"required"`
+}
+
+// TestNetworkResponse is the response for network connectivity test
+type TestNetworkResponse struct {
+	Reachable      bool   `json:"reachable"`
+	Message        string `json:"message"`
+	AvailablePorts []int  `json:"available_ports,omitempty"`
 }
 
 // listProxyHosts returns all proxy hosts for an agent
@@ -99,8 +121,10 @@ func (h *Handler) listProxyHosts(c *gin.Context) {
 	}
 
 	rows, err := h.db.Query(c.Request.Context(), `
-		SELECT id, agent_id, domain, upstream_target, ssl_enabled, ssl_cert_path,
-		       ssl_key_path, ssl_expires_at, force_ssl, http2_enabled, include_www,
+		SELECT id, agent_id, domain, upstream_target,
+		       COALESCE(proxy_type, 'upstream'), redirect_url, COALESCE(redirect_code, 301),
+		       ssl_enabled, ssl_cert_path, ssl_key_path, ssl_expires_at,
+		       force_ssl, http2_enabled, include_www,
 		       COALESCE(basic_auth_enabled, false), COALESCE(basic_auth_realm, 'Restricted'),
 		       COALESCE(basic_auth_excluded_paths, '{}'),
 		       config_hash, status, is_system_proxy, created_at, updated_at
@@ -118,10 +142,11 @@ func (h *Handler) listProxyHosts(c *gin.Context) {
 	for rows.Next() {
 		var p ProxyHost
 		if err := rows.Scan(
-			&p.ID, &p.AgentID, &p.Domain, &p.UpstreamTarget, &p.SSLEnabled,
-			&p.SSLCertPath, &p.SSLKeyPath, &p.SSLExpiresAt, &p.ForceSSL,
-			&p.HTTP2Enabled, &p.IncludeWWW, &p.BasicAuthEnabled, &p.BasicAuthRealm,
-			&p.BasicAuthExcludedPaths,
+			&p.ID, &p.AgentID, &p.Domain, &p.UpstreamTarget,
+			&p.ProxyType, &p.RedirectURL, &p.RedirectCode,
+			&p.SSLEnabled, &p.SSLCertPath, &p.SSLKeyPath, &p.SSLExpiresAt,
+			&p.ForceSSL, &p.HTTP2Enabled, &p.IncludeWWW,
+			&p.BasicAuthEnabled, &p.BasicAuthRealm, &p.BasicAuthExcludedPaths,
 			&p.ConfigHash, &p.Status, &p.IsSystemProxy, &p.CreatedAt, &p.UpdatedAt,
 		); err != nil {
 			continue
@@ -167,6 +192,40 @@ func (h *Handler) createProxyHost(c *gin.Context) {
 		return
 	}
 
+	// Default proxy_type to "upstream" if not specified
+	if req.ProxyType == "" {
+		req.ProxyType = "upstream"
+	}
+
+	// Validate proxy type
+	if req.ProxyType != "upstream" && req.ProxyType != "redirect" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid proxy_type: must be 'upstream' or 'redirect'"})
+		return
+	}
+
+	// Validate based on proxy type
+	if req.ProxyType == "upstream" {
+		if req.UpstreamTarget == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "upstream_target is required for upstream proxy type"})
+			return
+		}
+	} else if req.ProxyType == "redirect" {
+		if req.RedirectURL == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "redirect_url is required for redirect proxy type"})
+			return
+		}
+		// Default redirect code to 301 if not specified
+		if req.RedirectCode == 0 {
+			req.RedirectCode = 301
+		}
+		// Validate redirect code
+		validCodes := map[int]bool{301: true, 302: true, 307: true, 308: true}
+		if !validCodes[req.RedirectCode] {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid redirect_code: must be 301, 302, 307, or 308"})
+			return
+		}
+	}
+
 	// Check policies before creating proxy
 	if blocked, message := h.evaluateProxyPolicy(c, orgID, req.Domain, false, "create"); blocked {
 		c.JSON(http.StatusForbidden, gin.H{
@@ -191,12 +250,23 @@ func (h *Handler) createProxyHost(c *gin.Context) {
 	if basicAuthRealm == "" {
 		basicAuthRealm = "Restricted"
 	}
+
+	// Prepare redirect URL (nil for upstream type)
+	var redirectURL *string
+	var redirectCode *int
+	if req.ProxyType == "redirect" {
+		redirectURL = &req.RedirectURL
+		redirectCode = &req.RedirectCode
+	}
+
 	var proxyID uuid.UUID
 	err = h.db.QueryRow(c.Request.Context(), `
-		INSERT INTO proxy_hosts (agent_id, domain, upstream_target, force_ssl, http2_enabled, include_www, basic_auth_enabled, basic_auth_realm, status)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active')
+		INSERT INTO proxy_hosts (agent_id, domain, upstream_target, proxy_type, redirect_url, redirect_code,
+		                         force_ssl, http2_enabled, include_www, basic_auth_enabled, basic_auth_realm, status)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'active')
 		RETURNING id
-	`, agentID, req.Domain, req.UpstreamTarget, req.ForceSSL, req.HTTP2Enabled, req.IncludeWWW, req.BasicAuthEnabled, basicAuthRealm).Scan(&proxyID)
+	`, agentID, req.Domain, req.UpstreamTarget, req.ProxyType, redirectURL, redirectCode,
+		req.ForceSSL, req.HTTP2Enabled, req.IncludeWWW, req.BasicAuthEnabled, basicAuthRealm).Scan(&proxyID)
 
 	if err != nil {
 		h.logger.Error("Failed to create proxy host")
@@ -217,22 +287,27 @@ func (h *Handler) createProxyHost(c *gin.Context) {
 	// Audit log
 	h.auditLog(c, userID, orgID, "proxy.create", "proxy_host", proxyID, req)
 
-	// Push config to agent via gRPC
-	go h.dispatchProxyConfig(c.Request.Context(), agentID, proxyID, req.Domain, req.UpstreamTarget, req.ForceSSL, req.HTTP2Enabled, req.IncludeWWW, false)
+	// Push config to agent via gRPC (only for upstream proxies that have an upstream target)
+	go h.dispatchProxyConfigFull(c.Request.Context(), agentID, proxyID, req.Domain, req.UpstreamTarget,
+		req.ProxyType, redirectURL, redirectCode, req.ForceSSL, req.HTTP2Enabled, req.IncludeWWW, false)
 
 	// Fetch and return the created proxy
 	var proxy ProxyHost
 	err = h.db.QueryRow(c.Request.Context(), `
-		SELECT id, agent_id, domain, upstream_target, ssl_enabled, ssl_cert_path,
-		       ssl_key_path, ssl_expires_at, force_ssl, http2_enabled, include_www,
+		SELECT id, agent_id, domain, upstream_target,
+		       COALESCE(proxy_type, 'upstream'), redirect_url, COALESCE(redirect_code, 301),
+		       ssl_enabled, ssl_cert_path, ssl_key_path, ssl_expires_at,
+		       force_ssl, http2_enabled, include_www,
 		       COALESCE(basic_auth_enabled, false), COALESCE(basic_auth_realm, 'Restricted'),
 		       config_hash, status, created_at, updated_at
 		FROM proxy_hosts
 		WHERE id = $1
 	`, proxyID).Scan(
-		&proxy.ID, &proxy.AgentID, &proxy.Domain, &proxy.UpstreamTarget, &proxy.SSLEnabled,
-		&proxy.SSLCertPath, &proxy.SSLKeyPath, &proxy.SSLExpiresAt, &proxy.ForceSSL,
-		&proxy.HTTP2Enabled, &proxy.IncludeWWW, &proxy.BasicAuthEnabled, &proxy.BasicAuthRealm,
+		&proxy.ID, &proxy.AgentID, &proxy.Domain, &proxy.UpstreamTarget,
+		&proxy.ProxyType, &proxy.RedirectURL, &proxy.RedirectCode,
+		&proxy.SSLEnabled, &proxy.SSLCertPath, &proxy.SSLKeyPath, &proxy.SSLExpiresAt,
+		&proxy.ForceSSL, &proxy.HTTP2Enabled, &proxy.IncludeWWW,
+		&proxy.BasicAuthEnabled, &proxy.BasicAuthRealm,
 		&proxy.ConfigHash, &proxy.Status, &proxy.CreatedAt, &proxy.UpdatedAt,
 	)
 
@@ -275,16 +350,20 @@ func (h *Handler) getProxyHost(c *gin.Context) {
 
 	var proxy ProxyHost
 	err = h.db.QueryRow(c.Request.Context(), `
-		SELECT id, agent_id, domain, upstream_target, ssl_enabled, ssl_cert_path,
-		       ssl_key_path, ssl_expires_at, force_ssl, http2_enabled, include_www,
+		SELECT id, agent_id, domain, upstream_target,
+		       COALESCE(proxy_type, 'upstream'), redirect_url, COALESCE(redirect_code, 301),
+		       ssl_enabled, ssl_cert_path, ssl_key_path, ssl_expires_at,
+		       force_ssl, http2_enabled, include_www,
 		       COALESCE(basic_auth_enabled, false), COALESCE(basic_auth_realm, 'Restricted'),
 		       config_hash, status, created_at, updated_at
 		FROM proxy_hosts
 		WHERE id = $1 AND agent_id = $2
 	`, proxyID, agentID).Scan(
-		&proxy.ID, &proxy.AgentID, &proxy.Domain, &proxy.UpstreamTarget, &proxy.SSLEnabled,
-		&proxy.SSLCertPath, &proxy.SSLKeyPath, &proxy.SSLExpiresAt, &proxy.ForceSSL,
-		&proxy.HTTP2Enabled, &proxy.IncludeWWW, &proxy.BasicAuthEnabled, &proxy.BasicAuthRealm,
+		&proxy.ID, &proxy.AgentID, &proxy.Domain, &proxy.UpstreamTarget,
+		&proxy.ProxyType, &proxy.RedirectURL, &proxy.RedirectCode,
+		&proxy.SSLEnabled, &proxy.SSLCertPath, &proxy.SSLKeyPath, &proxy.SSLExpiresAt,
+		&proxy.ForceSSL, &proxy.HTTP2Enabled, &proxy.IncludeWWW,
+		&proxy.BasicAuthEnabled, &proxy.BasicAuthRealm,
 		&proxy.ConfigHash, &proxy.Status, &proxy.CreatedAt, &proxy.UpdatedAt,
 	)
 
@@ -373,6 +452,32 @@ func (h *Handler) updateProxyHost(c *gin.Context) {
 		query += fmt.Sprintf(", upstream_target = $%d", argCount)
 		args = append(args, *req.UpstreamTarget)
 	}
+	if req.ProxyType != nil {
+		// Validate proxy type
+		if *req.ProxyType != "upstream" && *req.ProxyType != "redirect" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid proxy_type: must be 'upstream' or 'redirect'"})
+			return
+		}
+		argCount++
+		query += fmt.Sprintf(", proxy_type = $%d", argCount)
+		args = append(args, *req.ProxyType)
+	}
+	if req.RedirectURL != nil {
+		argCount++
+		query += fmt.Sprintf(", redirect_url = $%d", argCount)
+		args = append(args, *req.RedirectURL)
+	}
+	if req.RedirectCode != nil {
+		// Validate redirect code
+		validCodes := map[int]bool{301: true, 302: true, 307: true, 308: true}
+		if !validCodes[*req.RedirectCode] {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid redirect_code: must be 301, 302, 307, or 308"})
+			return
+		}
+		argCount++
+		query += fmt.Sprintf(", redirect_code = $%d", argCount)
+		args = append(args, *req.RedirectCode)
+	}
 	if req.ForceSSL != nil {
 		argCount++
 		query += fmt.Sprintf(", force_ssl = $%d", argCount)
@@ -434,23 +539,27 @@ func (h *Handler) updateProxyHost(c *gin.Context) {
 	// Fetch updated proxy to get current values
 	var proxy ProxyHost
 	err = h.db.QueryRow(c.Request.Context(), `
-		SELECT id, agent_id, domain, upstream_target, ssl_enabled, ssl_cert_path,
-		       ssl_key_path, ssl_expires_at, force_ssl, http2_enabled, include_www,
+		SELECT id, agent_id, domain, upstream_target,
+		       COALESCE(proxy_type, 'upstream'), redirect_url, COALESCE(redirect_code, 301),
+		       ssl_enabled, ssl_cert_path, ssl_key_path, ssl_expires_at,
+		       force_ssl, http2_enabled, include_www,
 		       COALESCE(basic_auth_enabled, false), COALESCE(basic_auth_realm, 'Restricted'),
 		       COALESCE(basic_auth_excluded_paths, '{}'),
 		       config_hash, status, created_at, updated_at
 		FROM proxy_hosts
 		WHERE id = $1
 	`, proxyID).Scan(
-		&proxy.ID, &proxy.AgentID, &proxy.Domain, &proxy.UpstreamTarget, &proxy.SSLEnabled,
-		&proxy.SSLCertPath, &proxy.SSLKeyPath, &proxy.SSLExpiresAt, &proxy.ForceSSL,
-		&proxy.HTTP2Enabled, &proxy.IncludeWWW, &proxy.BasicAuthEnabled, &proxy.BasicAuthRealm,
-		&proxy.BasicAuthExcludedPaths,
+		&proxy.ID, &proxy.AgentID, &proxy.Domain, &proxy.UpstreamTarget,
+		&proxy.ProxyType, &proxy.RedirectURL, &proxy.RedirectCode,
+		&proxy.SSLEnabled, &proxy.SSLCertPath, &proxy.SSLKeyPath, &proxy.SSLExpiresAt,
+		&proxy.ForceSSL, &proxy.HTTP2Enabled, &proxy.IncludeWWW,
+		&proxy.BasicAuthEnabled, &proxy.BasicAuthRealm, &proxy.BasicAuthExcludedPaths,
 		&proxy.ConfigHash, &proxy.Status, &proxy.CreatedAt, &proxy.UpdatedAt,
 	)
 
 	// Push updated config to agent via gRPC
-	go h.dispatchProxyConfig(context.Background(), agentID, proxyID, proxy.Domain, proxy.UpstreamTarget, proxy.ForceSSL, proxy.HTTP2Enabled, proxy.IncludeWWW, proxy.SSLEnabled)
+	go h.dispatchProxyConfigFull(context.Background(), agentID, proxyID, proxy.Domain, proxy.UpstreamTarget,
+		proxy.ProxyType, proxy.RedirectURL, &proxy.RedirectCode, proxy.ForceSSL, proxy.HTTP2Enabled, proxy.IncludeWWW, proxy.SSLEnabled)
 
 	// If basic auth settings changed, dispatch htpasswd update (handles both system and regular proxies)
 	if req.BasicAuthEnabled != nil || req.BasicAuthRealm != nil || req.BasicAuthExcludedPaths != nil {
@@ -1124,7 +1233,12 @@ func generateNginxConfig(proxy ProxyHost, headers SecurityHeaders) string {
 		config += "    }\n"
 		config += "}\n\n"
 	} else {
-		config += generateLocationBlockWithAuth(proxy.UpstreamTarget, proxy.BasicAuthEnabled, proxy.BasicAuthRealm, proxy.Domain, proxy.BasicAuthExcludedPaths)
+		// Check if this is a redirect proxy
+		if proxy.ProxyType == "redirect" && proxy.RedirectURL != nil && *proxy.RedirectURL != "" {
+			config += generateRedirectLocationBlock(*proxy.RedirectURL, proxy.RedirectCode)
+		} else {
+			config += generateLocationBlockWithAuth(proxy.UpstreamTarget, proxy.BasicAuthEnabled, proxy.BasicAuthRealm, proxy.Domain, proxy.BasicAuthExcludedPaths)
+		}
 		config += "}\n\n"
 	}
 
@@ -1178,9 +1292,36 @@ func generateNginxConfig(proxy ProxyHost, headers SecurityHeaders) string {
 		// Security headers
 		config += generateSecurityHeaders(headers)
 
-		config += generateLocationBlockWithAuth(proxy.UpstreamTarget, proxy.BasicAuthEnabled, proxy.BasicAuthRealm, proxy.Domain, proxy.BasicAuthExcludedPaths)
+		// Check if this is a redirect proxy
+		if proxy.ProxyType == "redirect" && proxy.RedirectURL != nil && *proxy.RedirectURL != "" {
+			config += generateRedirectLocationBlock(*proxy.RedirectURL, proxy.RedirectCode)
+		} else {
+			config += generateLocationBlockWithAuth(proxy.UpstreamTarget, proxy.BasicAuthEnabled, proxy.BasicAuthRealm, proxy.Domain, proxy.BasicAuthExcludedPaths)
+		}
 		config += "}\n"
 	}
+
+	return config
+}
+
+// generateRedirectLocationBlock creates a location block that redirects to an external URL
+func generateRedirectLocationBlock(redirectURL string, redirectCode int) string {
+	var config string
+
+	// Default to 301 if no valid code provided
+	if redirectCode == 0 {
+		redirectCode = 301
+	}
+
+	config += "    location / {\n"
+	// Check if redirect URL already has $request_uri or variables
+	if strings.Contains(redirectURL, "$") {
+		config += fmt.Sprintf("        return %d %s;\n", redirectCode, redirectURL)
+	} else {
+		// Append $request_uri to preserve the path
+		config += fmt.Sprintf("        return %d %s$request_uri;\n", redirectCode, redirectURL)
+	}
+	config += "    }\n"
 
 	return config
 }
@@ -1475,6 +1616,103 @@ func (h *Handler) dispatchProxyConfig(ctx context.Context, agentID, proxyID uuid
 	)
 }
 
+// dispatchProxyConfigFull sends nginx config to the agent with full proxy details including redirect support
+func (h *Handler) dispatchProxyConfigFull(ctx context.Context, agentID, proxyID uuid.UUID, domain, upstream, proxyType string, redirectURL *string, redirectCode *int, forceSSL, http2, includeWWW, sslEnabled bool) {
+	agentIDStr := agentID.String()
+
+	if !agentgrpc.IsAgentConnected(agentIDStr) {
+		h.logger.Warn("Agent not connected, cannot dispatch proxy config",
+			zap.String("agent_id", agentIDStr),
+			zap.String("domain", domain),
+		)
+		return
+	}
+
+	// Fetch security headers for complete config
+	var headers SecurityHeaders
+	h.db.QueryRow(ctx, `
+		SELECT id, proxy_host_id, hsts_enabled, hsts_max_age, x_frame_options,
+		       x_content_type_options, x_xss_protection, content_security_policy
+		FROM proxy_security_headers
+		WHERE proxy_host_id = $1
+	`, proxyID).Scan(
+		&headers.ID, &headers.ProxyHostID, &headers.HSTSEnabled, &headers.HSTSMaxAge,
+		&headers.XFrameOptions, &headers.XContentTypeOptions, &headers.XXSSProtection,
+		&headers.ContentSecurityPolicy,
+	)
+
+	// Fetch basic auth settings
+	var basicAuthEnabled bool
+	var basicAuthRealm string
+	var basicAuthExcludedPaths []string
+	h.db.QueryRow(ctx, `
+		SELECT COALESCE(basic_auth_enabled, false), COALESCE(basic_auth_realm, 'Restricted'),
+		       COALESCE(basic_auth_excluded_paths, '{}')
+		FROM proxy_hosts WHERE id = $1
+	`, proxyID).Scan(&basicAuthEnabled, &basicAuthRealm, &basicAuthExcludedPaths)
+
+	// Default proxy type to upstream if empty
+	if proxyType == "" {
+		proxyType = "upstream"
+	}
+
+	// Default redirect code if not provided
+	code := 301
+	if redirectCode != nil {
+		code = *redirectCode
+	}
+
+	// Build proxy host for config generation
+	proxy := ProxyHost{
+		Domain:                 domain,
+		UpstreamTarget:         upstream,
+		ProxyType:              proxyType,
+		RedirectURL:            redirectURL,
+		RedirectCode:           code,
+		ForceSSL:               forceSSL,
+		HTTP2Enabled:           http2,
+		IncludeWWW:             includeWWW,
+		SSLEnabled:             sslEnabled,
+		BasicAuthEnabled:       basicAuthEnabled,
+		BasicAuthRealm:         basicAuthRealm,
+		BasicAuthExcludedPaths: basicAuthExcludedPaths,
+	}
+
+	// Generate nginx config
+	config := generateNginxConfig(proxy, headers)
+
+	// Build config path
+	configPath := filepath.Join("/data/nginx/conf.d", sanitizeFilename(domain)+".conf")
+
+	// Create command with config content
+	cmdPayload, _ := json.Marshal(agentgrpc.NginxCommand{
+		Action:        agentgrpc.NginxActionWriteConfig,
+		ConfigContent: config,
+		ConfigPath:    configPath,
+	})
+
+	cmd := &agentgrpc.BackendMessage{
+		RequestId: uuid.New().String(),
+		Type:      "nginx",
+		Command:   cmdPayload,
+	}
+
+	// Send command (non-blocking)
+	if err := agentgrpc.SendCommandAsync(agentIDStr, cmd); err != nil {
+		h.logger.Error("Failed to dispatch proxy config",
+			zap.Error(err),
+			zap.String("domain", domain),
+		)
+		return
+	}
+
+	h.logger.Info("Dispatched proxy config to agent",
+		zap.String("agent_id", agentIDStr),
+		zap.String("domain", domain),
+		zap.String("proxy_type", proxyType),
+	)
+}
+
 // dispatchProxyConfigWithCert sends nginx config with custom certificate paths to the agent
 func (h *Handler) dispatchProxyConfigWithCert(ctx context.Context, agentID, proxyID uuid.UUID, domain, upstream string, forceSSL, http2, sslEnabled bool, certPath, keyPath string) {
 	agentIDStr := agentID.String()
@@ -1757,4 +1995,97 @@ func (h *Handler) dispatchHtpasswd(ctx context.Context, agentID, proxyID uuid.UU
 // sanitizeFilename sanitizes a domain name for use in a filename
 func sanitizeFilename(domain string) string {
 	return strings.ReplaceAll(domain, ".", "_")
+}
+
+// testNetworkConnectivity tests if a container:port is accessible from the agent
+// POST /agents/:id/proxies/test-network
+func (h *Handler) testNetworkConnectivity(c *gin.Context) {
+	orgID := c.MustGet("org_id").(uuid.UUID)
+	agentIDStr := c.Param("id")
+
+	agentID, err := uuid.Parse(agentIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid agent ID"})
+		return
+	}
+
+	// Verify agent belongs to org
+	var exists bool
+	err = h.db.QueryRow(c.Request.Context(), `
+		SELECT EXISTS(SELECT 1 FROM agents WHERE id = $1 AND org_id = $2)
+	`, agentID, orgID).Scan(&exists)
+
+	if err != nil || !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "agent not found"})
+		return
+	}
+
+	var req TestNetworkRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Validate port range
+	if req.Port < 1 || req.Port > 65535 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid port number"})
+		return
+	}
+
+	// Check if agent is connected
+	if !agentgrpc.IsAgentConnected(agentIDStr) {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "agent is not connected"})
+		return
+	}
+
+	// Create network test command
+	cmdPayload, _ := json.Marshal(map[string]interface{}{
+		"action":         "network_test",
+		"container_name": req.ContainerName,
+		"port":           req.Port,
+	})
+
+	cmd := &agentgrpc.BackendMessage{
+		RequestId: uuid.New().String(),
+		Type:      "network",
+		Command:   cmdPayload,
+	}
+
+	// Send command and wait for response
+	resp, err := agentgrpc.SendCommand(agentIDStr, cmd, 10*time.Second)
+	if err != nil {
+		h.logger.Error("Failed to test network connectivity",
+			zap.Error(err),
+			zap.String("container", req.ContainerName),
+			zap.Int("port", req.Port),
+		)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to test network connectivity"})
+		return
+	}
+
+	// Parse command result from response
+	result, err := resp.GetCommandResult()
+	if err != nil {
+		h.logger.Error("Failed to parse network test result", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse response"})
+		return
+	}
+
+	// Build response
+	response := TestNetworkResponse{
+		Reachable: result.Success,
+		Message:   result.Message,
+	}
+
+	// If data contains available ports, extract them
+	if result.Data != nil {
+		var data struct {
+			AvailablePorts []int `json:"available_ports"`
+		}
+		if err := json.Unmarshal(result.Data, &data); err == nil && len(data.AvailablePorts) > 0 {
+			response.AvailablePorts = data.AvailablePorts
+		}
+	}
+
+	c.JSON(http.StatusOK, response)
 }
