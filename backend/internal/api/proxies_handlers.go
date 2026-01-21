@@ -1445,7 +1445,7 @@ func (h *Handler) dispatchProxyConfig(ctx context.Context, agentID, proxyID uuid
 	config := generateNginxConfig(proxy, headers)
 
 	// Build config path
-	configPath := filepath.Join("/etc/nginx/conf.d", domain+".conf")
+	configPath := filepath.Join("/data/nginx/conf.d", sanitizeFilename(domain)+".conf")
 
 	// Create command with config content
 	cmdPayload, _ := json.Marshal(agentgrpc.NginxCommand{
@@ -1514,7 +1514,7 @@ func (h *Handler) dispatchProxyConfigWithCert(ctx context.Context, agentID, prox
 	config := generateNginxConfig(proxy, headers)
 
 	// Build config path
-	configPath := filepath.Join("/etc/nginx/conf.d", domain+".conf")
+	configPath := filepath.Join("/data/nginx/conf.d", sanitizeFilename(domain)+".conf")
 
 	// Create command with config content
 	cmdPayload, _ := json.Marshal(agentgrpc.NginxCommand{
@@ -1557,7 +1557,7 @@ func (h *Handler) dispatchDeleteProxy(agentID uuid.UUID, domain string) {
 	}
 
 	// Build config path to delete
-	configPath := filepath.Join("/etc/nginx/conf.d", domain+".conf")
+	configPath := filepath.Join("/data/nginx/conf.d", sanitizeFilename(domain)+".conf")
 
 	// Create delete command (write empty config will fail validation, so we use a different approach)
 	// The agent should delete the file and reload nginx
