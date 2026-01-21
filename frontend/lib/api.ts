@@ -154,6 +154,7 @@ export interface ProxyHost {
   include_www: boolean;
   basic_auth_enabled: boolean;
   basic_auth_realm?: string;
+  basic_auth_excluded_paths?: string[];
   is_system_proxy: boolean;
   status: string;
   created_at: string;
@@ -3248,6 +3249,7 @@ export const api = {
       include_www: boolean;
       basic_auth_enabled: boolean;
       basic_auth_realm: string;
+      basic_auth_excluded_paths: string[];
       status: string;
     }>
   ) =>
