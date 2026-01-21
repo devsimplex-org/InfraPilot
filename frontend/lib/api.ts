@@ -151,6 +151,7 @@ export interface ProxyHost {
   ssl_expires_at: string | null;
   force_ssl: boolean;
   http2_enabled: boolean;
+  include_www: boolean;
   status: string;
   created_at: string;
   updated_at: string;
