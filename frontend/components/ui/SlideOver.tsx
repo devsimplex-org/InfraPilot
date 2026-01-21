@@ -15,6 +15,10 @@ export interface SlideOverProps {
   children: ReactNode;
   size?: 'sm' | 'md' | 'lg' | 'xl' | 'full';
   className?: string;
+  /**
+   * Optional title - if provided, automatically renders a header
+   */
+  title?: string;
 }
 
 export interface SlideOverHeaderProps {
@@ -141,6 +145,7 @@ export function SlideOver({
   children,
   size = 'md',
   className,
+  title,
 }: SlideOverProps) {
   // Prevent body scroll when SlideOver is open
   useEffect(() => {
@@ -196,7 +201,12 @@ export function SlideOver({
                       className
                     )}
                   >
-                    {children}
+                    {title && (
+                      <SlideOverHeader onClose={onClose}>
+                        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{title}</h2>
+                      </SlideOverHeader>
+                    )}
+                    {title ? <SlideOverBody>{children}</SlideOverBody> : children}
                   </div>
                 </Dialog.Panel>
               </Transition.Child>

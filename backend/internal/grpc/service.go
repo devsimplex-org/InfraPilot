@@ -456,21 +456,26 @@ func (m *AgentMessage) GetDNSChallengeResult() (*DNSChallengeResult, error) {
 
 // NginxCommand actions (string-based for JSON serialization)
 const (
-	NginxActionGetConfig   = "get_config"
-	NginxActionWriteConfig = "write_config"
-	NginxActionTestConfig  = "test_config"
-	NginxActionReload      = "reload"
-	NginxActionGetStatus   = "get_status"
-	NginxActionRequestSSL  = "request_ssl"
+	NginxActionGetConfig     = "get_config"
+	NginxActionWriteConfig   = "write_config"
+	NginxActionTestConfig    = "test_config"
+	NginxActionReload        = "reload"
+	NginxActionGetStatus     = "get_status"
+	NginxActionRequestSSL    = "request_ssl"
+	NginxActionWriteHtpasswd = "write_htpasswd"
+	NginxActionDeleteHtpasswd = "delete_htpasswd"
 )
 
 type NginxCommand struct {
-	Action        string `json:"action"`
-	ConfigContent string `json:"config_content,omitempty"`
-	ConfigPath    string `json:"config_path,omitempty"`
-	Domain        string `json:"domain,omitempty"`
-	Email         string `json:"email,omitempty"`
-	DNSProvider   string `json:"dns_provider,omitempty"`
+	Action          string `json:"action"`
+	ConfigContent   string `json:"config_content,omitempty"`
+	ConfigPath      string `json:"config_path,omitempty"`
+	Domain          string `json:"domain,omitempty"`
+	Email           string `json:"email,omitempty"`
+	DNSProvider     string `json:"dns_provider,omitempty"`
+	IncludeWWW      bool   `json:"include_www,omitempty"`
+	HtpasswdContent string `json:"htpasswd_content,omitempty"`
+	HtpasswdPath    string `json:"htpasswd_path,omitempty"`
 }
 
 // DockerCommand actions
@@ -652,6 +657,21 @@ func NewNginxSSLCommand(domain, email, dnsProvider string) *BackendMessage {
 	}
 }
 
+// NewNginxSSLCommandWithWWW creates a command to request SSL certificate with optional www subdomain
+func NewNginxSSLCommandWithWWW(domain, email, dnsProvider string, includeWWW bool) *BackendMessage {
+	return &BackendMessage{
+		RequestId: uuid.New().String(),
+		Type:      "nginx",
+		Command: mustMarshal(NginxCommand{
+			Action:      NginxActionRequestSSL,
+			Domain:      domain,
+			Email:       email,
+			DNSProvider: dnsProvider,
+			IncludeWWW:  includeWWW,
+		}),
+	}
+}
+
 // NewNetworkAttachCommand creates a command to attach nginx to a network
 func NewNetworkAttachCommand(networkID string) *BackendMessage {
 	return &BackendMessage{
@@ -691,6 +711,7 @@ type SSLCommand struct {
 	DNSProvider string `json:"dns_provider,omitempty"`
 	Staging     bool   `json:"staging,omitempty"`
 	ForceRenew  bool   `json:"force_renew,omitempty"`
+	IncludeWWW  bool   `json:"include_www,omitempty"`
 }
 
 // SSLCheckResult represents the result of an SSL check
@@ -730,7 +751,7 @@ func NewSSLCheckCommand(domain string) *BackendMessage {
 }
 
 // NewSSLRequestCommand creates a command to request an SSL certificate
-func NewSSLRequestCommand(domain, email, dnsProvider string, staging bool) *BackendMessage {
+func NewSSLRequestCommand(domain, email, dnsProvider string, staging, includeWWW bool) *BackendMessage {
 	return &BackendMessage{
 		RequestId: uuid.New().String(),
 		Type:      "ssl",
@@ -740,6 +761,7 @@ func NewSSLRequestCommand(domain, email, dnsProvider string, staging bool) *Back
 			Email:       email,
 			DNSProvider: dnsProvider,
 			Staging:     staging,
+			IncludeWWW:  includeWWW,
 		}),
 	}
 }
@@ -793,6 +815,31 @@ func NewSSLGetDNSChallengeCommand(domain string) *BackendMessage {
 		Command: mustMarshal(SSLCommand{
 			Action: SSLActionGetDNSChallenge,
 			Domain: domain,
+		}),
+	}
+}
+
+// NewNginxWriteHtpasswdCommand creates a command to write htpasswd file
+func NewNginxWriteHtpasswdCommand(htpasswdContent, htpasswdPath string) *BackendMessage {
+	return &BackendMessage{
+		RequestId: uuid.New().String(),
+		Type:      "nginx",
+		Command: mustMarshal(NginxCommand{
+			Action:          NginxActionWriteHtpasswd,
+			HtpasswdContent: htpasswdContent,
+			HtpasswdPath:    htpasswdPath,
+		}),
+	}
+}
+
+// NewNginxDeleteHtpasswdCommand creates a command to delete htpasswd file
+func NewNginxDeleteHtpasswdCommand(htpasswdPath string) *BackendMessage {
+	return &BackendMessage{
+		RequestId: uuid.New().String(),
+		Type:      "nginx",
+		Command: mustMarshal(NginxCommand{
+			Action:       NginxActionDeleteHtpasswd,
+			HtpasswdPath: htpasswdPath,
 		}),
 	}
 }

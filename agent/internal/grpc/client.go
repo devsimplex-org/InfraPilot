@@ -48,12 +48,15 @@ type AgentMessage struct {
 }
 
 type NginxCommand struct {
-	Action        string `json:"action"`
-	ConfigContent string `json:"config_content"`
-	ConfigPath    string `json:"config_path"`
-	Domain        string `json:"domain"`
-	Email         string `json:"email"`
-	DNSProvider   string `json:"dns_provider"`
+	Action          string `json:"action"`
+	ConfigContent   string `json:"config_content"`
+	ConfigPath      string `json:"config_path"`
+	Domain          string `json:"domain"`
+	Email           string `json:"email"`
+	DNSProvider     string `json:"dns_provider"`
+	IncludeWWW      bool   `json:"include_www"`
+	HtpasswdContent string `json:"htpasswd_content"`
+	HtpasswdPath    string `json:"htpasswd_path"`
 }
 
 type NetworkCommand struct {

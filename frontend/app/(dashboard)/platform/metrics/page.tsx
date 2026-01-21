@@ -181,7 +181,7 @@ export default function MetricsPage() {
   });
 
   const metrics = metricsData?.metrics || [];
-  const summary = summaryData || [];
+  const summary = summaryData?.summaries || [];
   const dashboards = dashboardsData?.dashboards || [];
   const reports = reportsData?.reports || [];
   const executions = executionsData?.executions || [];

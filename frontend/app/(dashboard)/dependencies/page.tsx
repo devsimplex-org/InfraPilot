@@ -541,9 +541,10 @@ export default function DependenciesPage() {
           <Table
             data={services}
             columns={serviceColumns}
-            isLoading={loadingServices}
+            keyExtractor={(row) => row.id}
+            loading={loadingServices}
             onRowClick={setSelectedService}
-            emptyMessage="No external services configured"
+            emptyState="No external services configured"
           />
         </div>
       )}
@@ -554,8 +555,9 @@ export default function DependenciesPage() {
           <Table
             data={dependencies}
             columns={dependencyColumns}
-            isLoading={loadingDependencies}
-            emptyMessage="No dependencies mapped"
+            keyExtractor={(row) => row.id}
+            loading={loadingDependencies}
+            emptyState="No dependencies mapped"
           />
         </div>
       )}
@@ -592,8 +594,9 @@ export default function DependenciesPage() {
             <Table
               data={risks}
               columns={riskColumns}
-              isLoading={loadingRisks}
-              emptyMessage="No dependency risks identified"
+              keyExtractor={(row, index) => `${row.source_name}-${row.external_service_name}-${index}`}
+              loading={loadingRisks}
+              emptyState="No dependency risks identified"
             />
           </div>
         </div>
@@ -605,9 +608,10 @@ export default function DependenciesPage() {
           <Table
             data={incidents}
             columns={incidentColumns}
-            isLoading={loadingIncidents}
+            keyExtractor={(row) => row.id}
+            loading={loadingIncidents}
             onRowClick={setSelectedIncident}
-            emptyMessage="No incidents recorded"
+            emptyState="No incidents recorded"
           />
         </div>
       )}

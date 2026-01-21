@@ -7,12 +7,22 @@ export interface StatCardProps {
   /**
    * The main label for the stat
    */
-  label: string;
+  label?: string;
+
+  /**
+   * Alias for label (backward compatibility)
+   */
+  title?: string;
 
   /**
    * The value to display (usually a number)
    */
   value: number | string;
+
+  /**
+   * Variant for color theming
+   */
+  variant?: 'default' | 'success' | 'warning' | 'error' | 'danger' | 'info';
 
   /**
    * Optional description or secondary text
@@ -55,19 +65,32 @@ export interface StatCardProps {
   onClick?: () => void;
 }
 
+const variantIconColors = {
+  default: 'text-primary-600',
+  success: 'text-green-600',
+  warning: 'text-yellow-600',
+  error: 'text-red-600',
+  danger: 'text-red-600',
+  info: 'text-blue-600',
+};
+
 export function StatCard({
   label,
+  title,
   value,
+  variant = 'default',
   description,
   icon: Icon,
   trend,
   trendValue,
-  iconColor = 'text-primary-600',
+  iconColor,
   valueColor = 'text-gray-900 dark:text-white',
   className,
   onClick,
 }: StatCardProps) {
   const isClickable = !!onClick;
+  const displayLabel = label || title;
+  const finalIconColor = iconColor || variantIconColors[variant];
 
   return (
     <Card
@@ -80,7 +103,7 @@ export function StatCard({
         <div className="flex items-center justify-between">
           <div className="flex-1">
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">
-              {label}
+              {displayLabel}
             </p>
             <p className={cn('text-2xl font-bold mt-1', valueColor)}>
               {typeof value === 'number' ? value.toLocaleString() : value}
@@ -112,7 +135,7 @@ export function StatCard({
             )}
           </div>
           {Icon && (
-            <div className={cn('p-3 rounded-lg bg-gray-100 dark:bg-gray-800', iconColor)}>
+            <div className={cn('p-3 rounded-lg bg-gray-100 dark:bg-gray-800', finalIconColor)}>
               <Icon className="h-8 w-8" />
             </div>
           )}

@@ -23,9 +23,10 @@ import {
   Settings,
   Loader2,
 } from "lucide-react";
-import { api, Container, SecurityHeaders, RateLimit } from "@/lib/api";
+import { api, Container, SecurityHeaders, RateLimit, ProxyHost } from "@/lib/api";
 import { formatRelativeTime, cn } from "@/lib/utils";
 import { SSLWizard } from "@/components/ssl-wizard";
+import { ProxyConfigForm } from "@/components/ProxyConfigForm";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
@@ -42,20 +43,6 @@ import {
   Tabs,
   Input,
 } from "@/components/ui/page-layout";
-
-interface ProxyHost {
-  id: string;
-  agent_id: string;
-  domain: string;
-  upstream_target: string;
-  ssl_enabled: boolean;
-  ssl_expires_at: string | null;
-  force_ssl: boolean;
-  http2_enabled: boolean;
-  status: string;
-  created_at: string;
-  updated_at: string;
-}
 
 type PanelTab = "details" | "security" | "ratelimits" | "config";
 type UpstreamMode = "manual" | "container";
@@ -77,6 +64,7 @@ export default function ProxiesPage() {
     upstream_target: "",
     force_ssl: true,
     http2_enabled: true,
+    include_www: false,
   });
 
   // Edit form state
@@ -85,6 +73,7 @@ export default function ProxiesPage() {
     upstream_target: "",
     force_ssl: true,
     http2_enabled: true,
+    include_www: false,
   });
 
   // Network warning state
@@ -121,6 +110,7 @@ export default function ProxiesPage() {
   const [showSSLWizard, setShowSSLWizard] = useState(false);
   const [sslWizardDomain, setSSLWizardDomain] = useState("");
   const [sslWizardProxyId, setSSLWizardProxyId] = useState("");
+  const [sslWizardIncludeWWW, setSSLWizardIncludeWWW] = useState(false);
 
   // Fetch agents
   const { data: agents } = useQuery({
@@ -181,6 +171,7 @@ export default function ProxiesPage() {
         upstream_target: selectedProxy.upstream_target,
         force_ssl: selectedProxy.force_ssl,
         http2_enabled: selectedProxy.http2_enabled,
+        include_www: selectedProxy.include_www,
       });
 
       // Load security headers
@@ -314,9 +305,18 @@ export default function ProxiesPage() {
     },
   });
 
+  // Nginx operations
+  const testNginxMutation = useMutation({
+    mutationFn: () => (selectedAgent ? api.testNginxConfig(selectedAgent) : Promise.reject("No agent")),
+  });
+
+  const reloadNginxMutation = useMutation({
+    mutationFn: () => (selectedAgent ? api.reloadNginx(selectedAgent) : Promise.reject("No agent")),
+  });
+
   // Helper functions
   const resetForm = () => {
-    setNewProxy({ domain: "", upstream_target: "", force_ssl: true, http2_enabled: true });
+    setNewProxy({ domain: "", upstream_target: "", force_ssl: true, http2_enabled: true, include_www: false });
     setUpstreamMode("manual");
     setSelectedContainer(null);
     setContainerPort("80");
@@ -650,18 +650,20 @@ export default function ProxiesPage() {
 
       case "config":
         return (
-          <div className="h-full">
-            {configLoading ? (
-              <div className="flex items-center justify-center h-32">
-                <Spinner />
-              </div>
-            ) : (
-              <div className="bg-gray-900 rounded-lg p-4 overflow-auto max-h-[500px]">
-                <pre className="text-xs text-gray-300 font-mono whitespace-pre-wrap">
-                  {configContent}
-                </pre>
-              </div>
-            )}
+          <div className="h-full overflow-auto">
+            <ProxyConfigForm
+              proxy={selectedProxy}
+              agentId={selectedAgent!}
+              securityHeaders={securityHeaders}
+              onSave={async (proxyData, headerData) => {
+                // Update proxy
+                await api.updateProxyHost(selectedAgent!, selectedProxy.id, proxyData);
+                // Update security headers
+                await api.updateSecurityHeaders(selectedAgent!, selectedProxy.id, headerData);
+                // Refresh data
+                queryClient.invalidateQueries({ queryKey: ["proxies", selectedAgent] });
+              }}
+            />
           </div>
         );
 
@@ -688,7 +690,7 @@ export default function ProxiesPage() {
                   onChange={(e) => setEditProxy({ ...editProxy, upstream_target: e.target.value })}
                   required
                 />
-                <div className="flex items-center gap-4">
+                <div className="flex flex-wrap items-center gap-4">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
@@ -706,6 +708,15 @@ export default function ProxiesPage() {
                       className="w-4 h-4 rounded"
                     />
                     <span className="text-sm">HTTP/2</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editProxy.include_www}
+                      onChange={(e) => setEditProxy({ ...editProxy, include_www: e.target.checked })}
+                      className="w-4 h-4 rounded"
+                    />
+                    <span className="text-sm">Include www</span>
                   </label>
                 </div>
                 <div className="flex gap-2">
@@ -807,6 +818,9 @@ export default function ProxiesPage() {
                       {selectedProxy.http2_enabled && (
                         <Badge>HTTP/2</Badge>
                       )}
+                      {selectedProxy.include_www && (
+                        <Badge>Include www</Badge>
+                      )}
                     </div>
                     {!selectedProxy.ssl_enabled && selectedProxy.status !== "ssl_pending" && (
                       <Button
@@ -816,6 +830,7 @@ export default function ProxiesPage() {
                         onClick={() => {
                           setSSLWizardDomain(selectedProxy.domain);
                           setSSLWizardProxyId(selectedProxy.id);
+                          setSSLWizardIncludeWWW(selectedProxy.include_www);
                           setShowSSLWizard(true);
                         }}
                       >
@@ -848,6 +863,9 @@ export default function ProxiesPage() {
         <div className="flex items-center gap-2">
           <Globe className="h-4 w-4 text-gray-400" />
           <span className="font-medium">{value}</span>
+          {row.is_system_proxy && (
+            <Badge color="blue" size="sm">InfraPilot</Badge>
+          )}
           <StatusIndicator status={getSSLStatus(row)} showLabel={false} size="sm" />
         </div>
       ),
@@ -893,16 +911,91 @@ export default function ProxiesPage() {
           />
         }
         action={
-          <Button
-            variant="primary"
-            icon={Plus}
-            onClick={() => setShowCreateModal(true)}
-            disabled={!selectedAgent}
-          >
-            Add Proxy Host
-          </Button>
+          <div className="flex items-center gap-2">
+            {/* Nginx Operations */}
+            <button
+              onClick={() => testNginxMutation.mutate()}
+              disabled={!selectedAgent || testNginxMutation.isPending}
+              className={cn(
+                "px-3 py-2 text-sm rounded-lg transition-colors flex items-center gap-1.5",
+                testNginxMutation.isSuccess && testNginxMutation.data?.success
+                  ? "bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/30"
+                  : testNginxMutation.isError || (testNginxMutation.isSuccess && !testNginxMutation.data?.success)
+                  ? "bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/30"
+                  : "bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50"
+              )}
+              title={testNginxMutation.data?.message || "Test nginx configuration"}
+            >
+              {testNginxMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : testNginxMutation.isSuccess && testNginxMutation.data?.success ? (
+                <Check className="h-4 w-4" />
+              ) : (
+                <AlertTriangle className="h-4 w-4" />
+              )}
+              {testNginxMutation.isPending ? "Testing..." : "Test Config"}
+            </button>
+            <button
+              onClick={() => reloadNginxMutation.mutate()}
+              disabled={!selectedAgent || reloadNginxMutation.isPending}
+              className={cn(
+                "px-3 py-2 text-sm rounded-lg transition-colors flex items-center gap-1.5",
+                reloadNginxMutation.isSuccess && reloadNginxMutation.data?.success
+                  ? "bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/30"
+                  : reloadNginxMutation.isError
+                  ? "bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/30"
+                  : "bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50"
+              )}
+              title={reloadNginxMutation.data?.message || "Reload nginx"}
+            >
+              {reloadNginxMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              {reloadNginxMutation.isPending ? "Reloading..." : "Reload Nginx"}
+            </button>
+            <Button
+              variant="primary"
+              icon={Plus}
+              onClick={() => setShowCreateModal(true)}
+              disabled={!selectedAgent}
+            >
+              Add Proxy Host
+            </Button>
+          </div>
         }
       />
+
+      {/* Nginx operation status messages */}
+      {(testNginxMutation.isSuccess || testNginxMutation.isError || reloadNginxMutation.isSuccess || reloadNginxMutation.isError) && (
+        <div
+          className={cn(
+            "p-3 rounded-lg text-sm flex items-center justify-between",
+            (testNginxMutation.data?.success || reloadNginxMutation.data?.success)
+              ? "bg-green-500/10 border border-green-500/30 text-green-700 dark:text-green-400"
+              : "bg-red-500/10 border border-red-500/30 text-red-700 dark:text-red-400"
+          )}
+        >
+          <div className="flex items-center gap-2">
+            {(testNginxMutation.data?.success || reloadNginxMutation.data?.success) ? (
+              <Check className="h-4 w-4" />
+            ) : (
+              <AlertTriangle className="h-4 w-4" />
+            )}
+            <span>{testNginxMutation.data?.message || reloadNginxMutation.data?.message || "Operation failed"}</span>
+          </div>
+          <button
+            onClick={() => {
+              testNginxMutation.reset();
+              reloadNginxMutation.reset();
+            }}
+            className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       {/* Metrics */}
       {selectedAgent && (
@@ -999,9 +1092,14 @@ export default function ProxiesPage() {
       <SlideOver isOpen={!!selectedProxy} onClose={() => setSelectedProxy(null)} size="lg">
         <SlideOver.Header onClose={() => setSelectedProxy(null)}>
           <div>
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-              {selectedProxy?.domain}
-            </h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                {selectedProxy?.domain}
+              </h2>
+              {selectedProxy?.is_system_proxy && (
+                <Badge color="blue" size="sm">InfraPilot</Badge>
+              )}
+            </div>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               {selectedProxy?.upstream_target}
             </p>
@@ -1154,7 +1252,7 @@ export default function ProxiesPage() {
                 </>
               )}
 
-              <div className="flex items-center gap-4">
+              <div className="flex flex-wrap items-center gap-4">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
@@ -1172,6 +1270,15 @@ export default function ProxiesPage() {
                     className="w-4 h-4 rounded"
                   />
                   <span className="text-sm text-gray-700 dark:text-gray-300">HTTP/2</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newProxy.include_www}
+                    onChange={(e) => setNewProxy({ ...newProxy, include_www: e.target.checked })}
+                    className="w-4 h-4 rounded"
+                  />
+                  <span className="text-sm text-gray-700 dark:text-gray-300">Include www</span>
                 </label>
               </div>
 
@@ -1243,6 +1350,7 @@ export default function ProxiesPage() {
         onOpenChange={setShowSSLWizard}
         agentId={selectedAgent || undefined}
         proxyId={sslWizardProxyId || undefined}
+        includeWWW={sslWizardIncludeWWW}
         onSuccess={() => {
           queryClient.invalidateQueries({ queryKey: ["proxies", selectedAgent] });
         }}

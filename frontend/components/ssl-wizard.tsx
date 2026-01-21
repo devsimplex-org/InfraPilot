@@ -31,6 +31,8 @@ interface SSLWizardProps {
   // For regular proxy hosts (not system domain)
   agentId?: string;
   proxyId?: string;
+  // Whether to include www subdomain in SSL cert
+  includeWWW?: boolean;
 }
 
 type WizardStep = "check" | "source" | "wildcard" | "dns" | "email" | "request" | "dns_challenge" | "dns_verify" | "complete";
@@ -42,6 +44,7 @@ export function SSLWizard({
   onSuccess,
   agentId,
   proxyId,
+  includeWWW = false,
 }: SSLWizardProps) {
   // Check if this is for a regular proxy (not system domain)
   const isRegularProxy = !!(agentId && proxyId);
@@ -130,7 +133,7 @@ export function SSLWizard({
     setError(null);
     try {
       const [dnsCheck, instructions] = await Promise.all([
-        api.verifyDNS(domain),
+        api.verifyDNS(domain, includeWWW),
         api.getDNSInstructions(domain),
       ]);
       setDnsResult(dnsCheck);
@@ -911,22 +914,69 @@ export function SSLWizard({
                     </div>
                   </div>
 
+                  {/* Show individual domain results when include_www is enabled */}
+                  {includeWWW && (dnsResult as any).www_result && (
+                    <div className="space-y-2">
+                      <div className={cn(
+                        "p-3 rounded-lg border flex items-center gap-2",
+                        (dnsResult as any).main_result?.matches
+                          ? "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800"
+                          : "bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800"
+                      )}>
+                        {(dnsResult as any).main_result?.matches ? (
+                          <Check className="h-4 w-4 text-green-500" />
+                        ) : (
+                          <X className="h-4 w-4 text-yellow-500" />
+                        )}
+                        <span className="text-sm">{domain}: {(dnsResult as any).main_result?.resolved_ips?.join(", ") || "Not resolved"}</span>
+                      </div>
+                      <div className={cn(
+                        "p-3 rounded-lg border flex items-center gap-2",
+                        (dnsResult as any).www_result?.matches
+                          ? "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800"
+                          : "bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800"
+                      )}>
+                        {(dnsResult as any).www_result?.matches ? (
+                          <Check className="h-4 w-4 text-green-500" />
+                        ) : (
+                          <X className="h-4 w-4 text-yellow-500" />
+                        )}
+                        <span className="text-sm">www.{domain}: {(dnsResult as any).www_result?.resolved_ips?.join(", ") || "Not resolved"}</span>
+                      </div>
+                    </div>
+                  )}
+
                   {/* DNS Instructions */}
                   {!dnsResult.matches && (
                     <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
                       <h4 className="font-medium text-gray-900 dark:text-white mb-2">
-                        Add this DNS record:
+                        Add {includeWWW ? "these DNS records" : "this DNS record"}:
                       </h4>
-                      <div className="bg-white dark:bg-gray-900 p-3 rounded font-mono text-sm flex items-center justify-between border border-gray-200 dark:border-gray-700">
-                        <span className="text-gray-900 dark:text-white">
-                          A {domain} {serverIP || dnsResult.expected_ip}
-                        </span>
-                        <button
-                          onClick={() => copyToClipboard(`${domain} A ${serverIP || dnsResult.expected_ip}`)}
-                          className="p-1 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300"
-                        >
-                          <Copy className="h-4 w-4" />
-                        </button>
+                      <div className="space-y-2">
+                        <div className="bg-white dark:bg-gray-900 p-3 rounded font-mono text-sm flex items-center justify-between border border-gray-200 dark:border-gray-700">
+                          <span className="text-gray-900 dark:text-white">
+                            A {domain} {serverIP || dnsResult.expected_ip}
+                          </span>
+                          <button
+                            onClick={() => copyToClipboard(`${domain} A ${serverIP || dnsResult.expected_ip}`)}
+                            className="p-1 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300"
+                          >
+                            <Copy className="h-4 w-4" />
+                          </button>
+                        </div>
+                        {includeWWW && (
+                          <div className="bg-white dark:bg-gray-900 p-3 rounded font-mono text-sm flex items-center justify-between border border-gray-200 dark:border-gray-700">
+                            <span className="text-gray-900 dark:text-white">
+                              A www.{domain} {serverIP || dnsResult.expected_ip}
+                            </span>
+                            <button
+                              onClick={() => copyToClipboard(`www.${domain} A ${serverIP || dnsResult.expected_ip}`)}
+                              className="p-1 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300"
+                            >
+                              <Copy className="h-4 w-4" />
+                            </button>
+                          </div>
+                        )}
                       </div>
                       <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
                         DNS changes can take 1-48 hours to propagate. Usually 1-5 minutes.
@@ -1232,15 +1282,24 @@ export function SSLWizard({
                   Request Certificate
                 </h3>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Ready to request SSL certificate for {domain}
+                  Ready to request SSL certificate for {includeWWW ? `${domain} and www.${domain}` : domain}
                 </p>
               </div>
 
               <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 space-y-3">
-                <div className="flex items-center gap-2">
-                  <Globe className="h-4 w-4 text-gray-400" />
-                  <span className="font-medium text-gray-700 dark:text-gray-300">Domain:</span>
-                  <span className="text-gray-900 dark:text-white">{domain}</span>
+                <div className="flex items-start gap-2">
+                  <Globe className="h-4 w-4 text-gray-400 mt-0.5" />
+                  <span className="font-medium text-gray-700 dark:text-gray-300">{includeWWW ? "Domains:" : "Domain:"}</span>
+                  <div className="text-gray-900 dark:text-white">
+                    {includeWWW ? (
+                      <div className="flex flex-col">
+                        <span>{domain}</span>
+                        <span>www.{domain}</span>
+                      </div>
+                    ) : (
+                      <span>{domain}</span>
+                    )}
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <Mail className="h-4 w-4 text-gray-400" />
@@ -1301,7 +1360,7 @@ export function SSLWizard({
                   SSL Certificate Issued!
                 </h3>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                  {resultMessage || `SSL certificate has been issued for ${domain}`}
+                  {resultMessage || `SSL certificate has been issued for ${includeWWW ? `${domain} and www.${domain}` : domain}`}
                 </p>
               </div>
 

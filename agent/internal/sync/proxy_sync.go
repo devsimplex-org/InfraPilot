@@ -24,6 +24,7 @@ type ProxyHost struct {
 	SSLKeyPath     *string `json:"ssl_key_path,omitempty"`
 	ForceSSL       bool    `json:"force_ssl"`
 	HTTP2Enabled   bool    `json:"http2_enabled"`
+	IncludeWWW     bool    `json:"include_www"`
 	Status         string  `json:"status"`
 	IsSystemProxy  bool    `json:"is_system_proxy"`
 }
@@ -109,6 +110,7 @@ func (s *ProxySyncer) syncProxies(ctx context.Context) {
 			SSLEnabled:   proxy.SSLEnabled,
 			ForceSSL:     proxy.ForceSSL,
 			HTTP2Enabled: proxy.HTTP2Enabled,
+			IncludeWWW:   proxy.IncludeWWW,
 		}
 
 		// Use custom SSL paths if provided (e.g., for wildcard certs)
