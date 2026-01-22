@@ -113,6 +113,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				// Proxy hosts
 				agents.GET("/:id/proxies", h.listProxyHosts)
 				agents.POST("/:id/proxies", h.RequireModifyProxy(), h.createProxyHost)
+				agents.POST("/:id/proxies/test-network", h.RequireModifyProxy(), h.testNetworkConnectivity)
 				agents.GET("/:id/proxies/:pid", h.getProxyHost)
 				agents.PUT("/:id/proxies/:pid", h.RequireModifyProxy(), h.updateProxyHost)
 				agents.DELETE("/:id/proxies/:pid", h.RequireModifyProxy(), h.deleteProxyHost)
@@ -741,7 +742,7 @@ func (h *Handler) dispatchDefaultPageConfigOnStartup(ctx context.Context) {
 			// Determine htpasswd path for this proxy (use sanitized domain)
 			htpasswdPath := ""
 			if basicAuthEnabled {
-				htpasswdPath = fmt.Sprintf("/etc/nginx/conf.d/.htpasswd_%s", strings.ReplaceAll(domain, ".", "_"))
+				htpasswdPath = fmt.Sprintf("/data/nginx/conf.d/.htpasswd_%s", strings.ReplaceAll(domain, ".", "_"))
 			}
 
 			// Dispatch the InfraPilot system proxy config (routes /api to backend)

@@ -290,7 +290,7 @@ func (h *Handler) updateInfraPilotDomain(c *gin.Context) {
 	// Determine htpasswd path for this proxy (use sanitized domain)
 	htpasswdPath := ""
 	if basicAuthEnabled {
-		htpasswdPath = fmt.Sprintf("/etc/nginx/conf.d/.htpasswd_%s", strings.ReplaceAll(req.Domain, ".", "_"))
+		htpasswdPath = fmt.Sprintf("/data/nginx/conf.d/.htpasswd_%s", strings.ReplaceAll(req.Domain, ".", "_"))
 	}
 
 	// Dispatch the special InfraPilot nginx config to the agent
@@ -386,8 +386,8 @@ func (h *Handler) dispatchInfraPilotProxyConfigWithCert(ctx interface{}, agentID
 	// Generate special InfraPilot nginx config that routes /api to backend
 	config := generateInfraPilotNginxConfig(domain, forceSSL, http2, sslEnabled, certPath, keyPath, basicAuthEnabled, basicAuthRealm, htpasswdPath)
 
-	// Build config path
-	configPath := filepath.Join("/etc/nginx/sites", domain+".conf")
+	// Build config path (same location as regular proxies)
+	configPath := filepath.Join("/data/nginx/conf.d", domain+".conf")
 
 	// Create command with config content
 	cmdPayload, _ := json.Marshal(agentgrpc.NginxCommand{
