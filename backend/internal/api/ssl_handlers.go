@@ -456,28 +456,31 @@ func (h *Handler) requestSSLCertificate(c *gin.Context) {
 		// Update proxy_hosts to enable SSL and regenerate nginx config
 		var proxyID uuid.UUID
 		var forceSSL, http2Enabled, isSystemProxy, includeWWW bool
+		var upstream, proxyType string
+		var redirectURL *string
+		var redirectCode *int
 		err := h.db.QueryRow(c.Request.Context(), `
 			UPDATE proxy_hosts SET ssl_enabled = true, force_ssl = true, status = 'active', updated_at = NOW()
 			WHERE agent_id = $1 AND domain = $2
-			RETURNING id, force_ssl, http2_enabled, is_system_proxy, include_www
-		`, agentID, req.Domain).Scan(&proxyID, &forceSSL, &http2Enabled, &isSystemProxy, &includeWWW)
+			RETURNING id, force_ssl, http2_enabled, is_system_proxy, include_www,
+			          COALESCE(upstream_target, ''), COALESCE(proxy_type, 'upstream'), redirect_url, redirect_code
+		`, agentID, req.Domain).Scan(&proxyID, &forceSSL, &http2Enabled, &isSystemProxy, &includeWWW,
+			&upstream, &proxyType, &redirectURL, &redirectCode)
 
 		if err == nil {
 			h.logger.Info("Updated proxy_hosts for SSL",
 				zap.String("domain", req.Domain),
 				zap.String("proxy_id", proxyID.String()),
+				zap.String("proxy_type", proxyType),
 			)
 
 			// Regenerate and dispatch nginx config with SSL enabled
 			if isSystemProxy {
 				go h.dispatchInfraPilotProxyConfig(c.Request.Context(), agentID, proxyID, req.Domain, true, http2Enabled, true)
 			} else {
-				// For regular proxies, get upstream and dispatch
-				var upstream string
-				h.db.QueryRow(c.Request.Context(), `SELECT upstream_target FROM proxy_hosts WHERE id = $1`, proxyID).Scan(&upstream)
-				if upstream != "" {
-					go h.dispatchProxyConfig(c.Request.Context(), agentID, proxyID, req.Domain, upstream, true, http2Enabled, includeWWW, true)
-				}
+				// For regular proxies (upstream or redirect), dispatch full config
+				go h.dispatchProxyConfigFull(c.Request.Context(), agentID, proxyID, req.Domain, upstream,
+					proxyType, redirectURL, redirectCode, forceSSL, http2Enabled, includeWWW, true)
 			}
 		} else {
 			h.logger.Warn("Could not find proxy_host to update SSL status",
@@ -1338,20 +1341,37 @@ func (h *Handler) completeDNSChallenge(c *gin.Context) {
 			)
 		}
 
-		// Update proxy_hosts if applicable
+		// Update proxy_hosts if applicable and regenerate nginx config
 		var proxyID uuid.UUID
-		var forceSSL, http2Enabled, isSystemProxy bool
+		var forceSSL, http2Enabled, isSystemProxy, includeWWW bool
+		var proxyDomain, upstream, proxyType string
+		var redirectURL *string
+		var redirectCode *int
 		err := h.db.QueryRow(c.Request.Context(), `
 			UPDATE proxy_hosts SET ssl_enabled = true, force_ssl = true, status = 'active', updated_at = NOW()
 			WHERE agent_id = $1 AND (domain = $2 OR domain LIKE $3)
-			RETURNING id, force_ssl, http2_enabled, is_system_proxy
-		`, agentID, req.Domain, "%."+strings.TrimPrefix(req.Domain, "*.")).Scan(&proxyID, &forceSSL, &http2Enabled, &isSystemProxy)
+			RETURNING id, domain, force_ssl, http2_enabled, is_system_proxy, include_www,
+			          COALESCE(upstream_target, ''), COALESCE(proxy_type, 'upstream'), redirect_url, redirect_code
+		`, agentID, req.Domain, "%."+strings.TrimPrefix(req.Domain, "*.")).Scan(
+			&proxyID, &proxyDomain, &forceSSL, &http2Enabled, &isSystemProxy, &includeWWW,
+			&upstream, &proxyType, &redirectURL, &redirectCode)
 
 		if err == nil {
 			h.logger.Info("Updated proxy_hosts for wildcard SSL",
 				zap.String("domain", req.Domain),
+				zap.String("proxy_domain", proxyDomain),
 				zap.String("proxy_id", proxyID.String()),
+				zap.String("proxy_type", proxyType),
 			)
+
+			// Regenerate and dispatch nginx config with SSL enabled
+			if isSystemProxy {
+				go h.dispatchInfraPilotProxyConfig(c.Request.Context(), agentID, proxyID, proxyDomain, true, http2Enabled, true)
+			} else {
+				// For regular proxies (upstream or redirect), dispatch full config
+				go h.dispatchProxyConfigFull(c.Request.Context(), agentID, proxyID, proxyDomain, upstream,
+					proxyType, redirectURL, redirectCode, forceSSL, http2Enabled, includeWWW, true)
+			}
 		}
 
 		c.JSON(http.StatusOK, gin.H{
