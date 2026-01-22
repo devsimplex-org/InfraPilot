@@ -23,7 +23,8 @@ import {
   Settings,
   Loader2,
 } from "lucide-react";
-import { api, Container, SecurityHeaders, RateLimit, ProxyHost } from "@/lib/api";
+import { api, Container, SecurityHeaders, RateLimit, ProxyHost, TestNetworkResponse } from "@/lib/api";
+import { Link2, ArrowRight } from "lucide-react";
 import { formatRelativeTime, cn } from "@/lib/utils";
 import { SSLWizard } from "@/components/ssl-wizard";
 import { ProxyConfigForm } from "@/components/ProxyConfigForm";
@@ -46,6 +47,7 @@ import {
 
 type PanelTab = "details" | "security" | "ratelimits" | "config";
 type UpstreamMode = "manual" | "container";
+type ProxyTypeMode = "upstream" | "redirect";
 
 export default function ProxiesPage() {
   const queryClient = useQueryClient();
@@ -56,9 +58,14 @@ export default function ProxiesPage() {
   const [isEditing, setIsEditing] = useState(false);
 
   // Form state for create
+  const [proxyType, setProxyType] = useState<ProxyTypeMode>("upstream");
   const [upstreamMode, setUpstreamMode] = useState<UpstreamMode>("manual");
   const [selectedContainer, setSelectedContainer] = useState<string | null>(null);
   const [containerPort, setContainerPort] = useState<string>("80");
+  const [redirectUrl, setRedirectUrl] = useState("");
+  const [redirectCode, setRedirectCode] = useState(301);
+  const [networkTestResult, setNetworkTestResult] = useState<TestNetworkResponse | null>(null);
+  const [testingNetwork, setTestingNetwork] = useState(false);
   const [newProxy, setNewProxy] = useState({
     domain: "",
     upstream_target: "",
@@ -243,7 +250,16 @@ export default function ProxiesPage() {
   });
 
   const createMutation = useMutation({
-    mutationFn: (data: typeof newProxy) => api.createProxyHost(selectedAgent!, data),
+    mutationFn: (data: {
+      domain: string;
+      upstream_target?: string;
+      proxy_type?: 'upstream' | 'redirect';
+      redirect_url?: string;
+      redirect_code?: number;
+      force_ssl?: boolean;
+      http2_enabled?: boolean;
+      include_www?: boolean;
+    }) => api.createProxyHost(selectedAgent!, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["proxies", selectedAgent] });
       setShowCreateModal(false);
@@ -317,10 +333,55 @@ export default function ProxiesPage() {
   // Helper functions
   const resetForm = () => {
     setNewProxy({ domain: "", upstream_target: "", force_ssl: true, http2_enabled: true, include_www: false });
+    setProxyType("upstream");
     setUpstreamMode("manual");
     setSelectedContainer(null);
     setContainerPort("80");
+    setRedirectUrl("");
+    setRedirectCode(301);
+    setNetworkTestResult(null);
+    setTestingNetwork(false);
     setPendingProxySubmit(false);
+  };
+
+  // Network test function
+  const handleNetworkTest = async () => {
+    if (!selectedAgent) return;
+
+    let containerName = "";
+    let port = parseInt(containerPort, 10);
+
+    if (upstreamMode === "container" && selectedContainer) {
+      const container = containers?.find((c) => c.container_id === selectedContainer);
+      containerName = container?.name?.replace(/^\//, "") || "";
+    } else if (upstreamMode === "manual" && newProxy.upstream_target) {
+      // Parse container name and port from upstream URL
+      const match = newProxy.upstream_target.match(/^https?:\/\/([^:/]+):?(\d+)?/);
+      if (match) {
+        containerName = match[1];
+        port = match[2] ? parseInt(match[2], 10) : 80;
+      }
+    }
+
+    if (!containerName || !port) return;
+
+    setTestingNetwork(true);
+    setNetworkTestResult(null);
+
+    try {
+      const result = await api.testNetworkConnectivity(selectedAgent, {
+        container_name: containerName,
+        port: port,
+      });
+      setNetworkTestResult(result);
+    } catch (error) {
+      setNetworkTestResult({
+        reachable: false,
+        message: "Failed to test network connectivity",
+      });
+    } finally {
+      setTestingNetwork(false);
+    }
   };
 
   const buildContainerUpstream = (container: Container | undefined) => {
@@ -331,10 +392,31 @@ export default function ProxiesPage() {
 
   const handleProxySubmit = (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Handle redirect type proxy
+    if (proxyType === "redirect") {
+      const proxyData = {
+        domain: newProxy.domain,
+        proxy_type: "redirect" as const,
+        redirect_url: redirectUrl,
+        redirect_code: redirectCode,
+        force_ssl: newProxy.force_ssl,
+        http2_enabled: newProxy.http2_enabled,
+        include_www: newProxy.include_www,
+      };
+      createMutation.mutate(proxyData);
+      return;
+    }
+
+    // Handle upstream type proxy
     if (upstreamMode === "container" && selectedContainer) {
       const container = containers?.find((c) => c.container_id === selectedContainer);
       const upstream = buildContainerUpstream(container);
-      const proxyData = { ...newProxy, upstream_target: upstream };
+      const proxyData = {
+        ...newProxy,
+        upstream_target: upstream,
+        proxy_type: "upstream" as const,
+      };
       setNewProxy(proxyData);
 
       if (containerNetworks?.[0] && !nginxNetworkCheck?.connected) {
@@ -345,7 +427,7 @@ export default function ProxiesPage() {
       }
       createMutation.mutate(proxyData);
     } else {
-      createMutation.mutate(newProxy);
+      createMutation.mutate({ ...newProxy, proxy_type: "upstream" as const });
     }
   };
 
@@ -787,14 +869,38 @@ export default function ProxiesPage() {
                   </div>
                 </div>
 
-                {/* Upstream */}
+                {/* Target / Upstream */}
                 <div>
-                  <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Upstream</h3>
-                  <div className="bg-gray-100 dark:bg-gray-800/50 rounded-lg p-3">
-                    <code className="text-sm text-gray-900 dark:text-white font-mono break-all">
-                      {selectedProxy.upstream_target}
-                    </code>
-                  </div>
+                  <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                    {selectedProxy.proxy_type === "redirect" ? "Redirect Target" : "Upstream"}
+                  </h3>
+                  {selectedProxy.proxy_type === "redirect" ? (
+                    <div className="space-y-2">
+                      <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-3 border border-purple-200 dark:border-purple-800">
+                        <div className="flex items-center gap-2 text-purple-700 dark:text-purple-400">
+                          <ArrowRight className="h-4 w-4" />
+                          <code className="text-sm font-mono break-all">
+                            {selectedProxy.redirect_url}
+                          </code>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge color="purple" size="sm">
+                          {selectedProxy.redirect_code === 301 ? "301 Permanent" :
+                           selectedProxy.redirect_code === 302 ? "302 Temporary" :
+                           selectedProxy.redirect_code === 307 ? "307 Temporary" :
+                           selectedProxy.redirect_code === 308 ? "308 Permanent" :
+                           `${selectedProxy.redirect_code}`}
+                        </Badge>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-gray-100 dark:bg-gray-800/50 rounded-lg p-3">
+                      <code className="text-sm text-gray-900 dark:text-white font-mono break-all">
+                        {selectedProxy.upstream_target}
+                      </code>
+                    </div>
+                  )}
                 </div>
 
                 {/* SSL / TLS */}
@@ -866,15 +972,27 @@ export default function ProxiesPage() {
           {row.is_system_proxy && (
             <Badge color="blue" size="sm">InfraPilot</Badge>
           )}
+          {row.proxy_type === "redirect" && (
+            <Badge color="purple" size="sm">Redirect</Badge>
+          )}
           <StatusIndicator status={getSSLStatus(row)} showLabel={false} size="sm" />
         </div>
       ),
     },
     {
       key: "upstream_target",
-      header: "Upstream",
-      render: (value: string) => (
-        <code className="text-xs text-gray-600 dark:text-gray-400">{value}</code>
+      header: "Target",
+      render: (value: string, row: ProxyHost) => (
+        <div className="flex items-center gap-1">
+          {row.proxy_type === "redirect" ? (
+            <>
+              <ArrowRight className="h-3 w-3 text-purple-500" />
+              <code className="text-xs text-purple-600 dark:text-purple-400">{row.redirect_url}</code>
+            </>
+          ) : (
+            <code className="text-xs text-gray-600 dark:text-gray-400">{value}</code>
+          )}
+        </div>
       ),
     },
     {
@@ -1099,9 +1217,14 @@ export default function ProxiesPage() {
               {selectedProxy?.is_system_proxy && (
                 <Badge color="blue" size="sm">InfraPilot</Badge>
               )}
+              {selectedProxy?.proxy_type === "redirect" && (
+                <Badge color="purple" size="sm">Redirect</Badge>
+              )}
             </div>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              {selectedProxy?.upstream_target}
+              {selectedProxy?.proxy_type === "redirect"
+                ? selectedProxy?.redirect_url
+                : selectedProxy?.upstream_target}
             </p>
           </div>
         </SlideOver.Header>
@@ -1132,6 +1255,43 @@ export default function ProxiesPage() {
               </button>
             </div>
             <form onSubmit={handleProxySubmit} className="space-y-4">
+              {/* Proxy Type Toggle */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Proxy Type
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setProxyType("upstream")}
+                    className={cn(
+                      "flex-1 flex flex-col items-center justify-center gap-1 px-4 py-3 rounded-lg border transition-colors",
+                      proxyType === "upstream"
+                        ? "bg-primary-50 dark:bg-primary-900/20 border-primary-500 text-primary-700 dark:text-primary-400"
+                        : "bg-gray-100 dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400"
+                    )}
+                  >
+                    <ContainerIcon className="h-5 w-5" />
+                    <span className="text-sm font-medium">Container Proxy</span>
+                    <span className="text-xs opacity-70">Forward to service</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setProxyType("redirect")}
+                    className={cn(
+                      "flex-1 flex flex-col items-center justify-center gap-1 px-4 py-3 rounded-lg border transition-colors",
+                      proxyType === "redirect"
+                        ? "bg-purple-50 dark:bg-purple-900/20 border-purple-500 text-purple-700 dark:text-purple-400"
+                        : "bg-gray-100 dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400"
+                    )}
+                  >
+                    <Link2 className="h-5 w-5" />
+                    <span className="text-sm font-medium">URL Redirect</span>
+                    <span className="text-xs opacity-70">Redirect to URL</span>
+                  </button>
+                </div>
+              </div>
+
               <Input
                 label="Domain"
                 value={newProxy.domain}
@@ -1140,50 +1300,131 @@ export default function ProxiesPage() {
                 required
               />
 
-              {/* Upstream Mode Toggle */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Upstream Type
-                </label>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setUpstreamMode("manual")}
-                    className={cn(
-                      "flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg border transition-colors",
-                      upstreamMode === "manual"
-                        ? "bg-primary-50 dark:bg-primary-900/20 border-primary-500 text-primary-700 dark:text-primary-400"
-                        : "bg-gray-100 dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400"
-                    )}
-                  >
-                    <Globe className="h-4 w-4" />
-                    Manual URL
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setUpstreamMode("container")}
-                    className={cn(
-                      "flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg border transition-colors",
-                      upstreamMode === "container"
-                        ? "bg-primary-50 dark:bg-primary-900/20 border-primary-500 text-primary-700 dark:text-primary-400"
-                        : "bg-gray-100 dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400"
-                    )}
-                  >
-                    <ContainerIcon className="h-4 w-4" />
-                    Container
-                  </button>
-                </div>
-              </div>
-
-              {upstreamMode === "manual" ? (
-                <Input
-                  label="Upstream Target"
-                  value={newProxy.upstream_target}
-                  onChange={(e) => setNewProxy({ ...newProxy, upstream_target: e.target.value })}
-                  placeholder="http://localhost:3000"
-                  required
-                />
+              {proxyType === "redirect" ? (
+                <>
+                  <Input
+                    label="Redirect URL"
+                    value={redirectUrl}
+                    onChange={(e) => setRedirectUrl(e.target.value)}
+                    placeholder="https://devsimplex.com"
+                    required
+                  />
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Redirect Type
+                    </label>
+                    <select
+                      value={redirectCode}
+                      onChange={(e) => setRedirectCode(parseInt(e.target.value, 10))}
+                      className="w-full px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500"
+                    >
+                      <option value={301}>301 - Permanent Redirect</option>
+                      <option value={302}>302 - Temporary Redirect</option>
+                      <option value={307}>307 - Temporary Redirect (preserve method)</option>
+                      <option value={308}>308 - Permanent Redirect (preserve method)</option>
+                    </select>
+                  </div>
+                </>
               ) : (
+                <>
+                  {/* Upstream Mode Toggle */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Upstream Type
+                    </label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setUpstreamMode("manual")}
+                        className={cn(
+                          "flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg border transition-colors",
+                          upstreamMode === "manual"
+                            ? "bg-primary-50 dark:bg-primary-900/20 border-primary-500 text-primary-700 dark:text-primary-400"
+                            : "bg-gray-100 dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400"
+                        )}
+                      >
+                        <Globe className="h-4 w-4" />
+                        Manual URL
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setUpstreamMode("container")}
+                        className={cn(
+                          "flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg border transition-colors",
+                          upstreamMode === "container"
+                            ? "bg-primary-50 dark:bg-primary-900/20 border-primary-500 text-primary-700 dark:text-primary-400"
+                            : "bg-gray-100 dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400"
+                        )}
+                      >
+                        <ContainerIcon className="h-4 w-4" />
+                        Container
+                      </button>
+                    </div>
+                  </div>
+
+                  {upstreamMode === "manual" ? (
+                    <div className="space-y-2">
+                      <div className="flex gap-2">
+                        <div className="flex-1">
+                          <Input
+                            label="Upstream Target"
+                            value={newProxy.upstream_target}
+                            onChange={(e) => setNewProxy({ ...newProxy, upstream_target: e.target.value })}
+                            placeholder="http://backend:3000"
+                            required
+                          />
+                        </div>
+                        <div className="flex items-end">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            onClick={handleNetworkTest}
+                            disabled={testingNetwork || !newProxy.upstream_target}
+                          >
+                            {testingNetwork ? <Loader2 className="h-4 w-4 animate-spin" /> : "Test"}
+                          </Button>
+                        </div>
+                      </div>
+                      {networkTestResult && (
+                        <div
+                          className={cn(
+                            "p-3 rounded-lg border text-sm",
+                            networkTestResult.reachable
+                              ? "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 text-green-700 dark:text-green-400"
+                              : "bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800 text-yellow-700 dark:text-yellow-400"
+                          )}
+                        >
+                          <div className="flex items-center gap-2">
+                            {networkTestResult.reachable ? <Check className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
+                            <span>{networkTestResult.message}</span>
+                          </div>
+                          {networkTestResult.available_ports && networkTestResult.available_ports.length > 0 && (
+                            <div className="mt-2">
+                              <span className="text-xs">Available ports: </span>
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                {networkTestResult.available_ports.map((port) => (
+                                  <button
+                                    key={port}
+                                    type="button"
+                                    onClick={() => {
+                                      const match = newProxy.upstream_target.match(/^(https?:\/\/[^:/]+)/);
+                                      if (match) {
+                                        setNewProxy({ ...newProxy, upstream_target: `${match[1]}:${port}` });
+                                        setNetworkTestResult(null);
+                                      }
+                                    }}
+                                    className="px-2 py-0.5 bg-yellow-100 dark:bg-yellow-800 rounded text-xs font-medium hover:bg-yellow-200 dark:hover:bg-yellow-700"
+                                  >
+                                    {port}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
                 <>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -1248,6 +1489,8 @@ export default function ProxiesPage() {
                         {buildContainerUpstream(containers?.find((c) => c.container_id === selectedContainer))}
                       </code>
                     </p>
+                  )}
+                  </>
                   )}
                 </>
               )}

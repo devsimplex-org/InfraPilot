@@ -75,7 +75,8 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool, logger *zap.Logger) 
 	// Sort migrations by name (they should be numbered like 001_, 002_, etc.)
 	var migrationFiles []string
 	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".sql") {
+		// Include .sql and .up.sql files, but exclude .down.sql files
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".sql") && !strings.HasSuffix(entry.Name(), ".down.sql") {
 			migrationFiles = append(migrationFiles, entry.Name())
 		}
 	}

@@ -166,8 +166,12 @@ func (h *Handler) createAuthUser(c *gin.Context) {
 	// Audit log
 	h.auditLog(c, userID, orgID, "proxy.auth_user.create", "proxy_auth_user", authUserID, gin.H{"username": req.Username})
 
-	// Dispatch updated htpasswd to agent
-	go h.dispatchHtpasswd(c.Request.Context(), agentID, proxyID)
+	// Dispatch updated htpasswd to agent (use background context since this runs in goroutine)
+	// Add small delay to ensure INSERT is fully committed before querying
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		h.dispatchHtpasswd(context.Background(), agentID, proxyID)
+	}()
 
 	// Fetch and return the created user
 	var user AuthUser
@@ -255,14 +259,22 @@ func (h *Handler) deleteAuthUser(c *gin.Context) {
 	// Audit log
 	h.auditLog(c, userID, orgID, "proxy.auth_user.delete", "proxy_auth_user", authUserID, gin.H{"username": username})
 
-	// Dispatch updated htpasswd to agent
-	go h.dispatchHtpasswd(c.Request.Context(), agentID, proxyID)
+	// Dispatch updated htpasswd to agent (use background context since this runs in goroutine)
+	// Add small delay to ensure DELETE is fully committed before querying
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		h.dispatchHtpasswd(context.Background(), agentID, proxyID)
+	}()
 
 	c.JSON(http.StatusOK, gin.H{"message": "auth user deleted"})
 }
 
 // generateHtpasswd generates htpasswd file content for a proxy
 func (h *Handler) generateHtpasswd(ctx context.Context, proxyID uuid.UUID) (string, error) {
+	h.logger.Info("generateHtpasswd: querying users",
+		zap.String("proxy_id", proxyID.String()),
+	)
+
 	rows, err := h.db.Query(ctx, `
 		SELECT username, password_hash
 		FROM proxy_auth_users
@@ -270,6 +282,7 @@ func (h *Handler) generateHtpasswd(ctx context.Context, proxyID uuid.UUID) (stri
 		ORDER BY username ASC
 	`, proxyID)
 	if err != nil {
+		h.logger.Error("generateHtpasswd: query failed", zap.Error(err))
 		return "", err
 	}
 	defer rows.Close()
@@ -278,10 +291,17 @@ func (h *Handler) generateHtpasswd(ctx context.Context, proxyID uuid.UUID) (stri
 	for rows.Next() {
 		var username, passwordHash string
 		if err := rows.Scan(&username, &passwordHash); err != nil {
+			h.logger.Error("generateHtpasswd: scan failed", zap.Error(err))
 			continue
 		}
+		h.logger.Info("generateHtpasswd: found user", zap.String("username", username))
 		lines = append(lines, fmt.Sprintf("%s:%s", username, passwordHash))
 	}
+
+	h.logger.Info("generateHtpasswd: result",
+		zap.String("proxy_id", proxyID.String()),
+		zap.Int("user_count", len(lines)),
+	)
 
 	return strings.Join(lines, "\n"), nil
 }
