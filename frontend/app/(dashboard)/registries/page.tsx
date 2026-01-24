@@ -52,8 +52,16 @@ import {
   Input,
 } from "@/components/ui/page-layout";
 import { ScanModal, ScanImage } from "@/components/ui/ScanModal";
+import { usePullWebSocket, PullProgress } from "@/hooks/usePullWebSocket";
 
 type Tab = "registries" | "browse";
+
+// Pull state for each image
+interface ImagePullState {
+  status: "queued" | "pulling" | "extracting" | "complete" | "error";
+  progress: number;
+  message?: string;
+}
 type RegistryProvider = "ghcr" | "dockerhub";
 
 const providerLabels: Record<RegistryProvider, string> = {
@@ -78,6 +86,9 @@ export default function RegistriesPage() {
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [showScanModal, setShowScanModal] = useState(false);
   const [scanImages, setScanImages] = useState<ScanImage[]>([]);
+
+  // State for tracking pulling images with progress
+  const [pullStates, setPullStates] = useState<Map<string, ImagePullState>>(new Map());
 
   // Form state for adding registry
   const [formData, setFormData] = useState<{
@@ -287,6 +298,30 @@ export default function RegistriesPage() {
     setShowScanModal(true);
   };
 
+  const handlePullImage = (registry: ContainerRegistry, repoName: string, tagName: string) => {
+    if (!defaultAgent) return;
+
+    const imageRef = getTagImageRef(registry, repoName, tagName);
+
+    // Initialize pull state
+    setPullStates((prev) => {
+      const newMap = new Map(prev);
+      newMap.set(imageRef, {
+        status: "queued",
+        progress: 0,
+        message: "Starting pull...",
+      });
+      return newMap;
+    });
+
+    // Start the pull via WebSocket
+    pullWs.startPull({
+      agent_id: defaultAgent.id,
+      registry_id: registry.id,
+      images: [{ image: imageRef }],
+    });
+  };
+
   // Clear tag selection when repo changes
   useEffect(() => {
     setSelectedTags(new Set());
@@ -316,6 +351,57 @@ export default function RegistriesPage() {
     mutationFn: (id: string) => api.testRegistryConnection(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["registries"] });
+    },
+  });
+
+  // WebSocket for image pulls with progress
+  const pullWs = usePullWebSocket({
+    onProgress: (progress: PullProgress) => {
+      setPullStates((prev) => {
+        const newMap = new Map(prev);
+        newMap.set(progress.image, {
+          status: progress.status,
+          progress: progress.progress || 0,
+          message: progress.message,
+        });
+        return newMap;
+      });
+
+      // If complete, refresh images list after a short delay
+      if (progress.status === "complete") {
+        setTimeout(() => {
+          queryClient.invalidateQueries({ queryKey: ["docker-images"] });
+          // Remove from pullStates after a delay to show completion
+          setTimeout(() => {
+            setPullStates((prev) => {
+              const newMap = new Map(prev);
+              newMap.delete(progress.image);
+              return newMap;
+            });
+          }, 2000);
+        }, 500);
+      }
+    },
+    onError: (error) => {
+      if (error.image) {
+        setPullStates((prev) => {
+          const newMap = new Map(prev);
+          newMap.set(error.image!, {
+            status: "error",
+            progress: 0,
+            message: error.error,
+          });
+          return newMap;
+        });
+        // Remove error state after 5 seconds
+        setTimeout(() => {
+          setPullStates((prev) => {
+            const newMap = new Map(prev);
+            newMap.delete(error.image!);
+            return newMap;
+          });
+        }, 5000);
+      }
     },
   });
 
@@ -820,6 +906,56 @@ export default function RegistriesPage() {
                           </div>
                         </div>
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          {/* Pull button - only show if not local */}
+                          {!isLocal && defaultAgent && (() => {
+                            const pullState = pullStates.get(imageRef);
+                            const isPulling = pullState && pullState.status !== "complete" && pullState.status !== "error";
+
+                            if (pullState) {
+                              // Show progress
+                              return (
+                                <div className="flex items-center gap-2 px-2">
+                                  {pullState.status === "error" ? (
+                                    <span className="text-xs text-red-500" title={pullState.message}>
+                                      Error
+                                    </span>
+                                  ) : pullState.status === "complete" ? (
+                                    <span className="text-xs text-green-500 flex items-center gap-1">
+                                      <CheckCircle className="h-3 w-3" />
+                                      Done
+                                    </span>
+                                  ) : (
+                                    <>
+                                      <div className="w-16 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                                        <div
+                                          className="h-full bg-green-500 transition-all duration-300"
+                                          style={{ width: `${pullState.progress}%` }}
+                                        />
+                                      </div>
+                                      <span className="text-xs text-gray-500 dark:text-gray-400 min-w-[2.5rem]">
+                                        {pullState.progress}%
+                                      </span>
+                                    </>
+                                  )}
+                                </div>
+                              );
+                            }
+
+                            return (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (selectedRegistry && selectedRepo) {
+                                    handlePullImage(selectedRegistry, selectedRepo, tag.name);
+                                  }
+                                }}
+                                className="p-2 text-gray-400 hover:text-green-600 dark:hover:text-green-400"
+                                title="Pull image"
+                              >
+                                <Download className="h-4 w-4" />
+                              </button>
+                            );
+                          })()}
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
