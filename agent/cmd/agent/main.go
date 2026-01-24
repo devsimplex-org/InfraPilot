@@ -141,6 +141,9 @@ func main() {
 		)
 	}
 
+	// Set agent ID for gRPC client
+	grpcClient.SetAgentID(cfg.AgentID)
+
 	// Create command handler
 	cmdHandler := &CommandHandler{
 		nginx:              nginxController,
@@ -149,10 +152,8 @@ func main() {
 		logger:             logger,
 		nginxContainerName: cfg.NginxContainerName,
 		proxyMode:          cfg.ProxyMode,
+		grpcClient:         grpcClient,
 	}
-
-	// Set agent ID for gRPC client
-	grpcClient.SetAgentID(cfg.AgentID)
 
 	// Start command stream processor
 	go func() {
@@ -228,6 +229,21 @@ type CommandHandler struct {
 	logger             *zap.Logger
 	nginxContainerName string
 	proxyMode          string // "managed" or "external"
+	grpcClient         *agentgrpc.Client
+}
+
+// sendPullProgress sends a pull progress update back to the backend
+func (h *CommandHandler) sendPullProgress(requestID string, progress *docker.PullProgressInfo) {
+	if h.grpcClient == nil {
+		h.logger.Warn("grpcClient is nil, cannot send progress")
+		return
+	}
+	h.logger.Info("Sending pull progress",
+		zap.String("request_id", requestID),
+		zap.String("status", progress.Status),
+		zap.Int("progress", progress.Progress),
+	)
+	h.grpcClient.SendProgress(requestID, "pull_progress", progress)
 }
 
 // IsManagedProxy returns true if InfraPilot manages the proxy
@@ -1350,6 +1366,37 @@ func (h *CommandHandler) handleDockerCommand(ctx context.Context, cmd *agentgrpc
 			}
 		}
 		if err := h.docker.PullImage(ctx, dockerCmd.ImageRef, auth); err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: err.Error(),
+			}
+		}
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: fmt.Sprintf("image %s pulled successfully", dockerCmd.ImageRef),
+		}
+
+	case "pull_image_stream":
+		if dockerCmd.ImageRef == "" {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: "image reference is required",
+			}
+		}
+		// Convert auth config if provided
+		var auth *docker.AuthConfig
+		if dockerCmd.AuthConfig != nil {
+			auth = &docker.AuthConfig{
+				Username:      dockerCmd.AuthConfig.Username,
+				Password:      dockerCmd.AuthConfig.Password,
+				ServerAddress: dockerCmd.AuthConfig.ServerAddress,
+			}
+		}
+		// Use streaming pull with progress callback
+		progressFn := func(progress *docker.PullProgressInfo) {
+			h.sendPullProgress(cmd.RequestId, progress)
+		}
+		if err := h.docker.PullImageWithProgress(ctx, dockerCmd.ImageRef, auth, progressFn); err != nil {
 			return &agentgrpc.CommandResult{
 				Success: false,
 				Message: err.Error(),

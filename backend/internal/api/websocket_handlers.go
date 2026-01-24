@@ -318,6 +318,47 @@ type ScanWSCompleteMessage struct {
 	Failed      int    `json:"failed"`
 }
 
+// ============ Image Pull WebSocket Types ============
+
+// PullWSRequest is the request to pull images via WebSocket
+type PullWSRequest struct {
+	AgentID    string          `json:"agent_id"`
+	RegistryID string          `json:"registry_id,omitempty"`
+	Images     []PullWSImage   `json:"images"`
+}
+
+// PullWSImage represents an image to pull
+type PullWSImage struct {
+	Image string `json:"image"`
+}
+
+// PullWSProgressMessage is sent for pull progress updates
+type PullWSProgressMessage struct {
+	Type       string `json:"type"` // "progress"
+	Image      string `json:"image"`
+	Status     string `json:"status"`     // "pulling", "extracting", "complete", "error"
+	Current    int64  `json:"current"`    // bytes downloaded
+	Total      int64  `json:"total"`      // total bytes
+	Progress   int    `json:"progress"`   // 0-100 percentage
+	Layer      string `json:"layer,omitempty"` // layer ID if applicable
+	Message    string `json:"message,omitempty"`
+}
+
+// PullWSErrorMessage is sent when an error occurs
+type PullWSErrorMessage struct {
+	Type  string `json:"type"` // "error"
+	Image string `json:"image,omitempty"`
+	Error string `json:"error"`
+}
+
+// PullWSCompleteMessage is sent when all pulls are complete
+type PullWSCompleteMessage struct {
+	Type        string `json:"type"` // "complete"
+	TotalImages int    `json:"total_images"`
+	Successful  int    `json:"successful"`
+	Failed      int    `json:"failed"`
+}
+
 // scanWebSocket handles WebSocket connections for scan operations
 func (h *Handler) scanWebSocket(c *gin.Context) {
 	// Get org_id from context (set by auth middleware)
@@ -643,6 +684,225 @@ func (h *Handler) processScanWSRequest(ctx context.Context, orgID uuid.UUID, req
 		zap.Int("successful", successful),
 		zap.Int("failed", failed))
 	send(ScanWSCompleteMessage{
+		Type:        "complete",
+		TotalImages: len(req.Images),
+		Successful:  successful,
+		Failed:      failed,
+	})
+}
+
+// pullWebSocket handles WebSocket connections for image pull operations
+func (h *Handler) pullWebSocket(c *gin.Context) {
+	// Get org_id from context (set by auth middleware)
+	orgID, exists := c.Get("org_id")
+	if !exists {
+		c.JSON(401, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	// Upgrade to WebSocket
+	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		h.logger.Error("Failed to upgrade WebSocket for pull", zap.Error(err))
+		return
+	}
+	defer conn.Close()
+
+	h.logger.Info("Pull WebSocket connection established",
+		zap.String("org_id", orgID.(uuid.UUID).String()))
+
+	// Mutex for thread-safe sending
+	var sendMu sync.Mutex
+	sendJSON := func(v interface{}) error {
+		sendMu.Lock()
+		defer sendMu.Unlock()
+		return conn.WriteJSON(v)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan struct{})
+
+	// Keep connection alive with pings
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				sendMu.Lock()
+				err := conn.WriteMessage(websocket.PingMessage, nil)
+				sendMu.Unlock()
+				if err != nil {
+					cancel()
+					return
+				}
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// Read messages from client
+	for {
+		_, message, err := conn.ReadMessage()
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+				h.logger.Debug("Pull WebSocket read error", zap.Error(err))
+			}
+			break
+		}
+
+		var req PullWSRequest
+		if err := json.Unmarshal(message, &req); err != nil {
+			sendJSON(PullWSErrorMessage{
+				Type:  "error",
+				Error: "Invalid request format",
+			})
+			continue
+		}
+
+		// Process pull request in goroutine
+		go h.processPullWSRequest(ctx, orgID.(uuid.UUID), req, sendJSON)
+	}
+
+	close(done)
+	h.logger.Info("Pull WebSocket connection closed",
+		zap.String("org_id", orgID.(uuid.UUID).String()))
+}
+
+// processPullWSRequest handles a pull request from WebSocket
+func (h *Handler) processPullWSRequest(ctx context.Context, orgID uuid.UUID, req PullWSRequest, send func(interface{}) error) {
+	successful := 0
+	failed := 0
+
+	// Validate agent ID
+	agentID, err := uuid.Parse(req.AgentID)
+	if err != nil {
+		send(PullWSErrorMessage{
+			Type:  "error",
+			Error: "Invalid agent ID",
+		})
+		return
+	}
+
+	// Check if agent is connected
+	if !agentgrpc.IsAgentConnected(agentID.String()) {
+		send(PullWSErrorMessage{
+			Type:  "error",
+			Error: "Agent not connected",
+		})
+		return
+	}
+
+	// Build auth config if registry ID is provided
+	var authConfig *agentgrpc.DockerAuthConfig
+	if req.RegistryID != "" {
+		registryID, err := uuid.Parse(req.RegistryID)
+		if err == nil {
+			authConfig, _ = h.buildAuthConfigFromRegistry(ctx, orgID, registryID)
+		}
+	}
+
+	for _, img := range req.Images {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		// Send queued status
+		send(PullWSProgressMessage{
+			Type:    "progress",
+			Image:   img.Image,
+			Status:  "queued",
+			Message: "Pull queued",
+		})
+
+		// Build the command with streaming flag
+		dockerCmd := agentgrpc.DockerResourceCommand{
+			Action:   agentgrpc.DockerActionPullImageStream,
+			ImageRef: img.Image,
+		}
+		if authConfig != nil {
+			dockerCmd.AuthConfig = authConfig
+		}
+
+		cmdPayload, _ := json.Marshal(dockerCmd)
+		cmd := &agentgrpc.BackendMessage{
+			RequestId: uuid.New().String(),
+			Type:      "docker",
+			Command:   cmdPayload,
+		}
+
+		// Send pulling status
+		send(PullWSProgressMessage{
+			Type:     "progress",
+			Image:    img.Image,
+			Status:   "pulling",
+			Progress: 0,
+			Message:  "Starting pull...",
+		})
+
+		// Use streaming command that returns progress
+		progressCh := make(chan *agentgrpc.PullProgress, 100)
+		go func() {
+			for progress := range progressCh {
+				send(PullWSProgressMessage{
+					Type:     "progress",
+					Image:    img.Image,
+					Status:   progress.Status,
+					Current:  progress.Current,
+					Total:    progress.Total,
+					Progress: progress.Progress,
+					Layer:    progress.Layer,
+					Message:  progress.Message,
+				})
+			}
+		}()
+
+		// Send command and wait for streaming response
+		resp, err := agentgrpc.SendCommandWithProgress(agentID.String(), cmd, 10*time.Minute, progressCh)
+		close(progressCh)
+
+		if err != nil {
+			send(PullWSErrorMessage{
+				Type:  "error",
+				Image: img.Image,
+				Error: err.Error(),
+			})
+			failed++
+			continue
+		}
+
+		if result, err := resp.GetCommandResult(); err == nil && result != nil {
+			if !result.Success {
+				send(PullWSErrorMessage{
+					Type:  "error",
+					Image: img.Image,
+					Error: result.Message,
+				})
+				failed++
+			} else {
+				send(PullWSProgressMessage{
+					Type:     "progress",
+					Image:    img.Image,
+					Status:   "complete",
+					Progress: 100,
+					Message:  "Pull complete",
+				})
+				successful++
+			}
+		} else {
+			failed++
+		}
+	}
+
+	// Send completion message
+	send(PullWSCompleteMessage{
 		Type:        "complete",
 		TotalImages: len(req.Images),
 		Successful:  successful,

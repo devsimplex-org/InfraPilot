@@ -223,6 +223,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 			protected.POST("/scans", h.RequireModifyContainers(), h.triggerImageScan)
 			protected.GET("/scans", h.listScans)
 			protected.GET("/scans/ws", h.scanWebSocket) // WebSocket for real-time scans (must be before :sid)
+			protected.GET("/pulls/ws", h.pullWebSocket) // WebSocket for real-time image pulls
 			protected.GET("/scans/:sid", h.getScanDetails)
 			protected.GET("/scans/:sid/vulnerabilities", h.getScanVulnerabilities)
 
