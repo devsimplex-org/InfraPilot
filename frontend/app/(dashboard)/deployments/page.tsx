@@ -198,21 +198,60 @@ export default function DeploymentsPage() {
         if (!deployment) return null;
         return (
           <div className="flex items-center gap-3">
-            <Shield className="w-5 h-5 text-gray-400 flex-shrink-0" />
+            <div className="p-2 rounded-lg bg-primary-100 dark:bg-primary-900/30">
+              <Package className="w-4 h-4 text-primary-600 dark:text-primary-400" />
+            </div>
             <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                  {deployment.service_name}
-                </p>
-                <Badge variant="default" size="sm">
-                  {deployment.environment}
-                </Badge>
-              </div>
-              <p className="text-xs text-gray-500 dark:text-gray-400 font-mono truncate mt-0.5">
-                {deployment.image_repository}
-                {deployment.image_tag && `:${deployment.image_tag}`}
+              <p className="text-sm font-medium text-gray-900 dark:text-white">
+                {deployment.service_name || "Unnamed Service"}
+              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                ID: {deployment.id.substring(0, 8)}...
               </p>
             </div>
+          </div>
+        );
+      },
+    },
+    {
+      key: "environment",
+      header: "Environment",
+      sortable: true,
+      render: (deployment) => {
+        if (!deployment) return null;
+        const envColors: Record<string, string> = {
+          prod: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+          production: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+          staging: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
+          dev: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+          development: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+        };
+        return (
+          <span className={cn(
+            "px-2 py-1 text-xs font-medium rounded-full",
+            envColors[deployment.environment?.toLowerCase()] || "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
+          )}>
+            {deployment.environment || "—"}
+          </span>
+        );
+      },
+    },
+    {
+      key: "image_repository",
+      header: "Image",
+      render: (deployment) => {
+        if (!deployment) return null;
+        const fullImage = deployment.image_repository + (deployment.image_tag ? `:${deployment.image_tag}` : "");
+        return (
+          <div className="min-w-0">
+            <p className="text-sm font-mono text-gray-900 dark:text-white truncate max-w-[200px]" title={fullImage}>
+              {deployment.image_repository || "—"}
+            </p>
+            {deployment.image_tag && (
+              <p className="text-xs text-primary-600 dark:text-primary-400 font-mono">
+                :{deployment.image_tag}
+              </p>
+            )}
           </div>
         );
       },
@@ -227,50 +266,89 @@ export default function DeploymentsPage() {
           <div className="space-y-1">
             <StatusIndicator
               status={getDeploymentStatus(deployment.status)}
-              label={deployment.status}
+              label={deployment.status?.replace(/_/g, " ") || "unknown"}
               size="sm"
               pulse={deployment.status === "running"}
             />
-            {deployment.policy_decision && (
-              <StatusIndicator
-                status={getPolicyDecisionStatus(deployment.policy_decision)!}
-                label={deployment.policy_decision === "allow" ? "Allowed" : deployment.policy_decision === "warn" ? "Warning" : "Blocked"}
-                size="sm"
-              />
+            {deployment.status_message && (
+              <p className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[150px]" title={deployment.status_message}>
+                {deployment.status_message}
+              </p>
             )}
           </div>
         );
       },
     },
     {
-      key: "git_commit",
-      header: "Git",
+      key: "container_name",
+      header: "Container",
       render: (deployment) => {
         if (!deployment) return null;
-        return deployment.git_commit ? (
-          <div className="flex items-center gap-2">
-            <GitBranch className="w-4 h-4 text-gray-400" />
-            <span className="text-xs text-gray-600 dark:text-gray-400 font-mono">
-              {deployment.git_commit.substring(0, 8)}
-            </span>
-          </div>
-        ) : (
-          <span className="text-xs text-gray-400">—</span>
+        if (deployment.container_name || deployment.container_id) {
+          return (
+            <div className="flex items-center gap-2">
+              <Container className="w-4 h-4 text-green-500" />
+              <span className="text-xs font-mono text-gray-900 dark:text-white">
+                {deployment.container_name || deployment.container_id?.substring(0, 12)}
+              </span>
+            </div>
+          );
+        }
+        return <span className="text-xs text-gray-400">—</span>;
+      },
+    },
+    {
+      key: "policy_decision",
+      header: "Policy",
+      render: (deployment) => {
+        if (!deployment) return null;
+        if (!deployment.policy_decision) {
+          return <span className="text-xs text-gray-400">Pending</span>;
+        }
+        return (
+          <StatusIndicator
+            status={getPolicyDecisionStatus(deployment.policy_decision)!}
+            label={deployment.policy_decision === "allow" ? "Allowed" : deployment.policy_decision === "warn" ? "Warning" : "Blocked"}
+            size="sm"
+          />
         );
       },
     },
     {
-      key: "deployed_at",
-      header: "Deployed",
+      key: "scan_result_id",
+      header: "Scan",
+      render: (deployment) => {
+        if (!deployment) return null;
+        if (deployment.scan_result_id) {
+          return (
+            <div className="flex items-center gap-1">
+              <Shield className="w-4 h-4 text-green-500" />
+              <span className="text-xs text-green-600 dark:text-green-400">Scanned</span>
+            </div>
+          );
+        }
+        if (deployment.status === "scanning") {
+          return (
+            <div className="flex items-center gap-1">
+              <RefreshCw className="w-4 h-4 text-yellow-500 animate-spin" />
+              <span className="text-xs text-yellow-600 dark:text-yellow-400">Scanning...</span>
+            </div>
+          );
+        }
+        return <span className="text-xs text-gray-400">—</span>;
+      },
+    },
+    {
+      key: "created_at",
+      header: "Created",
       sortable: true,
       render: (deployment) => {
         if (!deployment) return null;
-        return deployment.deployed_at ? (
-          <span className="text-xs text-gray-600 dark:text-gray-400">
-            {new Date(deployment.deployed_at).toLocaleDateString()}
-          </span>
-        ) : (
-          <span className="text-xs text-gray-400">—</span>
+        return (
+          <div className="text-xs text-gray-600 dark:text-gray-400">
+            <p>{new Date(deployment.created_at).toLocaleDateString()}</p>
+            <p>{new Date(deployment.created_at).toLocaleTimeString()}</p>
+          </div>
         );
       },
     },
