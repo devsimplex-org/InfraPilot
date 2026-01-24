@@ -637,9 +637,10 @@ type ScannedSecret struct {
 	ContainerName string `json:"container_name"`
 	Name          string `json:"name"`
 	SecretType    string `json:"secret_type"`
-	Source        string `json:"source"`
+	Source        string `json:"source"` // "environment", "env_file"
 	IsSensitive   bool   `json:"is_sensitive"`
 	Strength      string `json:"strength"`
+	EnvFilePath   string `json:"env_file_path,omitempty"` // Path to .env file if source is env_file
 }
 
 // DockerAuthConfig represents authentication for Docker registry operations

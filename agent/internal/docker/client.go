@@ -292,13 +292,43 @@ func (c *Client) ExecCreate(ctx context.Context, containerID string, cmd []strin
 		Cmd:          cmd,
 		AttachStdout: true,
 		AttachStderr: true,
-		AttachStdin:  true,
-		Tty:          true,
+		AttachStdin:  false,
+		Tty:          false,
 	})
 	if err != nil {
 		return "", err
 	}
 	return resp.ID, nil
+}
+
+// ExecAttach runs an exec and returns the output
+func (c *Client) ExecAttach(ctx context.Context, execID string) (string, error) {
+	resp, err := c.cli.ContainerExecAttach(ctx, execID, container.ExecStartOptions{
+		Tty: false,
+	})
+	if err != nil {
+		return "", err
+	}
+	defer resp.Close()
+
+	// Read the output
+	output, err := io.ReadAll(resp.Reader)
+	if err != nil {
+		return "", err
+	}
+
+	// Check exec result
+	inspect, err := c.cli.ContainerExecInspect(ctx, execID)
+	if err != nil {
+		return "", err
+	}
+
+	// Non-zero exit code means the command failed (e.g., file not found)
+	if inspect.ExitCode != 0 {
+		return "", fmt.Errorf("exec failed with exit code %d", inspect.ExitCode)
+	}
+
+	return string(output), nil
 }
 
 // ============ Network Operations ============
@@ -1189,6 +1219,468 @@ func (c *Client) RunContainer(ctx context.Context, cfg ContainerRunConfig) (*Con
 		Name:        cfg.Name,
 		Status:      "running",
 	}, nil
+}
+
+// ============ Secret Management Types ============
+
+// SecretMount represents a secret to be mounted in a container
+type SecretMount struct {
+	Name      string `json:"name"`
+	Value     string `json:"value,omitempty"`
+	MountPath string `json:"mount_path"` // e.g., /run/secrets/DB_PASSWORD
+}
+
+// SecretMigrationResult contains the result of a secret migration operation
+type SecretMigrationResult struct {
+	NewContainerID  string        `json:"new_container_id"`
+	MountedSecrets  []SecretMount `json:"mounted_secrets"`
+	RemovedEnvVars  []string      `json:"removed_env_vars"`
+	SecretsBasePath string        `json:"secrets_base_path"`
+}
+
+// SecretVerificationResult contains the result of verifying a migration
+type SecretVerificationResult struct {
+	Success         bool              `json:"success"`
+	ContainerID     string            `json:"container_id"`
+	ContainerHealth string            `json:"container_health"`
+	SecretsFound    map[string]bool   `json:"secrets_found"` // secret name -> exists
+	Errors          []string          `json:"errors,omitempty"`
+}
+
+// RollbackResult contains the result of a rollback operation
+type RollbackResult struct {
+	Success             bool   `json:"success"`
+	RestoredContainerID string `json:"restored_container_id"`
+	CleanedUpSecrets    int    `json:"cleaned_up_secrets"`
+	ErrorMessage        string `json:"error_message,omitempty"`
+}
+
+// ============ Secret Management Operations ============
+
+// CheckSwarmMode checks if Docker is running in swarm mode
+func (c *Client) CheckSwarmMode(ctx context.Context) (bool, error) {
+	info, err := c.cli.Info(ctx)
+	if err != nil {
+		return false, fmt.Errorf("failed to get Docker info: %w", err)
+	}
+	return info.Swarm.LocalNodeState == "active", nil
+}
+
+// CreateFileSecret creates a file-based secret on the host filesystem
+// Returns the path where the secret file was created
+func (c *Client) CreateFileSecret(ctx context.Context, name, value string) (string, error) {
+	// We'll exec into a helper container to create the secret file on the host
+	// This approach works without requiring direct host filesystem access from the agent
+
+	// Base path for secrets (this will be bind-mounted into containers)
+	secretsBasePath := "/var/lib/infrapilot/secrets"
+	secretPath := fmt.Sprintf("%s/%s", secretsBasePath, name)
+
+	// Use alpine to create the directory and file with proper permissions
+	// The directory is created with 0700 and the file with 0400
+	createCmd := fmt.Sprintf(`
+		mkdir -p %s && \
+		chmod 700 %s && \
+		printf '%%s' "$SECRET_VALUE" > %s && \
+		chmod 400 %s
+	`, secretsBasePath, secretsBasePath, secretPath, secretPath)
+
+	containerConfig := &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sh", "-c", createCmd},
+		Env:   []string{fmt.Sprintf("SECRET_VALUE=%s", value)},
+	}
+
+	hostConfig := &container.HostConfig{
+		Binds:      []string{secretsBasePath + ":" + secretsBasePath},
+		AutoRemove: true,
+	}
+
+	// Pull alpine if not available
+	_, _, err := c.cli.ImageInspectWithRaw(ctx, "alpine:latest")
+	if err != nil {
+		reader, err := c.cli.ImagePull(ctx, "alpine:latest", image.PullOptions{})
+		if err != nil {
+			return "", fmt.Errorf("failed to pull alpine image: %w", err)
+		}
+		defer reader.Close()
+		io.Copy(io.Discard, reader)
+	}
+
+	// Create and run the helper container
+	resp, err := c.cli.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, "")
+	if err != nil {
+		return "", fmt.Errorf("failed to create secret helper container: %w", err)
+	}
+
+	if err := c.cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+		c.cli.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true})
+		return "", fmt.Errorf("failed to start secret helper container: %w", err)
+	}
+
+	// Wait for completion
+	statusCh, errCh := c.cli.ContainerWait(ctx, resp.ID, container.WaitConditionNotRunning)
+	select {
+	case err := <-errCh:
+		if err != nil {
+			return "", fmt.Errorf("error waiting for secret creation: %w", err)
+		}
+	case status := <-statusCh:
+		if status.StatusCode != 0 {
+			return "", fmt.Errorf("secret creation failed with exit code %d", status.StatusCode)
+		}
+	}
+
+	return secretPath, nil
+}
+
+// RemoveFileSecret removes a file-based secret from the host filesystem
+func (c *Client) RemoveFileSecret(ctx context.Context, name string) error {
+	secretsBasePath := "/var/lib/infrapilot/secrets"
+	secretPath := fmt.Sprintf("%s/%s", secretsBasePath, name)
+
+	removeCmd := fmt.Sprintf("rm -f %s", secretPath)
+
+	containerConfig := &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sh", "-c", removeCmd},
+	}
+
+	hostConfig := &container.HostConfig{
+		Binds:      []string{secretsBasePath + ":" + secretsBasePath},
+		AutoRemove: true,
+	}
+
+	resp, err := c.cli.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, "")
+	if err != nil {
+		return fmt.Errorf("failed to create cleanup container: %w", err)
+	}
+
+	if err := c.cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+		c.cli.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true})
+		return fmt.Errorf("failed to start cleanup container: %w", err)
+	}
+
+	// Wait for completion
+	statusCh, errCh := c.cli.ContainerWait(ctx, resp.ID, container.WaitConditionNotRunning)
+	select {
+	case err := <-errCh:
+		if err != nil {
+			return fmt.Errorf("error waiting for secret removal: %w", err)
+		}
+	case <-statusCh:
+		// Success, ignore exit code for rm -f
+	}
+
+	return nil
+}
+
+// RecreateContainerWithSecrets recreates a container with secrets mounted and env vars removed
+func (c *Client) RecreateContainerWithSecrets(ctx context.Context, containerID string, secrets []SecretMount, removeEnvVars []string) (*SecretMigrationResult, error) {
+	// Step 1: Inspect the original container to get its config
+	originalInfo, err := c.cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect original container: %w", err)
+	}
+
+	// Step 2: Create file secrets on the host
+	secretsBasePath := "/var/lib/infrapilot/secrets"
+	mountedSecrets := make([]SecretMount, 0, len(secrets))
+
+	for _, secret := range secrets {
+		if secret.Value != "" {
+			secretPath, err := c.CreateFileSecret(ctx, secret.Name, secret.Value)
+			if err != nil {
+				// Cleanup any secrets we already created
+				for _, ms := range mountedSecrets {
+					c.RemoveFileSecret(ctx, ms.Name)
+				}
+				return nil, fmt.Errorf("failed to create secret %s: %w", secret.Name, err)
+			}
+			mountedSecrets = append(mountedSecrets, SecretMount{
+				Name:      secret.Name,
+				MountPath: secretPath,
+			})
+		}
+	}
+
+	// Step 3: Build new container config from original
+	newConfig := &container.Config{
+		Image:        originalInfo.Config.Image,
+		Cmd:          originalInfo.Config.Cmd,
+		Entrypoint:   originalInfo.Config.Entrypoint,
+		WorkingDir:   originalInfo.Config.WorkingDir,
+		ExposedPorts: originalInfo.Config.ExposedPorts,
+		Labels:       originalInfo.Config.Labels,
+		User:         originalInfo.Config.User,
+		Volumes:      originalInfo.Config.Volumes,
+		StopSignal:   originalInfo.Config.StopSignal,
+		Healthcheck:  originalInfo.Config.Healthcheck,
+	}
+
+	// Build env vars, removing the ones we're migrating to secrets
+	removeEnvSet := make(map[string]bool)
+	for _, envVar := range removeEnvVars {
+		removeEnvSet[envVar] = true
+	}
+
+	newEnv := make([]string, 0, len(originalInfo.Config.Env))
+	removedEnvVars := make([]string, 0)
+	for _, env := range originalInfo.Config.Env {
+		parts := strings.SplitN(env, "=", 2)
+		if len(parts) > 0 && removeEnvSet[parts[0]] {
+			removedEnvVars = append(removedEnvVars, parts[0])
+			continue
+		}
+		newEnv = append(newEnv, env)
+	}
+	newConfig.Env = newEnv
+
+	// Step 4: Build new host config with secrets mount added
+	newHostConfig := &container.HostConfig{
+		Binds:         originalInfo.HostConfig.Binds,
+		NetworkMode:   originalInfo.HostConfig.NetworkMode,
+		PortBindings:  originalInfo.HostConfig.PortBindings,
+		RestartPolicy: originalInfo.HostConfig.RestartPolicy,
+		CapAdd:        originalInfo.HostConfig.CapAdd,
+		CapDrop:       originalInfo.HostConfig.CapDrop,
+		Privileged:    originalInfo.HostConfig.Privileged,
+		PublishAllPorts: originalInfo.HostConfig.PublishAllPorts,
+		DNS:           originalInfo.HostConfig.DNS,
+		DNSOptions:    originalInfo.HostConfig.DNSOptions,
+		DNSSearch:     originalInfo.HostConfig.DNSSearch,
+		ExtraHosts:    originalInfo.HostConfig.ExtraHosts,
+		Links:         originalInfo.HostConfig.Links,
+		LogConfig:     originalInfo.HostConfig.LogConfig,
+		SecurityOpt:   originalInfo.HostConfig.SecurityOpt,
+		StorageOpt:    originalInfo.HostConfig.StorageOpt,
+		Tmpfs:         originalInfo.HostConfig.Tmpfs,
+		UTSMode:       originalInfo.HostConfig.UTSMode,
+		UsernsMode:    originalInfo.HostConfig.UsernsMode,
+		ShmSize:       originalInfo.HostConfig.ShmSize,
+		Sysctls:       originalInfo.HostConfig.Sysctls,
+		Runtime:       originalInfo.HostConfig.Runtime,
+		Resources:     originalInfo.HostConfig.Resources,
+		Mounts:        originalInfo.HostConfig.Mounts,
+		VolumesFrom:   originalInfo.HostConfig.VolumesFrom,
+	}
+
+	// Add the secrets directory bind mount (read-only)
+	// Secrets will be available at /run/secrets/<name> in the container
+	secretsBindMount := fmt.Sprintf("%s:/run/secrets:ro", secretsBasePath)
+	if newHostConfig.Binds == nil {
+		newHostConfig.Binds = []string{secretsBindMount}
+	} else {
+		// Check if already mounted
+		hasSecretMount := false
+		for _, bind := range newHostConfig.Binds {
+			if strings.Contains(bind, "/run/secrets") {
+				hasSecretMount = true
+				break
+			}
+		}
+		if !hasSecretMount {
+			newHostConfig.Binds = append(newHostConfig.Binds, secretsBindMount)
+		}
+	}
+
+	// Step 5: Build network config from original
+	var newNetworkConfig *network.NetworkingConfig
+	if originalInfo.NetworkSettings != nil && len(originalInfo.NetworkSettings.Networks) > 0 {
+		endpointsConfig := make(map[string]*network.EndpointSettings)
+		for netName, netSettings := range originalInfo.NetworkSettings.Networks {
+			endpointsConfig[netName] = &network.EndpointSettings{
+				Aliases: netSettings.Aliases,
+			}
+		}
+		newNetworkConfig = &network.NetworkingConfig{
+			EndpointsConfig: endpointsConfig,
+		}
+	}
+
+	// Step 6: Stop the original container
+	timeout := 30
+	if err := c.cli.ContainerStop(ctx, containerID, container.StopOptions{Timeout: &timeout}); err != nil {
+		// Cleanup secrets
+		for _, ms := range mountedSecrets {
+			c.RemoveFileSecret(ctx, ms.Name)
+		}
+		return nil, fmt.Errorf("failed to stop original container: %w", err)
+	}
+
+	// Step 7: Get the original container name for reuse
+	originalName := strings.TrimPrefix(originalInfo.Name, "/")
+
+	// Step 8: Remove the original container
+	if err := c.cli.ContainerRemove(ctx, containerID, container.RemoveOptions{}); err != nil {
+		// Try to restart original container
+		c.cli.ContainerStart(ctx, containerID, container.StartOptions{})
+		for _, ms := range mountedSecrets {
+			c.RemoveFileSecret(ctx, ms.Name)
+		}
+		return nil, fmt.Errorf("failed to remove original container: %w", err)
+	}
+
+	// Step 9: Create the new container with the same name
+	newResp, err := c.cli.ContainerCreate(ctx, newConfig, newHostConfig, newNetworkConfig, nil, originalName)
+	if err != nil {
+		// Cleanup secrets
+		for _, ms := range mountedSecrets {
+			c.RemoveFileSecret(ctx, ms.Name)
+		}
+		return nil, fmt.Errorf("failed to create new container: %w", err)
+	}
+
+	// Step 10: Start the new container
+	if err := c.cli.ContainerStart(ctx, newResp.ID, container.StartOptions{}); err != nil {
+		// Remove the failed container
+		c.cli.ContainerRemove(ctx, newResp.ID, container.RemoveOptions{Force: true})
+		// Cleanup secrets
+		for _, ms := range mountedSecrets {
+			c.RemoveFileSecret(ctx, ms.Name)
+		}
+		return nil, fmt.Errorf("failed to start new container: %w", err)
+	}
+
+	newContainerID := newResp.ID
+	if len(newContainerID) > 12 {
+		newContainerID = newContainerID[:12]
+	}
+
+	// Update mount paths to use the container's perspective
+	for i := range mountedSecrets {
+		mountedSecrets[i].MountPath = fmt.Sprintf("/run/secrets/%s", mountedSecrets[i].Name)
+	}
+
+	return &SecretMigrationResult{
+		NewContainerID:  newContainerID,
+		MountedSecrets:  mountedSecrets,
+		RemovedEnvVars:  removedEnvVars,
+		SecretsBasePath: secretsBasePath,
+	}, nil
+}
+
+// VerifySecretsMigration verifies that a migrated container has the expected secrets
+func (c *Client) VerifySecretsMigration(ctx context.Context, containerID string, expectedSecrets []string) (*SecretVerificationResult, error) {
+	result := &SecretVerificationResult{
+		Success:      true,
+		ContainerID:  containerID,
+		SecretsFound: make(map[string]bool),
+		Errors:       []string{},
+	}
+
+	// Check container is running
+	info, err := c.cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		result.Success = false
+		result.Errors = append(result.Errors, fmt.Sprintf("failed to inspect container: %v", err))
+		return result, nil
+	}
+
+	result.ContainerHealth = info.State.Status
+	if info.State.Status != "running" {
+		result.Success = false
+		result.Errors = append(result.Errors, fmt.Sprintf("container is not running (status: %s)", info.State.Status))
+	}
+
+	// Check each expected secret file exists
+	for _, secretName := range expectedSecrets {
+		secretPath := fmt.Sprintf("/run/secrets/%s", secretName)
+		checkCmd := []string{"test", "-f", secretPath}
+
+		execID, err := c.ExecCreate(ctx, containerID, checkCmd)
+		if err != nil {
+			result.SecretsFound[secretName] = false
+			result.Errors = append(result.Errors, fmt.Sprintf("failed to check secret %s: %v", secretName, err))
+			result.Success = false
+			continue
+		}
+
+		_, err = c.ExecAttach(ctx, execID)
+		if err != nil {
+			// Non-zero exit means file doesn't exist
+			result.SecretsFound[secretName] = false
+			result.Errors = append(result.Errors, fmt.Sprintf("secret %s not found at %s", secretName, secretPath))
+			result.Success = false
+		} else {
+			result.SecretsFound[secretName] = true
+		}
+	}
+
+	return result, nil
+}
+
+// RollbackSecretsMigration restores a container to its original state
+func (c *Client) RollbackSecretsMigration(ctx context.Context, containerID string, originalConfig json.RawMessage, createdSecrets []string) (*RollbackResult, error) {
+	result := &RollbackResult{
+		Success:          false,
+		CleanedUpSecrets: 0,
+	}
+
+	// Parse original config
+	var originalInfo types.ContainerJSON
+	if err := json.Unmarshal(originalConfig, &originalInfo); err != nil {
+		result.ErrorMessage = fmt.Sprintf("failed to parse original config: %v", err)
+		return result, nil
+	}
+
+	// Step 1: Stop the migrated container
+	timeout := 30
+	if err := c.cli.ContainerStop(ctx, containerID, container.StopOptions{Timeout: &timeout}); err != nil {
+		// Container might already be stopped, continue
+	}
+
+	// Step 2: Remove the migrated container
+	if err := c.cli.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true}); err != nil {
+		result.ErrorMessage = fmt.Sprintf("failed to remove migrated container: %v", err)
+		return result, nil
+	}
+
+	// Step 3: Recreate the original container
+	originalName := strings.TrimPrefix(originalInfo.Name, "/")
+
+	// Build network config
+	var networkConfig *network.NetworkingConfig
+	if originalInfo.NetworkSettings != nil && len(originalInfo.NetworkSettings.Networks) > 0 {
+		endpointsConfig := make(map[string]*network.EndpointSettings)
+		for netName, netSettings := range originalInfo.NetworkSettings.Networks {
+			endpointsConfig[netName] = &network.EndpointSettings{
+				Aliases: netSettings.Aliases,
+			}
+		}
+		networkConfig = &network.NetworkingConfig{
+			EndpointsConfig: endpointsConfig,
+		}
+	}
+
+	newResp, err := c.cli.ContainerCreate(ctx, originalInfo.Config, originalInfo.HostConfig, networkConfig, nil, originalName)
+	if err != nil {
+		result.ErrorMessage = fmt.Sprintf("failed to recreate original container: %v", err)
+		return result, nil
+	}
+
+	// Step 4: Start the restored container
+	if err := c.cli.ContainerStart(ctx, newResp.ID, container.StartOptions{}); err != nil {
+		c.cli.ContainerRemove(ctx, newResp.ID, container.RemoveOptions{Force: true})
+		result.ErrorMessage = fmt.Sprintf("failed to start restored container: %v", err)
+		return result, nil
+	}
+
+	restoredContainerID := newResp.ID
+	if len(restoredContainerID) > 12 {
+		restoredContainerID = restoredContainerID[:12]
+	}
+
+	// Step 5: Clean up created secrets
+	for _, secretName := range createdSecrets {
+		if err := c.RemoveFileSecret(ctx, secretName); err == nil {
+			result.CleanedUpSecrets++
+		}
+	}
+
+	result.Success = true
+	result.RestoredContainerID = restoredContainerID
+	return result, nil
 }
 
 // ============ Network Connectivity Testing ============

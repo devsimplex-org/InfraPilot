@@ -2529,6 +2529,56 @@ export interface SecretExposureSummary {
   exposures_last_30d: number;
 }
 
+// Secret Migration Types
+export interface SecretMigration {
+  id: string;
+  org_id: string;
+  agent_id: string;
+  container_id: string;
+  container_name: string;
+  source_type: 'env_file' | 'env_var';
+  source_path?: string;
+  status: 'pending' | 'creating_secrets' | 'stopping_container' | 'starting_container' | 'verifying' | 'completed' | 'failed' | 'rolled_back';
+  error_message?: string;
+  new_container_id?: string;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string;
+  total_secrets?: number;
+  completed_secrets?: number;
+  failed_secrets?: number;
+}
+
+export interface SecretMigrationItem {
+  id: string;
+  migration_id: string;
+  secret_name: string;
+  secret_type?: string;
+  old_source: string;
+  new_source: string;
+  status: 'pending' | 'created' | 'attached' | 'verified' | 'completed' | 'failed';
+  mount_path?: string;
+  error_message?: string;
+  created_at: string;
+}
+
+export interface SecretMigrationDetails {
+  migration: SecretMigration;
+  items: SecretMigrationItem[];
+}
+
+export interface CreateMigrationRequest {
+  container_id: string;
+  container_name: string;
+  source_type: string;
+  source_path?: string;
+  secrets: {
+    name: string;
+    value: string;
+    type?: string;
+  }[];
+}
+
 export interface CreateSecretRequest {
   name: string;
   secret_type: string;
@@ -5045,6 +5095,24 @@ export const api = {
     fetchAPI<{ id: string; status: string; message: string }>(`/secrets/scans`, {
       method: "POST",
       body: JSON.stringify(data),
+    }),
+
+  // Secret Migrations (agent-scoped)
+  listSecretMigrations: (agentId: string) =>
+    fetchAPI<SecretMigration[]>(`/agents/${agentId}/secrets/migrations`),
+
+  getSecretMigration: (agentId: string, migrationId: string) =>
+    fetchAPI<SecretMigrationDetails>(`/agents/${agentId}/secrets/migrations/${migrationId}`),
+
+  createSecretMigration: (agentId: string, data: CreateMigrationRequest) =>
+    fetchAPI<{ id: string; status: string }>(`/agents/${agentId}/secrets/migrations`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  rollbackSecretMigration: (agentId: string, migrationId: string) =>
+    fetchAPI<{ message: string }>(`/agents/${agentId}/secrets/migrations/${migrationId}/rollback`, {
+      method: "POST",
     }),
 
   // Epic 17: Background Jobs & Workers

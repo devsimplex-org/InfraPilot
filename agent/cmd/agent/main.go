@@ -1509,7 +1509,7 @@ func (h *CommandHandler) handleDockerCommand(ctx context.Context, cmd *agentgrpc
 		}
 
 	case "scan_secrets":
-		// Scan all containers for environment variable secrets
+		// Scan all containers for environment variable secrets and .env files
 		containers, err := h.docker.ListContainers(ctx)
 		if err != nil {
 			return &agentgrpc.CommandResult{
@@ -1556,12 +1556,198 @@ func (h *CommandHandler) handleDockerCommand(ctx context.Context, cmd *agentgrpc
 					}
 				}
 			}
+
+			// Check for .env files inside the container
+			if container.State == "running" {
+				envFileSecrets := h.scanContainerEnvFiles(ctx, container.ID, container.Name)
+				scannedSecrets = append(scannedSecrets, envFileSecrets...)
+			}
 		}
 
 		data, _ := json.Marshal(scannedSecrets)
 		return &agentgrpc.CommandResult{
 			Success: true,
 			Message: fmt.Sprintf("scanned %d containers, found %d secrets", len(containers), len(scannedSecrets)),
+			Data:    data,
+		}
+
+	// ============ Secret Migration Operations ============
+	case "migrate_secrets":
+		// Migrate secrets from .env file to Docker file secrets
+		var migrateCmd struct {
+			ContainerID   string              `json:"container_id"`
+			Secrets       []docker.SecretMount `json:"secrets"`
+			RemoveEnvVars []string            `json:"remove_env_vars"`
+		}
+		if err := json.Unmarshal(cmd.Command, &migrateCmd); err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("failed to parse migrate_secrets command: %v", err),
+			}
+		}
+
+		if migrateCmd.ContainerID == "" {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: "container_id is required",
+			}
+		}
+		if len(migrateCmd.Secrets) == 0 {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: "at least one secret is required",
+			}
+		}
+
+		h.logger.Info("Starting secret migration",
+			zap.String("container_id", migrateCmd.ContainerID),
+			zap.Int("secrets_count", len(migrateCmd.Secrets)),
+		)
+
+		// Store original container config for rollback
+		originalInfo, err := h.docker.InspectContainer(ctx, migrateCmd.ContainerID)
+		if err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("failed to inspect container: %v", err),
+			}
+		}
+		originalConfig, _ := json.Marshal(originalInfo)
+
+		// Perform the migration
+		result, err := h.docker.RecreateContainerWithSecrets(ctx, migrateCmd.ContainerID, migrateCmd.Secrets, migrateCmd.RemoveEnvVars)
+		if err != nil {
+			h.logger.Error("Secret migration failed",
+				zap.String("container_id", migrateCmd.ContainerID),
+				zap.Error(err),
+			)
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("migration failed: %v", err),
+			}
+		}
+
+		h.logger.Info("Secret migration completed",
+			zap.String("new_container_id", result.NewContainerID),
+			zap.Int("secrets_mounted", len(result.MountedSecrets)),
+		)
+
+		// Include original config in response for potential rollback
+		response := struct {
+			*docker.SecretMigrationResult
+			OriginalConfig json.RawMessage `json:"original_config"`
+		}{
+			SecretMigrationResult: result,
+			OriginalConfig:        originalConfig,
+		}
+		data, _ := json.Marshal(response)
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: fmt.Sprintf("migrated %d secrets to container %s", len(result.MountedSecrets), result.NewContainerID),
+			Data:    data,
+		}
+
+	case "verify_migration":
+		// Verify that secrets are properly mounted in the container
+		var verifyCmd struct {
+			ContainerID     string   `json:"container_id"`
+			ExpectedSecrets []string `json:"expected_secrets"`
+		}
+		if err := json.Unmarshal(cmd.Command, &verifyCmd); err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("failed to parse verify_migration command: %v", err),
+			}
+		}
+
+		if verifyCmd.ContainerID == "" {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: "container_id is required",
+			}
+		}
+
+		h.logger.Info("Verifying secret migration",
+			zap.String("container_id", verifyCmd.ContainerID),
+			zap.Int("expected_secrets", len(verifyCmd.ExpectedSecrets)),
+		)
+
+		result, err := h.docker.VerifySecretsMigration(ctx, verifyCmd.ContainerID, verifyCmd.ExpectedSecrets)
+		if err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("verification error: %v", err),
+			}
+		}
+
+		data, _ := json.Marshal(result)
+		if result.Success {
+			return &agentgrpc.CommandResult{
+				Success: true,
+				Message: "all secrets verified successfully",
+				Data:    data,
+			}
+		}
+		return &agentgrpc.CommandResult{
+			Success: false,
+			Message: fmt.Sprintf("verification failed: %v", result.Errors),
+			Data:    data,
+		}
+
+	case "rollback_migration":
+		// Rollback a secret migration to restore original container
+		var rollbackCmd struct {
+			ContainerID    string          `json:"container_id"`
+			OriginalConfig json.RawMessage `json:"original_config"`
+			CreatedSecrets []string        `json:"created_secrets"`
+		}
+		if err := json.Unmarshal(cmd.Command, &rollbackCmd); err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("failed to parse rollback_migration command: %v", err),
+			}
+		}
+
+		if rollbackCmd.ContainerID == "" {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: "container_id is required",
+			}
+		}
+		if len(rollbackCmd.OriginalConfig) == 0 {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: "original_config is required",
+			}
+		}
+
+		h.logger.Info("Rolling back secret migration",
+			zap.String("container_id", rollbackCmd.ContainerID),
+		)
+
+		result, err := h.docker.RollbackSecretsMigration(ctx, rollbackCmd.ContainerID, rollbackCmd.OriginalConfig, rollbackCmd.CreatedSecrets)
+		if err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("rollback error: %v", err),
+			}
+		}
+
+		data, _ := json.Marshal(result)
+		if result.Success {
+			h.logger.Info("Migration rollback completed",
+				zap.String("restored_container_id", result.RestoredContainerID),
+				zap.Int("cleaned_secrets", result.CleanedUpSecrets),
+			)
+			return &agentgrpc.CommandResult{
+				Success: true,
+				Message: fmt.Sprintf("rollback successful, restored container %s", result.RestoredContainerID),
+				Data:    data,
+			}
+		}
+		return &agentgrpc.CommandResult{
+			Success: false,
+			Message: fmt.Sprintf("rollback failed: %s", result.ErrorMessage),
 			Data:    data,
 		}
 
@@ -1579,9 +1765,77 @@ type ScannedSecret struct {
 	ContainerName string `json:"container_name"`
 	Name          string `json:"name"`
 	SecretType    string `json:"secret_type"`
-	Source        string `json:"source"`
+	Source        string `json:"source"` // "environment", "env_file"
 	IsSensitive   bool   `json:"is_sensitive"`
 	Strength      string `json:"strength"`
+	EnvFilePath   string `json:"env_file_path,omitempty"` // Path to .env file if source is env_file
+}
+
+// scanContainerEnvFiles looks for .env files inside a running container
+func (h *CommandHandler) scanContainerEnvFiles(ctx context.Context, containerID, containerName string) []ScannedSecret {
+	var secrets []ScannedSecret
+
+	// Common locations to check for .env files
+	envFilePaths := []string{
+		"/app/.env",
+		"/app/.env.local",
+		"/app/.env.production",
+		"/.env",
+		"/home/.env",
+		"/var/www/.env",
+		"/var/www/html/.env",
+		"/opt/app/.env",
+		"/src/.env",
+	}
+
+	for _, envPath := range envFilePaths {
+		// Try to read the .env file using cat
+		execID, err := h.docker.ExecCreate(ctx, containerID, []string{"cat", envPath})
+		if err != nil {
+			continue
+		}
+
+		// Get the output
+		output, err := h.docker.ExecAttach(ctx, execID)
+		if err != nil || output == "" {
+			continue
+		}
+
+		// Parse the .env file content
+		lines := strings.Split(output, "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			// Skip empty lines and comments
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+
+			// Parse KEY=VALUE
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			key := strings.TrimSpace(parts[0])
+			value := strings.Trim(strings.TrimSpace(parts[1]), "\"'")
+
+			// Check if this looks like a secret
+			secretType, isSensitive := detectSecretType(key, value)
+			if secretType != "" {
+				secrets = append(secrets, ScannedSecret{
+					ContainerID:   containerID,
+					ContainerName: containerName,
+					Name:          key,
+					SecretType:    secretType,
+					Source:        "env_file",
+					IsSensitive:   isSensitive,
+					Strength:      analyzeSecretStrength(value),
+					EnvFilePath:   envPath,
+				})
+			}
+		}
+	}
+
+	return secrets
 }
 
 // detectSecretType checks if an environment variable looks like a secret
