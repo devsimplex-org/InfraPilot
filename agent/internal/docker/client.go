@@ -153,6 +153,13 @@ type ImagePullProgress struct {
 	ID       string `json:"id,omitempty"`
 }
 
+// AuthConfig represents authentication for Docker registry operations
+type AuthConfig struct {
+	Username      string `json:"username,omitempty"`
+	Password      string `json:"password,omitempty"`
+	ServerAddress string `json:"server_address,omitempty"`
+}
+
 func NewClient() (*Client, error) {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
