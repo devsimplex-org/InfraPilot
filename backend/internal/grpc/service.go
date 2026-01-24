@@ -608,6 +608,8 @@ const (
 	DockerActionDeleteImage      = "delete_image"
 	// Container operations
 	DockerActionRunContainer = "run_container"
+	// Secret scanning
+	DockerActionScanSecrets = "scan_secrets"
 )
 
 // ContainerRunCommand represents a command to run a new container
@@ -627,6 +629,17 @@ type ContainerRunResult struct {
 	ContainerID string `json:"container_id"`
 	Name        string `json:"name"`
 	Status      string `json:"status"`
+}
+
+// ScannedSecret represents a secret found during container scanning
+type ScannedSecret struct {
+	ContainerID   string `json:"container_id"`
+	ContainerName string `json:"container_name"`
+	Name          string `json:"name"`
+	SecretType    string `json:"secret_type"`
+	Source        string `json:"source"`
+	IsSensitive   bool   `json:"is_sensitive"`
+	Strength      string `json:"strength"`
 }
 
 // DockerAuthConfig represents authentication for Docker registry operations

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -1507,12 +1508,188 @@ func (h *CommandHandler) handleDockerCommand(ctx context.Context, cmd *agentgrpc
 			Data:    data,
 		}
 
+	case "scan_secrets":
+		// Scan all containers for environment variable secrets
+		containers, err := h.docker.ListContainers(ctx)
+		if err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("failed to list containers: %v", err),
+			}
+		}
+
+		var scannedSecrets []ScannedSecret
+		for _, container := range containers {
+			// Inspect each container to get environment variables
+			info, err := h.docker.InspectContainer(ctx, container.ID)
+			if err != nil {
+				h.logger.Warn("Failed to inspect container",
+					zap.String("container_id", container.ID),
+					zap.Error(err),
+				)
+				continue
+			}
+
+			// Extract and analyze environment variables
+			if info.Config != nil && len(info.Config.Env) > 0 {
+				for _, envVar := range info.Config.Env {
+					// Parse KEY=VALUE format
+					parts := strings.SplitN(envVar, "=", 2)
+					if len(parts) != 2 {
+						continue
+					}
+					key := parts[0]
+					value := parts[1]
+
+					// Check if this looks like a secret
+					secretType, isSensitive := detectSecretType(key, value)
+					if secretType != "" {
+						scannedSecrets = append(scannedSecrets, ScannedSecret{
+							ContainerID:   container.ID,
+							ContainerName: container.Name,
+							Name:          key,
+							SecretType:    secretType,
+							Source:        "environment",
+							IsSensitive:   isSensitive,
+							Strength:      analyzeSecretStrength(value),
+						})
+					}
+				}
+			}
+		}
+
+		data, _ := json.Marshal(scannedSecrets)
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: fmt.Sprintf("scanned %d containers, found %d secrets", len(containers), len(scannedSecrets)),
+			Data:    data,
+		}
+
 	default:
 		return &agentgrpc.CommandResult{
 			Success: false,
 			Message: fmt.Sprintf("unknown docker action: %s", dockerCmd.Action),
 		}
 	}
+}
+
+// ScannedSecret represents a secret found during scanning
+type ScannedSecret struct {
+	ContainerID   string `json:"container_id"`
+	ContainerName string `json:"container_name"`
+	Name          string `json:"name"`
+	SecretType    string `json:"secret_type"`
+	Source        string `json:"source"`
+	IsSensitive   bool   `json:"is_sensitive"`
+	Strength      string `json:"strength"`
+}
+
+// detectSecretType checks if an environment variable looks like a secret
+// Returns the secret type and whether it's sensitive
+func detectSecretType(key, value string) (string, bool) {
+	keyUpper := strings.ToUpper(key)
+
+	// Skip empty values
+	if value == "" {
+		return "", false
+	}
+
+	// Check for common secret patterns in key names
+	secretPatterns := map[string]string{
+		"PASSWORD":     "password",
+		"PASSWD":       "password",
+		"SECRET":       "secret",
+		"API_KEY":      "api_key",
+		"APIKEY":       "api_key",
+		"API_SECRET":   "api_secret",
+		"ACCESS_KEY":   "access_key",
+		"ACCESS_TOKEN": "access_token",
+		"AUTH_TOKEN":   "auth_token",
+		"TOKEN":        "token",
+		"PRIVATE_KEY":  "private_key",
+		"CREDENTIALS":  "credentials",
+		"AWS_SECRET":   "aws_secret",
+		"DB_PASSWORD":  "database_password",
+		"DATABASE_PASSWORD": "database_password",
+		"MYSQL_PASSWORD":    "database_password",
+		"POSTGRES_PASSWORD": "database_password",
+		"REDIS_PASSWORD":    "database_password",
+		"MONGO_PASSWORD":    "database_password",
+		"ENCRYPTION_KEY":    "encryption_key",
+		"SIGNING_KEY":       "signing_key",
+		"JWT_SECRET":        "jwt_secret",
+		"SESSION_SECRET":    "session_secret",
+		"COOKIE_SECRET":     "cookie_secret",
+		"SMTP_PASSWORD":     "smtp_password",
+		"SSH_KEY":           "ssh_key",
+		"SSL_KEY":           "ssl_key",
+		"TLS_KEY":           "tls_key",
+		"WEBHOOK_SECRET":    "webhook_secret",
+		"CLIENT_SECRET":     "client_secret",
+	}
+
+	for pattern, secretType := range secretPatterns {
+		if strings.Contains(keyUpper, pattern) {
+			return secretType, true
+		}
+	}
+
+	// Check for suffixes
+	suffixes := []string{"_KEY", "_SECRET", "_PASSWORD", "_TOKEN", "_CREDENTIALS"}
+	for _, suffix := range suffixes {
+		if strings.HasSuffix(keyUpper, suffix) {
+			return "generic_secret", true
+		}
+	}
+
+	return "", false
+}
+
+// analyzeSecretStrength returns the strength of a secret value
+func analyzeSecretStrength(value string) string {
+	length := len(value)
+
+	// Basic strength analysis
+	hasLower := false
+	hasUpper := false
+	hasDigit := false
+	hasSpecial := false
+
+	for _, c := range value {
+		switch {
+		case c >= 'a' && c <= 'z':
+			hasLower = true
+		case c >= 'A' && c <= 'Z':
+			hasUpper = true
+		case c >= '0' && c <= '9':
+			hasDigit = true
+		default:
+			hasSpecial = true
+		}
+	}
+
+	complexity := 0
+	if hasLower {
+		complexity++
+	}
+	if hasUpper {
+		complexity++
+	}
+	if hasDigit {
+		complexity++
+	}
+	if hasSpecial {
+		complexity++
+	}
+
+	if length >= 32 && complexity >= 3 {
+		return "strong"
+	} else if length >= 16 && complexity >= 2 {
+		return "medium"
+	} else if length >= 8 {
+		return "weak"
+	}
+	return "very_weak"
 }
 
 // getStringOption safely extracts a string value from options map
