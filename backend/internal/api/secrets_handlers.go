@@ -1,11 +1,14 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	agentgrpc "github.com/infrapilot/backend/internal/grpc"
 	"go.uber.org/zap"
 )
 
@@ -819,6 +822,7 @@ func (h *Handler) triggerSecretScan(c *gin.Context) {
 		}
 	}
 
+	// Create scan record with running status
 	var scanID uuid.UUID
 	err := h.db.QueryRow(c.Request.Context(), `
 		INSERT INTO secret_scan_results (org_id, agent_id, deployment_id, scan_type, scan_target, status)
@@ -833,5 +837,137 @@ func (h *Handler) triggerSecretScan(c *gin.Context) {
 		return
 	}
 
+	// Get agents to scan
+	var agentsToScan []uuid.UUID
+	if agentID != nil {
+		agentsToScan = append(agentsToScan, *agentID)
+	} else {
+		// Get all active agents for this org
+		rows, err := h.db.Query(c.Request.Context(), `
+			SELECT id FROM agents WHERE org_id = $1 AND status = 'active'`,
+			orgID,
+		)
+		if err != nil {
+			h.logger.Error("Failed to get agents", zap.Error(err))
+		} else {
+			defer rows.Close()
+			for rows.Next() {
+				var id uuid.UUID
+				if err := rows.Scan(&id); err == nil {
+					agentsToScan = append(agentsToScan, id)
+				}
+			}
+		}
+	}
+
+	// Run scan asynchronously (use background context since request may complete)
+	go func() {
+		ctx := context.Background()
+		var totalSecrets, successCount, errorCount int
+
+		for _, agID := range agentsToScan {
+			secrets, err := h.scanAgentSecrets(ctx, orgID, agID, scanID)
+			if err != nil {
+				h.logger.Error("Failed to scan agent secrets",
+					zap.String("agent_id", agID.String()),
+					zap.Error(err),
+				)
+				errorCount++
+				continue
+			}
+			successCount++
+			totalSecrets += len(secrets)
+		}
+
+		// Update scan status
+		status := "completed"
+		if errorCount > 0 && successCount == 0 {
+			status = "failed"
+		} else if errorCount > 0 {
+			status = "partial"
+		}
+
+		_, err := h.db.Exec(ctx, `
+			UPDATE secret_scan_results
+			SET status = $1, completed_at = NOW(), secrets_found = $2
+			WHERE id = $3`,
+			status, totalSecrets, scanID,
+		)
+		if err != nil {
+			h.logger.Error("Failed to update scan status", zap.Error(err))
+		}
+	}()
+
 	c.JSON(http.StatusCreated, gin.H{"id": scanID, "status": "running", "message": "Secret scan started"})
+}
+
+// scanAgentSecrets sends a scan_secrets command to an agent and processes results
+func (h *Handler) scanAgentSecrets(ctx context.Context, orgID, agentID, scanID uuid.UUID) ([]agentgrpc.ScannedSecret, error) {
+	// Build the scan command
+	cmdPayload, _ := json.Marshal(agentgrpc.DockerResourceCommand{
+		Action: agentgrpc.DockerActionScanSecrets,
+	})
+	cmd := &agentgrpc.BackendMessage{
+		RequestId: uuid.New().String(),
+		Type:      "docker",
+		Command:   cmdPayload,
+	}
+
+	// Send command to agent
+	resp, err := agentgrpc.SendCommand(agentID.String(), cmd, 60*time.Second)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse response
+	result, err := resp.GetCommandResult()
+	if err != nil || result == nil || !result.Success {
+		if result != nil {
+			return nil, err
+		}
+		return nil, err
+	}
+
+	// Parse scanned secrets
+	var secrets []agentgrpc.ScannedSecret
+	if err := json.Unmarshal(result.Data, &secrets); err != nil {
+		return nil, err
+	}
+
+	// Store secrets in database
+	now := time.Now()
+	for _, secret := range secrets {
+		// Create location identifier from container info
+		location := secret.ContainerID
+		if location == "" {
+			location = secret.ContainerName
+		}
+
+		_, err := h.db.Exec(ctx, `
+			INSERT INTO secrets_inventory (
+				org_id, agent_id, name, secret_type, source, location,
+				container_id, container_name, classification, environment,
+				is_sensitive, strength, auto_discovered, discovered_at, last_scanned_at
+			) VALUES (
+				$1, $2, $3, $4, $5, $6,
+				$7, $8, 'internal', 'unknown',
+				$9, $10, true, $11, $11
+			)
+			ON CONFLICT (org_id, name, source, location)
+			DO UPDATE SET
+				last_scanned_at = $11,
+				strength = $10`,
+			orgID, agentID, secret.Name, secret.SecretType, secret.Source, location,
+			secret.ContainerID, secret.ContainerName,
+			secret.IsSensitive, secret.Strength, now,
+		)
+		if err != nil {
+			h.logger.Warn("Failed to insert secret",
+				zap.String("name", secret.Name),
+				zap.Error(err),
+			)
+		}
+	}
+
+	return secrets, nil
 }
