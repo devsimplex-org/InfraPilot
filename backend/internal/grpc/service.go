@@ -546,6 +546,13 @@ type ContainerRunResult struct {
 	Status      string `json:"status"`
 }
 
+// DockerAuthConfig represents authentication for Docker registry operations
+type DockerAuthConfig struct {
+	Username      string `json:"username,omitempty"`
+	Password      string `json:"password,omitempty"`
+	ServerAddress string `json:"server_address,omitempty"`
+}
+
 // DockerResourceCommand represents a Docker resource command (networks, volumes, images)
 type DockerResourceCommand struct {
 	Action     string                 `json:"action"`
@@ -555,6 +562,7 @@ type DockerResourceCommand struct {
 	ImageID    string                 `json:"image_id,omitempty"`
 	Force      bool                   `json:"force,omitempty"`
 	Options    map[string]interface{} `json:"options,omitempty"`
+	AuthConfig *DockerAuthConfig      `json:"auth_config,omitempty"`
 }
 
 type NetworkCommand struct {

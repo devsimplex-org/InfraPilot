@@ -1122,6 +1122,13 @@ func (h *CommandHandler) handleSSLCommand(ctx context.Context, cmd *agentgrpc.Ba
 	}
 }
 
+// DockerAuthConfig represents authentication for Docker registry operations
+type DockerAuthConfig struct {
+	Username      string `json:"username,omitempty"`
+	Password      string `json:"password,omitempty"`
+	ServerAddress string `json:"server_address,omitempty"`
+}
+
 // DockerCommand represents a Docker resource command from the backend
 type DockerCommand struct {
 	Action     string                 `json:"action"`
@@ -1131,6 +1138,7 @@ type DockerCommand struct {
 	ImageID    string                 `json:"image_id,omitempty"`
 	Force      bool                   `json:"force,omitempty"`
 	Options    map[string]interface{} `json:"options,omitempty"`
+	AuthConfig *DockerAuthConfig      `json:"auth_config,omitempty"`
 }
 
 func (h *CommandHandler) handleDockerCommand(ctx context.Context, cmd *agentgrpc.BackendMessage) *agentgrpc.CommandResult {
@@ -1332,7 +1340,16 @@ func (h *CommandHandler) handleDockerCommand(ctx context.Context, cmd *agentgrpc
 				Message: "image reference is required",
 			}
 		}
-		if err := h.docker.PullImage(ctx, dockerCmd.ImageRef); err != nil {
+		// Convert auth config if provided
+		var auth *docker.AuthConfig
+		if dockerCmd.AuthConfig != nil {
+			auth = &docker.AuthConfig{
+				Username:      dockerCmd.AuthConfig.Username,
+				Password:      dockerCmd.AuthConfig.Password,
+				ServerAddress: dockerCmd.AuthConfig.ServerAddress,
+			}
+		}
+		if err := h.docker.PullImage(ctx, dockerCmd.ImageRef, auth); err != nil {
 			return &agentgrpc.CommandResult{
 				Success: false,
 				Message: err.Error(),

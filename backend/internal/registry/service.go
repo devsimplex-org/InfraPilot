@@ -368,9 +368,18 @@ func (s *Service) ListTags(ctx context.Context, orgID, registryID uuid.UUID, rep
 	return client.ListTags(ctx, repository, page, pageSize)
 }
 
-// getClient creates a registry client for the given registry
-func (s *Service) getClient(registry *Registry) (Client, error) {
-	// Decrypt credentials
+// GetDecryptedCredentials retrieves and decrypts credentials for a registry
+func (s *Service) GetDecryptedCredentials(ctx context.Context, orgID, registryID uuid.UUID) (*Credentials, error) {
+	registry, err := s.GetRegistry(ctx, orgID, registryID)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.decryptCredentials(registry)
+}
+
+// decryptCredentials decrypts the credentials for a registry
+func (s *Service) decryptCredentials(registry *Registry) (*Credentials, error) {
 	var creds Credentials
 	if len(registry.CredentialsEncrypted) > 0 {
 		var credsJSON []byte
@@ -391,6 +400,16 @@ func (s *Service) getClient(registry *Registry) (Client, error) {
 		if err := json.Unmarshal(credsJSON, &creds); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal credentials: %w", err)
 		}
+	}
+
+	return &creds, nil
+}
+
+// getClient creates a registry client for the given registry
+func (s *Service) getClient(registry *Registry) (Client, error) {
+	creds, err := s.decryptCredentials(registry)
+	if err != nil {
+		return nil, err
 	}
 
 	namespace := ""
