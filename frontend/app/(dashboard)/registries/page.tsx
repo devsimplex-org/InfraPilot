@@ -26,6 +26,7 @@ import {
   CheckSquare,
   Square,
   X,
+  Rocket,
 } from "lucide-react";
 import {
   api,
@@ -53,6 +54,7 @@ import {
 } from "@/components/ui/page-layout";
 import { ScanModal, ScanImage } from "@/components/ui/ScanModal";
 import { usePullWebSocket, PullProgress } from "@/hooks/usePullWebSocket";
+import { DeployDialog } from "@/components/DeployDialog";
 
 type Tab = "registries" | "browse";
 
@@ -86,6 +88,14 @@ export default function RegistriesPage() {
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [showScanModal, setShowScanModal] = useState(false);
   const [scanImages, setScanImages] = useState<ScanImage[]>([]);
+
+  // Deploy dialog state
+  const [showDeployDialog, setShowDeployDialog] = useState(false);
+  const [deployImageInfo, setDeployImageInfo] = useState<{
+    repository: string;
+    tag: string;
+    registryId: string;
+  } | null>(null);
 
   // State for tracking pulling images with progress
   const [pullStates, setPullStates] = useState<Map<string, ImagePullState>>(new Map());
@@ -296,6 +306,16 @@ export default function RegistriesPage() {
     const ref = getTagImageRef(registry, repoName, tagName);
     setScanImages([{ reference: ref, tag: tagName }]);
     setShowScanModal(true);
+  };
+
+  const handleDeployTag = (registry: ContainerRegistry, repoName: string, tagName: string) => {
+    const imageRepository = getTagImageRef(registry, repoName, tagName).split(":")[0];
+    setDeployImageInfo({
+      repository: imageRepository,
+      tag: tagName,
+      registryId: registry.id,
+    });
+    setShowDeployDialog(true);
   };
 
   const handlePullImage = (registry: ContainerRegistry, repoName: string, tagName: string) => {
@@ -972,6 +992,18 @@ export default function RegistriesPage() {
                             onClick={(e) => {
                               e.stopPropagation();
                               if (selectedRegistry && selectedRepo) {
+                                handleDeployTag(selectedRegistry, selectedRepo, tag.name);
+                              }
+                            }}
+                            className="p-2 text-gray-400 hover:text-green-600 dark:hover:text-green-400"
+                            title="Deploy image"
+                          >
+                            <Rocket className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (selectedRegistry && selectedRepo) {
                                 const repo = reposData?.repositories.find(
                                   (r) => r.name === selectedRepo
                                 );
@@ -1156,6 +1188,20 @@ export default function RegistriesPage() {
         images={scanImages}
         mode="both"
       />
+
+      {/* Deploy Dialog */}
+      {deployImageInfo && (
+        <DeployDialog
+          isOpen={showDeployDialog}
+          onClose={() => {
+            setShowDeployDialog(false);
+            setDeployImageInfo(null);
+          }}
+          imageRepository={deployImageInfo.repository}
+          imageTag={deployImageInfo.tag}
+          registryId={deployImageInfo.registryId}
+        />
+      )}
     </div>
   );
 }
