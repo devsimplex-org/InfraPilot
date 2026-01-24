@@ -14,6 +14,7 @@ import (
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/network"
+	"github.com/docker/docker/api/types/registry"
 	"github.com/docker/docker/api/types/volume"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
@@ -151,6 +152,35 @@ type ImagePullProgress struct {
 	Status   string `json:"status"`
 	Progress string `json:"progress,omitempty"`
 	ID       string `json:"id,omitempty"`
+}
+
+// AuthConfig represents authentication for Docker registry operations
+type AuthConfig struct {
+	Username      string `json:"username,omitempty"`
+	Password      string `json:"password,omitempty"`
+	ServerAddress string `json:"server_address,omitempty"`
+}
+
+// PullProgressInfo represents progress information during image pull
+type PullProgressInfo struct {
+	Status   string `json:"status"`   // "pulling", "extracting", "complete", "error"
+	Current  int64  `json:"current"`  // bytes downloaded/extracted
+	Total    int64  `json:"total"`    // total bytes
+	Progress int    `json:"progress"` // 0-100 percentage
+	Layer    string `json:"layer,omitempty"`
+	Message  string `json:"message,omitempty"`
+}
+
+// DockerPullProgress represents a single progress message from Docker's pull API
+type DockerPullProgress struct {
+	Status         string `json:"status"`
+	ID             string `json:"id"`
+	ProgressDetail struct {
+		Current int64 `json:"current"`
+		Total   int64 `json:"total"`
+	} `json:"progressDetail"`
+	Progress string `json:"progress"`
+	Error    string `json:"error,omitempty"`
 }
 
 func NewClient() (*Client, error) {
@@ -853,9 +883,25 @@ func (c *Client) InspectImage(ctx context.Context, imageID string) (*ImageInfo, 
 	}, nil
 }
 
-// PullImage pulls a Docker image from a registry
-func (c *Client) PullImage(ctx context.Context, imageRef string) error {
-	reader, err := c.cli.ImagePull(ctx, imageRef, image.PullOptions{})
+// PullImage pulls a Docker image from a registry with optional authentication
+func (c *Client) PullImage(ctx context.Context, imageRef string, auth *AuthConfig) error {
+	pullOpts := image.PullOptions{}
+
+	// Build registry auth if credentials are provided
+	if auth != nil && (auth.Username != "" || auth.Password != "") {
+		authConfig := registry.AuthConfig{
+			Username:      auth.Username,
+			Password:      auth.Password,
+			ServerAddress: auth.ServerAddress,
+		}
+		encodedAuth, err := registry.EncodeAuthConfig(authConfig)
+		if err != nil {
+			return fmt.Errorf("failed to encode auth config: %w", err)
+		}
+		pullOpts.RegistryAuth = encodedAuth
+	}
+
+	reader, err := c.cli.ImagePull(ctx, imageRef, pullOpts)
 	if err != nil {
 		return fmt.Errorf("failed to pull image: %w", err)
 	}
@@ -872,6 +918,120 @@ func (c *Client) PullImage(ctx context.Context, imageRef string) error {
 			// Ignore decode errors, just continue
 			continue
 		}
+	}
+
+	return nil
+}
+
+// PullImageWithProgress pulls a Docker image and reports progress via callback
+func (c *Client) PullImageWithProgress(ctx context.Context, imageRef string, auth *AuthConfig, progressFn func(*PullProgressInfo)) error {
+	pullOpts := image.PullOptions{}
+
+	// Build registry auth if credentials are provided
+	if auth != nil && (auth.Username != "" || auth.Password != "") {
+		authConfig := registry.AuthConfig{
+			Username:      auth.Username,
+			Password:      auth.Password,
+			ServerAddress: auth.ServerAddress,
+		}
+		encodedAuth, err := registry.EncodeAuthConfig(authConfig)
+		if err != nil {
+			return fmt.Errorf("failed to encode auth config: %w", err)
+		}
+		pullOpts.RegistryAuth = encodedAuth
+	}
+
+	reader, err := c.cli.ImagePull(ctx, imageRef, pullOpts)
+	if err != nil {
+		return fmt.Errorf("failed to pull image: %w", err)
+	}
+	defer reader.Close()
+
+	// Send initial progress immediately
+	if progressFn != nil {
+		progressFn(&PullProgressInfo{
+			Status:   "pulling",
+			Progress: 0,
+			Message:  "Starting download...",
+		})
+	}
+
+	// Track progress across layers
+	layerProgress := make(map[string]*DockerPullProgress)
+	var totalBytes, currentBytes int64
+	lastReportTime := time.Now().Add(-300 * time.Millisecond) // Allow first progress to send immediately
+
+	decoder := json.NewDecoder(reader)
+	for {
+		var progress DockerPullProgress
+		if err := decoder.Decode(&progress); err != nil {
+			if err == io.EOF {
+				break
+			}
+			continue
+		}
+
+		// Handle errors
+		if progress.Error != "" {
+			if progressFn != nil {
+				progressFn(&PullProgressInfo{
+					Status:  "error",
+					Message: progress.Error,
+				})
+			}
+			return fmt.Errorf("pull error: %s", progress.Error)
+		}
+
+		// Track layer progress
+		if progress.ID != "" {
+			layerProgress[progress.ID] = &progress
+
+			// Calculate total progress across all layers
+			totalBytes = 0
+			currentBytes = 0
+			for _, lp := range layerProgress {
+				if lp.ProgressDetail.Total > 0 {
+					totalBytes += lp.ProgressDetail.Total
+					currentBytes += lp.ProgressDetail.Current
+				}
+			}
+		}
+
+		// Report progress (throttle to avoid flooding)
+		if progressFn != nil && time.Since(lastReportTime) > 200*time.Millisecond {
+			lastReportTime = time.Now()
+
+			status := "pulling"
+			if strings.Contains(strings.ToLower(progress.Status), "extract") {
+				status = "extracting"
+			} else if strings.Contains(strings.ToLower(progress.Status), "complete") ||
+				strings.Contains(strings.ToLower(progress.Status), "already exists") {
+				status = "complete"
+			}
+
+			progressPercent := 0
+			if totalBytes > 0 {
+				progressPercent = int(float64(currentBytes) / float64(totalBytes) * 100)
+			}
+
+			progressFn(&PullProgressInfo{
+				Status:   status,
+				Current:  currentBytes,
+				Total:    totalBytes,
+				Progress: progressPercent,
+				Layer:    progress.ID,
+				Message:  progress.Status,
+			})
+		}
+	}
+
+	// Send final complete message
+	if progressFn != nil {
+		progressFn(&PullProgressInfo{
+			Status:   "complete",
+			Progress: 100,
+			Message:  "Pull complete",
+		})
 	}
 
 	return nil

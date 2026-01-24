@@ -106,6 +106,73 @@ func SendCommandAsync(agentID string, cmd *BackendMessage) error {
 	}
 }
 
+// SendCommandWithProgress sends a command and receives progress updates until completion
+// Progress updates are sent to progressCh, and the final response is returned
+func SendCommandWithProgress(agentID string, cmd *BackendMessage, timeout time.Duration, progressCh chan<- *PullProgress) (*AgentMessage, error) {
+	conn, ok := GetConnectedAgent(agentID)
+	if !ok {
+		return nil, status.Error(codes.Unavailable, "agent not connected")
+	}
+
+	// Create response channel - buffered to receive multiple messages
+	responseCh := make(chan *AgentMessage, 100)
+	conn.mu.Lock()
+	conn.ResponseCh[cmd.RequestId] = responseCh
+	conn.mu.Unlock()
+
+	defer func() {
+		conn.mu.Lock()
+		delete(conn.ResponseCh, cmd.RequestId)
+		conn.mu.Unlock()
+	}()
+
+	// Send command
+	select {
+	case conn.SendCh <- cmd:
+	case <-time.After(timeout):
+		return nil, status.Error(codes.DeadlineExceeded, "send timeout")
+	case <-conn.ctx.Done():
+		return nil, status.Error(codes.Unavailable, "agent disconnected")
+	}
+
+	// Wait for responses - continue until we get a final (non-progress) message
+	timeoutTimer := time.NewTimer(timeout)
+	defer timeoutTimer.Stop()
+
+	for {
+		select {
+		case resp := <-responseCh:
+			// Check if this is a progress message
+			if resp.Type == "pull_progress" {
+				// Parse and forward progress
+				var progress PullProgress
+				if err := json.Unmarshal(resp.Data, &progress); err == nil && progressCh != nil {
+					select {
+					case progressCh <- &progress:
+					default:
+						// Progress channel full, skip
+					}
+				}
+				// Reset timeout on each progress message
+				if !timeoutTimer.Stop() {
+					select {
+					case <-timeoutTimer.C:
+					default:
+					}
+				}
+				timeoutTimer.Reset(timeout)
+				continue
+			}
+			// This is the final response
+			return resp, nil
+		case <-timeoutTimer.C:
+			return nil, status.Error(codes.DeadlineExceeded, "response timeout")
+		case <-conn.ctx.Done():
+			return nil, status.Error(codes.Unavailable, "agent disconnected")
+		}
+	}
+}
+
 // RegisterAgentServiceServer registers the service with a gRPC server
 func RegisterAgentServiceServer(s *grpc.Server, srv *AgentService) {
 	// In production, use generated protobuf code
@@ -274,21 +341,34 @@ func (s *AgentService) CommandStream(agentID string, recvCh <-chan *AgentMessage
 					return
 				}
 
-				s.logger.Debug("Received message from agent",
+				s.logger.Info("Received message from agent",
 					zap.String("agent_id", agentID),
 					zap.String("request_id", msg.RequestId),
+					zap.String("type", msg.Type),
 				)
 
 				// Route response to waiting handler
 				conn.mu.Lock()
 				if ch, exists := conn.ResponseCh[msg.RequestId]; exists {
+					s.logger.Info("Routing message to response channel",
+						zap.String("request_id", msg.RequestId),
+						zap.String("type", msg.Type),
+					)
 					select {
 					case ch <- msg:
+						s.logger.Info("Message sent to response channel",
+							zap.String("request_id", msg.RequestId),
+						)
 					default:
 						s.logger.Warn("Response channel full, dropping message",
 							zap.String("request_id", msg.RequestId),
 						)
 					}
+				} else {
+					s.logger.Warn("No response channel for request",
+						zap.String("request_id", msg.RequestId),
+						zap.String("type", msg.Type),
+					)
 				}
 				conn.mu.Unlock()
 
@@ -415,7 +495,9 @@ type BackendMessage struct {
 
 type AgentMessage struct {
 	RequestId string          `json:"request_id"`
-	Response  json.RawMessage `json:"response"` // One of: CommandResult, ErrorResponse, etc.
+	Type      string          `json:"type,omitempty"`     // "pull_progress" for streaming updates, empty for final response
+	Response  json.RawMessage `json:"response,omitempty"` // One of: CommandResult, ErrorResponse, etc.
+	Data      json.RawMessage `json:"data,omitempty"`     // Used for progress data
 }
 
 // GetCommandResult parses the Response as CommandResult
@@ -519,12 +601,15 @@ const (
 	DockerActionCreateVolume  = "create_volume"
 	DockerActionDeleteVolume  = "delete_volume"
 	// Image operations
-	DockerActionListImages   = "list_images"
-	DockerActionInspectImage = "inspect_image"
-	DockerActionPullImage    = "pull_image"
-	DockerActionDeleteImage  = "delete_image"
+	DockerActionListImages       = "list_images"
+	DockerActionInspectImage     = "inspect_image"
+	DockerActionPullImage        = "pull_image"
+	DockerActionPullImageStream  = "pull_image_stream" // Pull with progress streaming
+	DockerActionDeleteImage      = "delete_image"
 	// Container operations
 	DockerActionRunContainer = "run_container"
+	// Secret scanning
+	DockerActionScanSecrets = "scan_secrets"
 )
 
 // ContainerRunCommand represents a command to run a new container
@@ -546,6 +631,24 @@ type ContainerRunResult struct {
 	Status      string `json:"status"`
 }
 
+// ScannedSecret represents a secret found during container scanning
+type ScannedSecret struct {
+	ContainerID   string `json:"container_id"`
+	ContainerName string `json:"container_name"`
+	Name          string `json:"name"`
+	SecretType    string `json:"secret_type"`
+	Source        string `json:"source"`
+	IsSensitive   bool   `json:"is_sensitive"`
+	Strength      string `json:"strength"`
+}
+
+// DockerAuthConfig represents authentication for Docker registry operations
+type DockerAuthConfig struct {
+	Username      string `json:"username,omitempty"`
+	Password      string `json:"password,omitempty"`
+	ServerAddress string `json:"server_address,omitempty"`
+}
+
 // DockerResourceCommand represents a Docker resource command (networks, volumes, images)
 type DockerResourceCommand struct {
 	Action     string                 `json:"action"`
@@ -555,6 +658,7 @@ type DockerResourceCommand struct {
 	ImageID    string                 `json:"image_id,omitempty"`
 	Force      bool                   `json:"force,omitempty"`
 	Options    map[string]interface{} `json:"options,omitempty"`
+	AuthConfig *DockerAuthConfig      `json:"auth_config,omitempty"`
 }
 
 type NetworkCommand struct {
@@ -582,6 +686,16 @@ type NetworkInfo struct {
 	Scope      string
 	Internal   bool
 	Containers map[string]string
+}
+
+// PullProgress represents progress of an image pull operation
+type PullProgress struct {
+	Status   string `json:"status"`   // "pulling", "extracting", "complete", "error"
+	Current  int64  `json:"current"`  // bytes downloaded
+	Total    int64  `json:"total"`    // total bytes
+	Progress int    `json:"progress"` // 0-100 percentage
+	Layer    string `json:"layer,omitempty"`
+	Message  string `json:"message,omitempty"`
 }
 
 type NetworkListResponse struct {
