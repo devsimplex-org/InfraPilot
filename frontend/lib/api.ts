@@ -3542,12 +3542,12 @@ export const api = {
   getDockerImage: (agentId: string, imageId: string) =>
     fetchAPI<DockerImage>(`/agents/${agentId}/docker/images/${encodeURIComponent(imageId)}`),
 
-  pullDockerImage: (agentId: string, image: string) =>
+  pullDockerImage: (agentId: string, image: string, registryId?: string) =>
     fetchAPI<{ success: boolean; message: string }>(
       `/agents/${agentId}/docker/images/pull`,
       {
         method: "POST",
-        body: JSON.stringify({ image }),
+        body: JSON.stringify({ image, registry_id: registryId }),
       }
     ),
 

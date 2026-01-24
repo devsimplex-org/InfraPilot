@@ -18,10 +18,12 @@ import {
   Square,
   MinusSquare,
   Filter,
+  Rocket,
 } from "lucide-react";
 import { api, DockerImage } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { ScanModal, ScanImage } from "@/components/ui/ScanModal";
+import { DeployDialog } from "@/components/DeployDialog";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
@@ -58,6 +60,13 @@ export default function ImagesPage() {
   // Scan modal state
   const [showScanModal, setShowScanModal] = useState(false);
   const [scanImages, setScanImages] = useState<ScanImage[]>([]);
+
+  // Deploy dialog state
+  const [showDeployDialog, setShowDeployDialog] = useState(false);
+  const [deployImageInfo, setDeployImageInfo] = useState<{
+    repository: string;
+    tag: string;
+  } | null>(null);
 
   // Fetch agents
   const { data: agents } = useQuery({
@@ -188,6 +197,18 @@ export default function ImagesPage() {
       tag: image.tags[0]?.split(":")[1],
     }]);
     setShowScanModal(true);
+  };
+
+  const handleDeploy = (image: DockerImage) => {
+    const tag = image.tags[0] || "";
+    const parts = tag.split(":");
+    const repository = parts.slice(0, -1).join(":") || parts[0] || image.id;
+    const tagName = parts.length > 1 ? parts[parts.length - 1] : "latest";
+    setDeployImageInfo({
+      repository,
+      tag: tagName,
+    });
+    setShowDeployDialog(true);
   };
 
   // Bulk delete function
@@ -723,14 +744,24 @@ export default function ImagesPage() {
                   <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
                     Actions
                   </h3>
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    onClick={() => setShowDeleteModal(true)}
-                  >
-                    <Trash2 className="h-4 w-4 mr-1" />
-                    Delete Image
-                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => handleDeploy(selectedImage)}
+                    >
+                      <Rocket className="h-4 w-4 mr-1" />
+                      Deploy
+                    </Button>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={() => setShowDeleteModal(true)}
+                    >
+                      <Trash2 className="h-4 w-4 mr-1" />
+                      Delete Image
+                    </Button>
+                  </div>
                   {selectedImage.used_by.length > 0 && (
                     <p className="text-xs text-yellow-600 dark:text-yellow-400 mt-2">
                       Warning: Image is in use. Deletion may require force.
@@ -978,6 +1009,19 @@ export default function ImagesPage() {
         images={scanImages}
         mode="both"
       />
+
+      {/* Deploy Dialog */}
+      {deployImageInfo && (
+        <DeployDialog
+          isOpen={showDeployDialog}
+          onClose={() => {
+            setShowDeployDialog(false);
+            setDeployImageInfo(null);
+          }}
+          imageRepository={deployImageInfo.repository}
+          imageTag={deployImageInfo.tag}
+        />
+      )}
     </div>
   );
 }
