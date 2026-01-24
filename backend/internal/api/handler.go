@@ -212,6 +212,12 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 			// CVE-Centric View (Epic 1: Supply Chain Security)
 			agents.GET(":id/cves", h.getCVESummaries)
 			agents.GET(":id/cves/:cve_id", h.getCVEDetail)
+
+			// Secret Migrations (agent-scoped)
+			agents.GET("/:id/secrets/migrations", h.listSecretMigrations)
+			agents.POST("/:id/secrets/migrations", h.RequireModifyContainers(), h.createMigration)
+			agents.GET("/:id/secrets/migrations/:migration_id", h.getMigration)
+			agents.POST("/:id/secrets/migrations/:migration_id/rollback", h.RequireModifyContainers(), h.rollbackMigration)
 			}
 
 			// Services view (cross-agent)

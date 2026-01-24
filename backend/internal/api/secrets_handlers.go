@@ -937,9 +937,11 @@ func (h *Handler) scanAgentSecrets(ctx context.Context, orgID, agentID, scanID u
 	// Store secrets in database
 	now := time.Now()
 	for _, secret := range secrets {
-		// Create location identifier from container info
+		// Create location identifier - use env file path if available, otherwise container ID
 		location := secret.ContainerID
-		if location == "" {
+		if secret.EnvFilePath != "" {
+			location = secret.ContainerID + ":" + secret.EnvFilePath
+		} else if location == "" {
 			location = secret.ContainerName
 		}
 
@@ -970,4 +972,585 @@ func (h *Handler) scanAgentSecrets(ctx context.Context, orgID, agentID, scanID u
 	}
 
 	return secrets, nil
+}
+
+// ============================================================================
+// Secret Migration Types
+// ============================================================================
+
+// SecretMigration represents a migration job
+type SecretMigration struct {
+	ID                     uuid.UUID       `json:"id"`
+	OrgID                  uuid.UUID       `json:"org_id"`
+	AgentID                uuid.UUID       `json:"agent_id"`
+	ContainerID            string          `json:"container_id"`
+	ContainerName          string          `json:"container_name"`
+	SourceType             string          `json:"source_type"`
+	SourcePath             *string         `json:"source_path,omitempty"`
+	Status                 string          `json:"status"`
+	ErrorMessage           *string         `json:"error_message,omitempty"`
+	OriginalContainerConfig json.RawMessage `json:"original_container_config,omitempty"`
+	NewContainerID         *string         `json:"new_container_id,omitempty"`
+	CreatedAt              time.Time       `json:"created_at"`
+	UpdatedAt              time.Time       `json:"updated_at"`
+	CompletedAt            *time.Time      `json:"completed_at,omitempty"`
+	// Aggregated fields
+	TotalSecrets     int `json:"total_secrets,omitempty"`
+	CompletedSecrets int `json:"completed_secrets,omitempty"`
+	FailedSecrets    int `json:"failed_secrets,omitempty"`
+}
+
+// SecretMigrationItem represents an individual secret in a migration
+type SecretMigrationItem struct {
+	ID           uuid.UUID  `json:"id"`
+	MigrationID  uuid.UUID  `json:"migration_id"`
+	SecretName   string     `json:"secret_name"`
+	SecretType   *string    `json:"secret_type,omitempty"`
+	OldSource    string     `json:"old_source"`
+	NewSource    string     `json:"new_source"`
+	Status       string     `json:"status"`
+	MountPath    *string    `json:"mount_path,omitempty"`
+	ErrorMessage *string    `json:"error_message,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+}
+
+// CreateMigrationRequest represents a request to create a new migration
+type CreateMigrationRequest struct {
+	ContainerID   string `json:"container_id" binding:"required"`
+	ContainerName string `json:"container_name" binding:"required"`
+	SourceType    string `json:"source_type" binding:"required"`
+	SourcePath    string `json:"source_path,omitempty"`
+	Secrets       []struct {
+		Name  string `json:"name" binding:"required"`
+		Value string `json:"value" binding:"required"`
+		Type  string `json:"type,omitempty"`
+	} `json:"secrets" binding:"required,min=1"`
+}
+
+// SecretMount is used in agent communication for secret migration
+type SecretMount struct {
+	Name      string `json:"name"`
+	Value     string `json:"value,omitempty"`
+	MountPath string `json:"mount_path"`
+}
+
+// ============================================================================
+// Secret Migration Handlers
+// ============================================================================
+
+// listSecretMigrations returns migrations for an agent
+func (h *Handler) listSecretMigrations(c *gin.Context) {
+	orgID := c.MustGet("org_id").(uuid.UUID)
+	agentIDStr := c.Param("id")
+
+	agentID, err := uuid.Parse(agentIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid agent ID"})
+		return
+	}
+
+	// Verify agent belongs to org
+	var agentOrgID uuid.UUID
+	err = h.db.QueryRow(c.Request.Context(),
+		`SELECT org_id FROM agents WHERE id = $1`, agentID,
+	).Scan(&agentOrgID)
+	if err != nil || agentOrgID != orgID {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Agent not found"})
+		return
+	}
+
+	rows, err := h.db.Query(c.Request.Context(), `
+		SELECT id, org_id, agent_id, container_id, container_name, source_type, source_path,
+		       status, error_message, new_container_id, created_at, updated_at, completed_at,
+		       total_secrets, completed_secrets, failed_secrets
+		FROM v_secret_migrations_summary
+		WHERE org_id = $1 AND agent_id = $2
+		ORDER BY created_at DESC
+		LIMIT 100`,
+		orgID, agentID,
+	)
+	if err != nil {
+		h.logger.Error("Failed to list migrations", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list migrations"})
+		return
+	}
+	defer rows.Close()
+
+	migrations := []SecretMigration{}
+	for rows.Next() {
+		var m SecretMigration
+		err := rows.Scan(
+			&m.ID, &m.OrgID, &m.AgentID, &m.ContainerID, &m.ContainerName, &m.SourceType, &m.SourcePath,
+			&m.Status, &m.ErrorMessage, &m.NewContainerID, &m.CreatedAt, &m.UpdatedAt, &m.CompletedAt,
+			&m.TotalSecrets, &m.CompletedSecrets, &m.FailedSecrets,
+		)
+		if err != nil {
+			h.logger.Error("Failed to scan migration", zap.Error(err))
+			continue
+		}
+		migrations = append(migrations, m)
+	}
+
+	c.JSON(http.StatusOK, migrations)
+}
+
+// getMigration returns a specific migration with its items
+func (h *Handler) getMigration(c *gin.Context) {
+	orgID := c.MustGet("org_id").(uuid.UUID)
+	agentIDStr := c.Param("id")
+	migrationIDStr := c.Param("migration_id")
+
+	agentID, err := uuid.Parse(agentIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid agent ID"})
+		return
+	}
+
+	migrationID, err := uuid.Parse(migrationIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid migration ID"})
+		return
+	}
+
+	// Get migration
+	var m SecretMigration
+	err = h.db.QueryRow(c.Request.Context(), `
+		SELECT id, org_id, agent_id, container_id, container_name, source_type, source_path,
+		       status, error_message, original_container_config, new_container_id,
+		       created_at, updated_at, completed_at
+		FROM secret_migrations
+		WHERE id = $1 AND org_id = $2 AND agent_id = $3`,
+		migrationID, orgID, agentID,
+	).Scan(
+		&m.ID, &m.OrgID, &m.AgentID, &m.ContainerID, &m.ContainerName, &m.SourceType, &m.SourcePath,
+		&m.Status, &m.ErrorMessage, &m.OriginalContainerConfig, &m.NewContainerID,
+		&m.CreatedAt, &m.UpdatedAt, &m.CompletedAt,
+	)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Migration not found"})
+		return
+	}
+
+	// Get migration items
+	rows, err := h.db.Query(c.Request.Context(), `
+		SELECT id, migration_id, secret_name, secret_type, old_source, new_source,
+		       status, mount_path, error_message, created_at
+		FROM secret_migration_items
+		WHERE migration_id = $1
+		ORDER BY created_at`,
+		migrationID,
+	)
+	if err != nil {
+		h.logger.Error("Failed to get migration items", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get migration details"})
+		return
+	}
+	defer rows.Close()
+
+	items := []SecretMigrationItem{}
+	for rows.Next() {
+		var item SecretMigrationItem
+		err := rows.Scan(
+			&item.ID, &item.MigrationID, &item.SecretName, &item.SecretType, &item.OldSource, &item.NewSource,
+			&item.Status, &item.MountPath, &item.ErrorMessage, &item.CreatedAt,
+		)
+		if err != nil {
+			h.logger.Error("Failed to scan migration item", zap.Error(err))
+			continue
+		}
+		items = append(items, item)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"migration": m,
+		"items":     items,
+	})
+}
+
+// createMigration creates a new migration job and executes it
+func (h *Handler) createMigration(c *gin.Context) {
+	orgID := c.MustGet("org_id").(uuid.UUID)
+	agentIDStr := c.Param("id")
+
+	agentID, err := uuid.Parse(agentIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid agent ID"})
+		return
+	}
+
+	// Verify agent belongs to org and is active
+	var agentOrgID uuid.UUID
+	var agentStatus string
+	err = h.db.QueryRow(c.Request.Context(),
+		`SELECT org_id, status FROM agents WHERE id = $1`, agentID,
+	).Scan(&agentOrgID, &agentStatus)
+	if err != nil || agentOrgID != orgID {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Agent not found"})
+		return
+	}
+	if agentStatus != "active" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Agent is not active"})
+		return
+	}
+
+	var req CreateMigrationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Create migration record
+	var migrationID uuid.UUID
+	sourcePath := &req.SourcePath
+	if req.SourcePath == "" {
+		sourcePath = nil
+	}
+
+	err = h.db.QueryRow(c.Request.Context(), `
+		INSERT INTO secret_migrations (org_id, agent_id, container_id, container_name, source_type, source_path, status)
+		VALUES ($1, $2, $3, $4, $5, $6, 'pending')
+		RETURNING id`,
+		orgID, agentID, req.ContainerID, req.ContainerName, req.SourceType, sourcePath,
+	).Scan(&migrationID)
+
+	if err != nil {
+		h.logger.Error("Failed to create migration", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create migration"})
+		return
+	}
+
+	// Create migration items
+	for _, secret := range req.Secrets {
+		secretType := &secret.Type
+		if secret.Type == "" {
+			secretType = nil
+		}
+		_, err := h.db.Exec(c.Request.Context(), `
+			INSERT INTO secret_migration_items (migration_id, secret_name, secret_type, old_source, new_source, status)
+			VALUES ($1, $2, $3, $4, 'file_secret', 'pending')`,
+			migrationID, secret.Name, secretType, req.SourceType,
+		)
+		if err != nil {
+			h.logger.Error("Failed to create migration item",
+				zap.String("secret_name", secret.Name),
+				zap.Error(err),
+			)
+		}
+	}
+
+	// Execute migration asynchronously
+	go h.executeMigration(context.Background(), orgID, agentID, migrationID, req)
+
+	c.JSON(http.StatusCreated, gin.H{"id": migrationID, "status": "pending"})
+}
+
+// executeMigration runs the migration process
+func (h *Handler) executeMigration(ctx context.Context, orgID, agentID, migrationID uuid.UUID, req CreateMigrationRequest) {
+	// Update status to creating_secrets
+	h.updateMigrationStatus(ctx, migrationID, "creating_secrets", nil)
+
+	// Build secrets list for agent command
+	secrets := make([]SecretMount, 0, len(req.Secrets))
+	removeEnvVars := make([]string, 0, len(req.Secrets))
+	for _, s := range req.Secrets {
+		secrets = append(secrets, SecretMount{
+			Name:  s.Name,
+			Value: s.Value,
+		})
+		removeEnvVars = append(removeEnvVars, s.Name)
+	}
+
+	// Build migrate command
+	migrateCmd := struct {
+		Action        string        `json:"action"`
+		ContainerID   string        `json:"container_id"`
+		Secrets       []SecretMount `json:"secrets"`
+		RemoveEnvVars []string      `json:"remove_env_vars"`
+	}{
+		Action:        "migrate_secrets",
+		ContainerID:   req.ContainerID,
+		Secrets:       secrets,
+		RemoveEnvVars: removeEnvVars,
+	}
+
+	cmdPayload, _ := json.Marshal(migrateCmd)
+	cmd := &agentgrpc.BackendMessage{
+		RequestId: uuid.New().String(),
+		Type:      "docker",
+		Command:   cmdPayload,
+	}
+
+	// Update status to stopping_container
+	h.updateMigrationStatus(ctx, migrationID, "stopping_container", nil)
+
+	// Send command to agent (longer timeout for container operations)
+	resp, err := agentgrpc.SendCommand(agentID.String(), cmd, 300*time.Second)
+	if err != nil {
+		h.logger.Error("Migration command failed", zap.Error(err))
+		errMsg := err.Error()
+		h.updateMigrationStatus(ctx, migrationID, "failed", &errMsg)
+		return
+	}
+
+	result, err := resp.GetCommandResult()
+	if err != nil || result == nil || !result.Success {
+		errMsg := "Migration command returned error"
+		if result != nil && result.Message != "" {
+			errMsg = result.Message
+		}
+		h.logger.Error("Migration failed", zap.String("error", errMsg))
+		h.updateMigrationStatus(ctx, migrationID, "failed", &errMsg)
+		return
+	}
+
+	// Parse migration result
+	var migrationResult struct {
+		NewContainerID  string          `json:"new_container_id"`
+		MountedSecrets  []SecretMount   `json:"mounted_secrets"`
+		RemovedEnvVars  []string        `json:"removed_env_vars"`
+		OriginalConfig  json.RawMessage `json:"original_config"`
+	}
+	if err := json.Unmarshal(result.Data, &migrationResult); err != nil {
+		h.logger.Error("Failed to parse migration result", zap.Error(err))
+		errMsg := "Failed to parse migration result"
+		h.updateMigrationStatus(ctx, migrationID, "failed", &errMsg)
+		return
+	}
+
+	// Store original config and new container ID
+	h.db.Exec(ctx, `
+		UPDATE secret_migrations
+		SET original_container_config = $1, new_container_id = $2, status = 'starting_container'
+		WHERE id = $3`,
+		migrationResult.OriginalConfig, migrationResult.NewContainerID, migrationID,
+	)
+
+	// Update migration items with mount paths
+	for _, ms := range migrationResult.MountedSecrets {
+		h.db.Exec(ctx, `
+			UPDATE secret_migration_items
+			SET status = 'created', mount_path = $1
+			WHERE migration_id = $2 AND secret_name = $3`,
+			ms.MountPath, migrationID, ms.Name,
+		)
+	}
+
+	// Update status to verifying
+	h.updateMigrationStatus(ctx, migrationID, "verifying", nil)
+
+	// Send verify command
+	expectedSecrets := make([]string, 0, len(req.Secrets))
+	for _, s := range req.Secrets {
+		expectedSecrets = append(expectedSecrets, s.Name)
+	}
+
+	verifyCmd := struct {
+		Action          string   `json:"action"`
+		ContainerID     string   `json:"container_id"`
+		ExpectedSecrets []string `json:"expected_secrets"`
+	}{
+		Action:          "verify_migration",
+		ContainerID:     migrationResult.NewContainerID,
+		ExpectedSecrets: expectedSecrets,
+	}
+
+	verifyCmdPayload, _ := json.Marshal(verifyCmd)
+	verifyMsg := &agentgrpc.BackendMessage{
+		RequestId: uuid.New().String(),
+		Type:      "docker",
+		Command:   verifyCmdPayload,
+	}
+
+	verifyResp, err := agentgrpc.SendCommand(agentID.String(), verifyMsg, 60*time.Second)
+	if err != nil {
+		h.logger.Warn("Verification command failed, but migration may still be successful", zap.Error(err))
+	} else {
+		verifyResult, _ := verifyResp.GetCommandResult()
+		if verifyResult != nil && verifyResult.Success {
+			// Update items as verified
+			for _, s := range expectedSecrets {
+				h.db.Exec(ctx, `
+					UPDATE secret_migration_items
+					SET status = 'completed'
+					WHERE migration_id = $1 AND secret_name = $2`,
+					migrationID, s,
+				)
+			}
+		}
+	}
+
+	// Mark migration as completed
+	h.db.Exec(ctx, `
+		UPDATE secret_migrations
+		SET status = 'completed', completed_at = NOW()
+		WHERE id = $1`,
+		migrationID,
+	)
+
+	// Update secrets_inventory to reflect new source
+	for _, s := range req.Secrets {
+		h.db.Exec(ctx, `
+			UPDATE secrets_inventory
+			SET source = 'file_secret', location = $1, updated_at = NOW()
+			WHERE org_id = $2 AND name = $3 AND container_id = $4`,
+			"/run/secrets/"+s.Name, orgID, s.Name, req.ContainerID,
+		)
+	}
+
+	h.logger.Info("Migration completed successfully",
+		zap.String("migration_id", migrationID.String()),
+		zap.String("new_container_id", migrationResult.NewContainerID),
+	)
+}
+
+// rollbackMigration triggers a rollback of a migration
+func (h *Handler) rollbackMigration(c *gin.Context) {
+	orgID := c.MustGet("org_id").(uuid.UUID)
+	agentIDStr := c.Param("id")
+	migrationIDStr := c.Param("migration_id")
+
+	agentID, err := uuid.Parse(agentIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid agent ID"})
+		return
+	}
+
+	migrationID, err := uuid.Parse(migrationIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid migration ID"})
+		return
+	}
+
+	// Get migration details
+	var m SecretMigration
+	err = h.db.QueryRow(c.Request.Context(), `
+		SELECT id, org_id, agent_id, container_id, container_name, source_type, source_path,
+		       status, original_container_config, new_container_id
+		FROM secret_migrations
+		WHERE id = $1 AND org_id = $2 AND agent_id = $3`,
+		migrationID, orgID, agentID,
+	).Scan(
+		&m.ID, &m.OrgID, &m.AgentID, &m.ContainerID, &m.ContainerName, &m.SourceType, &m.SourcePath,
+		&m.Status, &m.OriginalContainerConfig, &m.NewContainerID,
+	)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Migration not found"})
+		return
+	}
+
+	// Check if migration can be rolled back
+	if m.Status == "pending" || m.Status == "rolled_back" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Migration cannot be rolled back in current status"})
+		return
+	}
+
+	if m.OriginalContainerConfig == nil || m.NewContainerID == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Migration does not have rollback data"})
+		return
+	}
+
+	// Get created secrets for cleanup
+	rows, err := h.db.Query(c.Request.Context(), `
+		SELECT secret_name FROM secret_migration_items WHERE migration_id = $1`,
+		migrationID,
+	)
+	if err != nil {
+		h.logger.Error("Failed to get migration items", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get migration details"})
+		return
+	}
+	defer rows.Close()
+
+	createdSecrets := []string{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err == nil {
+			createdSecrets = append(createdSecrets, name)
+		}
+	}
+
+	// Build rollback command
+	rollbackCmd := struct {
+		Action         string          `json:"action"`
+		ContainerID    string          `json:"container_id"`
+		OriginalConfig json.RawMessage `json:"original_config"`
+		CreatedSecrets []string        `json:"created_secrets"`
+	}{
+		Action:         "rollback_migration",
+		ContainerID:    *m.NewContainerID,
+		OriginalConfig: m.OriginalContainerConfig,
+		CreatedSecrets: createdSecrets,
+	}
+
+	cmdPayload, _ := json.Marshal(rollbackCmd)
+	cmd := &agentgrpc.BackendMessage{
+		RequestId: uuid.New().String(),
+		Type:      "docker",
+		Command:   cmdPayload,
+	}
+
+	// Send rollback command
+	resp, err := agentgrpc.SendCommand(agentID.String(), cmd, 300*time.Second)
+	if err != nil {
+		h.logger.Error("Rollback command failed", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Rollback command failed: " + err.Error()})
+		return
+	}
+
+	result, err := resp.GetCommandResult()
+	if err != nil || result == nil || !result.Success {
+		errMsg := "Rollback failed"
+		if result != nil && result.Message != "" {
+			errMsg = result.Message
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": errMsg})
+		return
+	}
+
+	// Update migration status
+	h.db.Exec(c.Request.Context(), `
+		UPDATE secret_migrations
+		SET status = 'rolled_back', updated_at = NOW()
+		WHERE id = $1`,
+		migrationID,
+	)
+
+	// Update migration items status
+	h.db.Exec(c.Request.Context(), `
+		UPDATE secret_migration_items
+		SET status = 'pending'
+		WHERE migration_id = $1`,
+		migrationID,
+	)
+
+	// Restore secrets_inventory source
+	for _, secretName := range createdSecrets {
+		h.db.Exec(c.Request.Context(), `
+			UPDATE secrets_inventory
+			SET source = $1, updated_at = NOW()
+			WHERE org_id = $2 AND name = $3 AND container_id = $4`,
+			m.SourceType, orgID, secretName, m.ContainerID,
+		)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Migration rolled back successfully"})
+}
+
+// updateMigrationStatus updates the status of a migration
+func (h *Handler) updateMigrationStatus(ctx context.Context, migrationID uuid.UUID, status string, errorMsg *string) {
+	if errorMsg != nil {
+		h.db.Exec(ctx, `
+			UPDATE secret_migrations
+			SET status = $1, error_message = $2, updated_at = NOW()
+			WHERE id = $3`,
+			status, *errorMsg, migrationID,
+		)
+	} else {
+		h.db.Exec(ctx, `
+			UPDATE secret_migrations
+			SET status = $1, updated_at = NOW()
+			WHERE id = $2`,
+			status, migrationID,
+		)
+	}
 }
