@@ -2392,7 +2392,7 @@ export interface SecretInventory {
   agent_id?: string;
   name: string;
   secret_type: 'api_key' | 'password' | 'certificate' | 'ssh_key' | 'oauth_token' | 'database_credential' | 'encryption_key';
-  source: 'env_var' | 'file' | 'vault' | 'k8s_secret' | 'docker_secret' | 'config';
+  source: 'env_var' | 'env_file' | 'file' | 'file_secret' | 'vault' | 'k8s_secret' | 'docker_secret' | 'config' | 'environment';
   location?: string;
   deployment_id?: string;
   container_id?: string;
