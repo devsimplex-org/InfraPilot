@@ -38,8 +38,9 @@ export default function DeploymentsPage() {
   const [selectedDeployment, setSelectedDeployment] = useState<Deployment | null>(null);
   const [panelTab, setPanelTab] = useState<PanelTab>("overview");
   const [vulnerabilitySeverityFilter, setVulnerabilitySeverityFilter] = useState<string[]>([]);
-  const [statusFilter, setStatusFilter] = useState<string[]>([]);
-  const [environmentFilter, setEnvironmentFilter] = useState<string[]>([]);
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [environmentFilter, setEnvironmentFilter] = useState<string>("all");
+  const [searchFilter, setSearchFilter] = useState("");
 
   // Fetch agents
   const { data: agents } = useQuery({
@@ -135,25 +136,22 @@ export default function DeploymentsPage() {
       .filter((deployment): deployment is Deployment => !!deployment) // Remove null/undefined
       .filter((deployment) => {
         // Status filter
-        if (statusFilter.length > 0 && !statusFilter.includes(deployment.status)) {
-          return false;
-        }
+        const matchesStatus = statusFilter === "all" || deployment.status === statusFilter;
 
         // Environment filter
-        if (environmentFilter.length > 0 && !environmentFilter.includes(deployment.environment)) {
-          return false;
-        }
+        const matchesEnv = environmentFilter === "all" || deployment.environment === environmentFilter;
 
-        return true;
+        // Search filter
+        const matchesSearch = !searchFilter ||
+          deployment.service_name?.toLowerCase().includes(searchFilter.toLowerCase()) ||
+          deployment.image_repository?.toLowerCase().includes(searchFilter.toLowerCase()) ||
+          deployment.container_name?.toLowerCase().includes(searchFilter.toLowerCase());
+
+        return matchesStatus && matchesEnv && matchesSearch;
       });
-  }, [deployments, statusFilter, environmentFilter]);
+  }, [deployments, statusFilter, environmentFilter, searchFilter]);
 
-  // Get unique values for filters
-  const uniqueStatuses = useMemo(() => {
-    if (!deployments) return [];
-    return Array.from(new Set(deployments.map((d) => d.status)));
-  }, [deployments]);
-
+  // Get unique environments for filters
   const uniqueEnvironments = useMemo(() => {
     if (!deployments) return [];
     return Array.from(new Set(deployments.map((d) => d.environment)));
@@ -188,14 +186,14 @@ export default function DeploymentsPage() {
     }
   };
 
-  // Table columns
+  // Table columns - render receives (cellValue, fullRow)
   const columns: Column<Deployment>[] = [
     {
       key: "service_name",
       header: "Service",
       sortable: true,
-      render: (deployment) => {
-        if (!deployment) return null;
+      render: (_value: string, row: Deployment) => {
+        if (!row?.id) return null;
         return (
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-primary-100 dark:bg-primary-900/30">
@@ -203,10 +201,10 @@ export default function DeploymentsPage() {
             </div>
             <div className="min-w-0">
               <p className="text-sm font-medium text-gray-900 dark:text-white">
-                {deployment.service_name || "Unnamed Service"}
+                {row.service_name || "Unnamed Service"}
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                ID: {deployment.id.substring(0, 8)}...
+                ID: {row.id?.substring(0, 8) || "—"}...
               </p>
             </div>
           </div>
@@ -217,8 +215,8 @@ export default function DeploymentsPage() {
       key: "environment",
       header: "Environment",
       sortable: true,
-      render: (deployment) => {
-        if (!deployment) return null;
+      render: (_value: string, row: Deployment) => {
+        if (!row?.id) return null;
         const envColors: Record<string, string> = {
           prod: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
           production: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
@@ -229,9 +227,9 @@ export default function DeploymentsPage() {
         return (
           <span className={cn(
             "px-2 py-1 text-xs font-medium rounded-full",
-            envColors[deployment.environment?.toLowerCase()] || "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
+            envColors[row.environment?.toLowerCase()] || "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
           )}>
-            {deployment.environment || "—"}
+            {row.environment || "—"}
           </span>
         );
       },
@@ -239,17 +237,17 @@ export default function DeploymentsPage() {
     {
       key: "image_repository",
       header: "Image",
-      render: (deployment) => {
-        if (!deployment) return null;
-        const fullImage = deployment.image_repository + (deployment.image_tag ? `:${deployment.image_tag}` : "");
+      render: (_value: string, row: Deployment) => {
+        if (!row?.id) return null;
+        const fullImage = (row.image_repository || "") + (row.image_tag ? `:${row.image_tag}` : "");
         return (
           <div className="min-w-0">
             <p className="text-sm font-mono text-gray-900 dark:text-white truncate max-w-[200px]" title={fullImage}>
-              {deployment.image_repository || "—"}
+              {row.image_repository || "—"}
             </p>
-            {deployment.image_tag && (
+            {row.image_tag && (
               <p className="text-xs text-primary-600 dark:text-primary-400 font-mono">
-                :{deployment.image_tag}
+                :{row.image_tag}
               </p>
             )}
           </div>
@@ -260,19 +258,19 @@ export default function DeploymentsPage() {
       key: "status",
       header: "Status",
       sortable: true,
-      render: (deployment) => {
-        if (!deployment) return null;
+      render: (_value: string, row: Deployment) => {
+        if (!row?.id) return null;
         return (
           <div className="space-y-1">
             <StatusIndicator
-              status={getDeploymentStatus(deployment.status)}
-              label={deployment.status?.replace(/_/g, " ") || "unknown"}
+              status={getDeploymentStatus(row.status)}
+              label={row.status?.replace(/_/g, " ") || "unknown"}
               size="sm"
-              pulse={deployment.status === "running"}
+              pulse={row.status === "running"}
             />
-            {deployment.status_message && (
-              <p className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[150px]" title={deployment.status_message}>
-                {deployment.status_message}
+            {row.status_message && (
+              <p className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[150px]" title={row.status_message}>
+                {row.status_message}
               </p>
             )}
           </div>
@@ -282,14 +280,14 @@ export default function DeploymentsPage() {
     {
       key: "container_name",
       header: "Container",
-      render: (deployment) => {
-        if (!deployment) return null;
-        if (deployment.container_name || deployment.container_id) {
+      render: (_value: string, row: Deployment) => {
+        if (!row?.id) return null;
+        if (row.container_name || row.container_id) {
           return (
             <div className="flex items-center gap-2">
               <Container className="w-4 h-4 text-green-500" />
               <span className="text-xs font-mono text-gray-900 dark:text-white">
-                {deployment.container_name || deployment.container_id?.substring(0, 12)}
+                {row.container_name || row.container_id?.substring(0, 12)}
               </span>
             </div>
           );
@@ -300,15 +298,15 @@ export default function DeploymentsPage() {
     {
       key: "policy_decision",
       header: "Policy",
-      render: (deployment) => {
-        if (!deployment) return null;
-        if (!deployment.policy_decision) {
+      render: (_value: string, row: Deployment) => {
+        if (!row?.id) return null;
+        if (!row.policy_decision) {
           return <span className="text-xs text-gray-400">Pending</span>;
         }
         return (
           <StatusIndicator
-            status={getPolicyDecisionStatus(deployment.policy_decision)!}
-            label={deployment.policy_decision === "allow" ? "Allowed" : deployment.policy_decision === "warn" ? "Warning" : "Blocked"}
+            status={getPolicyDecisionStatus(row.policy_decision)!}
+            label={row.policy_decision === "allow" ? "Allowed" : row.policy_decision === "warn" ? "Warning" : "Blocked"}
             size="sm"
           />
         );
@@ -317,9 +315,9 @@ export default function DeploymentsPage() {
     {
       key: "scan_result_id",
       header: "Scan",
-      render: (deployment) => {
-        if (!deployment) return null;
-        if (deployment.scan_result_id) {
+      render: (_value: string, row: Deployment) => {
+        if (!row?.id) return null;
+        if (row.scan_result_id) {
           return (
             <div className="flex items-center gap-1">
               <Shield className="w-4 h-4 text-green-500" />
@@ -327,7 +325,7 @@ export default function DeploymentsPage() {
             </div>
           );
         }
-        if (deployment.status === "scanning") {
+        if (row.status === "scanning") {
           return (
             <div className="flex items-center gap-1">
               <RefreshCw className="w-4 h-4 text-yellow-500 animate-spin" />
@@ -342,41 +340,18 @@ export default function DeploymentsPage() {
       key: "created_at",
       header: "Created",
       sortable: true,
-      render: (deployment) => {
-        if (!deployment) return null;
+      render: (_value: string, row: Deployment) => {
+        if (!row?.id) return null;
+        if (!row.created_at) {
+          return <span className="text-xs text-gray-400">—</span>;
+        }
         return (
           <div className="text-xs text-gray-600 dark:text-gray-400">
-            <p>{new Date(deployment.created_at).toLocaleDateString()}</p>
-            <p>{new Date(deployment.created_at).toLocaleTimeString()}</p>
+            <p>{new Date(row.created_at).toLocaleDateString()}</p>
+            <p>{new Date(row.created_at).toLocaleTimeString()}</p>
           </div>
         );
       },
-    },
-  ];
-
-  // Deployment filters
-  const deploymentFilters: FilterGroup[] = [
-    {
-      id: "status",
-      label: "Status",
-      type: "checkbox",
-      options: uniqueStatuses.map((status) => ({
-        label: status.charAt(0).toUpperCase() + status.slice(1),
-        value: status,
-      })),
-      value: statusFilter,
-      onChange: (value) => setStatusFilter(value as string[]),
-    },
-    {
-      id: "environment",
-      label: "Environment",
-      type: "checkbox",
-      options: uniqueEnvironments.map((env) => ({
-        label: env.charAt(0).toUpperCase() + env.slice(1),
-        value: env,
-      })),
-      value: environmentFilter,
-      onChange: (value) => setEnvironmentFilter(value as string[]),
     },
   ];
 
@@ -500,48 +475,89 @@ export default function DeploymentsPage() {
           </MetricsGrid>
         )}
 
-        {/* Filters */}
-        {deployments && deployments.length > 0 && (
-          <FilterPanel
-            filters={deploymentFilters}
-            onReset={() => {
-              setStatusFilter([]);
-              setEnvironmentFilter([]);
-            }}
-          />
-        )}
+        {/* Filters and Table */}
+        <div className="flex gap-6">
+          {/* Filters Sidebar */}
+          <div className="w-64 flex-shrink-0">
+            <FilterPanel
+              filters={[
+                {
+                  id: "status",
+                  label: "Status",
+                  type: "radio",
+                  options: [
+                    { label: "All", value: "all", count: metrics?.total || 0 },
+                    { label: "Running", value: "running", count: metrics?.running || 0 },
+                    { label: "Failed", value: "failed", count: metrics?.failed || 0 },
+                    { label: "Scanning", value: "scanning", count: deployments?.filter(d => d.status === "scanning").length || 0 },
+                    { label: "Pending", value: "pending", count: deployments?.filter(d => d.status === "pending").length || 0 },
+                  ],
+                  value: statusFilter,
+                  onChange: (value) => setStatusFilter(value as string),
+                },
+                {
+                  id: "environment",
+                  label: "Environment",
+                  type: "radio",
+                  options: [
+                    { label: "All", value: "all", count: metrics?.total || 0 },
+                    ...uniqueEnvironments.map((env) => ({
+                      label: env.charAt(0).toUpperCase() + env.slice(1),
+                      value: env,
+                      count: deployments?.filter(d => d.environment === env).length || 0,
+                    })),
+                  ],
+                  value: environmentFilter,
+                  onChange: (value) => setEnvironmentFilter(value as string),
+                },
+                {
+                  id: "search",
+                  label: "Search",
+                  type: "search",
+                  value: searchFilter,
+                  onChange: (value) => setSearchFilter(value as string),
+                },
+              ]}
+              onReset={() => {
+                setStatusFilter("all");
+                setEnvironmentFilter("all");
+                setSearchFilter("");
+              }}
+            />
+          </div>
 
-        {/* Deployments Table */}
-        <Card>
-          <Card.Body className="p-0">
-            {isLoading ? (
-              <div className="p-12">
-                <Spinner.Page label="Loading deployments..." />
-              </div>
-            ) : (
-              <Table
-                columns={columns}
-                data={filteredDeployments}
-                keyExtractor={(deployment) => deployment.id}
-                onRowClick={(deployment) => setSelectedDeployment(deployment)}
-                loading={isLoading}
-                emptyState={
+          {/* Main Content */}
+          <div className="flex-1 min-w-0">
+            <Card>
+              <Card.Body className="p-0">
+                {isLoading ? (
+                  <div className="p-12">
+                    <Spinner.Page label="Loading deployments..." />
+                  </div>
+                ) : filteredDeployments.length > 0 ? (
+                  <Table
+                    columns={columns}
+                    data={filteredDeployments}
+                    keyExtractor={(deployment) => deployment.id}
+                    onRowClick={(deployment) => setSelectedDeployment(deployment)}
+                    loading={isLoading}
+                    hoverable
+                  />
+                ) : (
                   <EmptyState
                     icon={Package}
-                    title="No deployments"
+                    title="No deployments found"
                     description={
-                      statusFilter.length > 0 || environmentFilter.length > 0
-                        ? "No deployments match your filters. Try adjusting your filter criteria."
+                      statusFilter !== "all" || environmentFilter !== "all" || searchFilter
+                        ? "No deployments match the current filters"
                         : "No deployments found for this agent"
                     }
-                    size="sm"
                   />
-                }
-                hoverable
-              />
-            )}
-          </Card.Body>
-        </Card>
+                )}
+              </Card.Body>
+            </Card>
+          </div>
+        </div>
       </div>
 
       {/* Detail SlideOver */}
