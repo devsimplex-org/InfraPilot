@@ -626,40 +626,11 @@ func (h *Handler) sendConfirmationOTP(c *gin.Context) {
 		return
 	}
 
-	// Get org's SMTP settings
-	var smtpConfig struct {
-		Host     *string `json:"host"`
-		Port     *int    `json:"port"`
-		Username *string `json:"username"`
-		Password *string `json:"password"`
-		From     *string `json:"from"`
-		UseTLS   bool    `json:"use_tls"`
-	}
-
-	var smtpConfigBytes []byte
-	err = h.db.QueryRow(c.Request.Context(), `
-		SELECT smtp_config FROM organizations WHERE id = $1
-	`, orgID).Scan(&smtpConfigBytes)
-
-	if err != nil || smtpConfigBytes == nil {
-		// Fall back to environment variables for SMTP
-		h.logger.Warn("No SMTP config found for org, falling back to env vars")
-		c.JSON(http.StatusOK, gin.H{
-			"success": true,
-			"message": "Verification code sent to your email",
-			// In development, include the OTP for testing
-			// "otp": otp, // Remove in production
-		})
-		return
-	}
-
-	// Send email with OTP
-	// For now, just return success - email sending will use org's SMTP config
-	// This would be integrated with a proper email service
-
+	// TODO: Integrate with email service to send OTP
+	// For now, log the OTP generation (email sending would be added later)
 	h.logger.Info("Confirmation OTP generated",
-		zap.String("user_id", userID.String()),
-		zap.String("email", email))
+		"user_id", userID.String(),
+		"email", email)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
