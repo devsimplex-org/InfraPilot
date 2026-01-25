@@ -374,6 +374,32 @@ export default function DeploymentsPage() {
         );
       },
     },
+    {
+      key: "actions",
+      header: "Actions",
+      render: (_value: unknown, row: Deployment) => {
+        if (!row?.id) return null;
+        const isRedeploying = redeployingId === row.id;
+        return (
+          <div className="flex items-center gap-1">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (confirm(`Redeploy ${row.service_name}?\n\nThis will create a new deployment with the same configuration and run the full pipeline (security scan, policy check, deploy).`)) {
+                  setRedeployingId(row.id);
+                  redeployMutation.mutate(row.id);
+                }
+              }}
+              disabled={isRedeploying}
+              className="p-1.5 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 rounded disabled:opacity-50"
+              title="Redeploy"
+            >
+              <RotateCcw className={cn("h-4 w-4", isRedeploying && "animate-spin")} />
+            </button>
+          </div>
+        );
+      },
+    },
   ];
 
   // Vulnerability filters
@@ -590,9 +616,24 @@ export default function DeploymentsPage() {
         {selectedDeployment && (
           <>
             <SlideOver.Header onClose={() => setSelectedDeployment(null)} showCloseButton>
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{selectedDeployment.service_name}</h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400">{selectedDeployment.environment}</p>
+              <div className="flex items-center justify-between w-full pr-8">
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{selectedDeployment.service_name}</h2>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">{selectedDeployment.environment}</p>
+                </div>
+                <button
+                  onClick={() => {
+                    if (confirm(`Redeploy ${selectedDeployment.service_name}?\n\nThis will create a new deployment with the same configuration and run the full pipeline (security scan, policy check, deploy).`)) {
+                      setRedeployingId(selectedDeployment.id);
+                      redeployMutation.mutate(selectedDeployment.id);
+                    }
+                  }}
+                  disabled={redeployingId === selectedDeployment.id}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  <RotateCcw className={cn("h-4 w-4", redeployingId === selectedDeployment.id && "animate-spin")} />
+                  Redeploy
+                </button>
               </div>
             </SlideOver.Header>
 
