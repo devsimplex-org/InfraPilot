@@ -218,7 +218,10 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 			agents.POST("/:id/secrets/migrations", h.RequireModifyContainers(), h.createMigration)
 			agents.GET("/:id/secrets/migrations/:migration_id", h.getMigration)
 			agents.POST("/:id/secrets/migrations/:migration_id/rollback", h.RequireModifyContainers(), h.rollbackMigration)
-			}
+
+			// Secret Import (import .env to container)
+			agents.POST("/:id/secrets/import", h.RequireModifyContainers(), h.importSecrets)
+		}
 
 			// Services view (cross-agent)
 			protected.GET("/services", h.listServices)

@@ -1536,6 +1536,137 @@ func (h *Handler) rollbackMigration(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Migration rolled back successfully"})
 }
 
+// importSecrets imports secrets from .env content to a container as env vars or docker secrets
+func (h *Handler) importSecrets(c *gin.Context) {
+	agentIDStr := c.Param("id")
+	agentID, err := uuid.Parse(agentIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid agent ID"})
+		return
+	}
+
+	var req struct {
+		ContainerID   string `json:"container_id" binding:"required"`
+		ContainerName string `json:"container_name" binding:"required"`
+		Method        string `json:"method" binding:"required"` // "env_vars" or "docker_secrets"
+		Secrets       []struct {
+			Name  string `json:"name" binding:"required"`
+			Value string `json:"value" binding:"required"`
+		} `json:"secrets" binding:"required,min=1"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if req.Method != "env_vars" && req.Method != "docker_secrets" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid method. Must be 'env_vars' or 'docker_secrets'"})
+		return
+	}
+
+	h.logger.Info("Importing secrets to container",
+		zap.String("agent_id", agentIDStr),
+		zap.String("container_id", req.ContainerID),
+		zap.String("method", req.Method),
+		zap.Int("secrets_count", len(req.Secrets)),
+	)
+
+	// Build the command based on method
+	var cmdPayload []byte
+	if req.Method == "docker_secrets" {
+		// Use the existing migrate_secrets infrastructure for docker secrets
+		secrets := make([]struct {
+			Name      string `json:"name"`
+			Value     string `json:"value"`
+			MountPath string `json:"mount_path"`
+		}, len(req.Secrets))
+		for i, s := range req.Secrets {
+			secrets[i] = struct {
+				Name      string `json:"name"`
+				Value     string `json:"value"`
+				MountPath string `json:"mount_path"`
+			}{
+				Name:      s.Name,
+				Value:     s.Value,
+				MountPath: "/run/secrets/" + s.Name,
+			}
+		}
+
+		importCmd := struct {
+			Action      string      `json:"action"`
+			ContainerID string      `json:"container_id"`
+			Secrets     interface{} `json:"secrets"`
+		}{
+			Action:      "import_secrets",
+			ContainerID: req.ContainerID,
+			Secrets:     secrets,
+		}
+		cmdPayload, _ = json.Marshal(importCmd)
+	} else {
+		// Import as environment variables
+		envVars := make(map[string]string)
+		for _, s := range req.Secrets {
+			envVars[s.Name] = s.Value
+		}
+
+		importCmd := struct {
+			Action      string            `json:"action"`
+			ContainerID string            `json:"container_id"`
+			EnvVars     map[string]string `json:"env_vars"`
+		}{
+			Action:      "import_env_vars",
+			ContainerID: req.ContainerID,
+			EnvVars:     envVars,
+		}
+		cmdPayload, _ = json.Marshal(importCmd)
+	}
+
+	cmd := &agentgrpc.BackendMessage{
+		RequestId: uuid.New().String(),
+		Type:      "docker",
+		Command:   cmdPayload,
+	}
+
+	// Send command to agent with longer timeout for container recreation
+	resp, err := agentgrpc.SendCommand(agentID.String(), cmd, 5*time.Minute)
+	if err != nil {
+		h.logger.Error("Import secrets command failed", zap.Error(err))
+		c.JSON(http.StatusOK, gin.H{"success": false, "error": "Command failed: " + err.Error()})
+		return
+	}
+
+	result, err := resp.GetCommandResult()
+	if err != nil || result == nil || !result.Success {
+		errMsg := "Import failed"
+		if result != nil && result.Message != "" {
+			errMsg = result.Message
+		}
+		h.logger.Error("Import secrets failed", zap.String("error", errMsg))
+		c.JSON(http.StatusOK, gin.H{"success": false, "error": errMsg})
+		return
+	}
+
+	// Parse result for new container ID
+	var importResult struct {
+		NewContainerID string `json:"new_container_id"`
+	}
+	if result.Data != nil {
+		json.Unmarshal(result.Data, &importResult)
+	}
+
+	h.logger.Info("Secrets imported successfully",
+		zap.String("container_id", req.ContainerID),
+		zap.String("new_container_id", importResult.NewContainerID),
+		zap.Int("secrets_count", len(req.Secrets)),
+	)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":          true,
+		"new_container_id": importResult.NewContainerID,
+	})
+}
+
 // updateMigrationStatus updates the status of a migration
 func (h *Handler) updateMigrationStatus(ctx context.Context, migrationID uuid.UUID, status string, errorMsg *string) {
 	if errorMsg != nil {

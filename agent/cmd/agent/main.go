@@ -1751,6 +1751,120 @@ func (h *CommandHandler) handleDockerCommand(ctx context.Context, cmd *agentgrpc
 			Data:    data,
 		}
 
+	case "import_secrets":
+		// Import secrets as Docker file secrets (similar to migrate_secrets but without removing env vars)
+		var importCmd struct {
+			ContainerID string `json:"container_id"`
+			Secrets     []struct {
+				Name      string `json:"name"`
+				Value     string `json:"value"`
+				MountPath string `json:"mount_path"`
+			} `json:"secrets"`
+		}
+		if err := json.Unmarshal(dockerCmd.Options["secrets"].(json.RawMessage), &importCmd.Secrets); err != nil {
+			// Try parsing the whole options
+			optBytes, _ := json.Marshal(dockerCmd.Options)
+			if err := json.Unmarshal(optBytes, &importCmd); err != nil {
+				return &agentgrpc.CommandResult{
+					Success: false,
+					Message: fmt.Sprintf("failed to parse import_secrets command: %v", err),
+				}
+			}
+		}
+		if importCmd.ContainerID == "" {
+			if cid, ok := dockerCmd.Options["container_id"].(string); ok {
+				importCmd.ContainerID = cid
+			}
+		}
+
+		h.logger.Info("Importing secrets to container",
+			zap.String("container_id", importCmd.ContainerID),
+			zap.Int("secrets_count", len(importCmd.Secrets)),
+		)
+
+		// Convert to SecretMount format
+		secretMounts := make([]docker.SecretMount, len(importCmd.Secrets))
+		for i, s := range importCmd.Secrets {
+			secretMounts[i] = docker.SecretMount{
+				Name:      s.Name,
+				Value:     s.Value,
+				MountPath: s.MountPath,
+			}
+		}
+
+		// Use RecreateContainerWithSecrets without removing any env vars
+		result, err := h.docker.RecreateContainerWithSecrets(ctx, importCmd.ContainerID, secretMounts, nil)
+		if err != nil {
+			h.logger.Error("Failed to import secrets",
+				zap.Error(err),
+				zap.String("container_id", importCmd.ContainerID),
+			)
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("failed to import secrets: %v", err),
+			}
+		}
+
+		h.logger.Info("Secrets imported successfully",
+			zap.String("new_container_id", result.NewContainerID),
+			zap.Int("secrets_mounted", len(result.MountedSecrets)),
+		)
+
+		data, _ := json.Marshal(map[string]interface{}{
+			"new_container_id":  result.NewContainerID,
+			"mounted_secrets":   result.MountedSecrets,
+		})
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: fmt.Sprintf("imported %d secrets to container %s", len(result.MountedSecrets), result.NewContainerID),
+			Data:    data,
+		}
+
+	case "import_env_vars":
+		// Import secrets as environment variables
+		var importCmd struct {
+			ContainerID string            `json:"container_id"`
+			EnvVars     map[string]string `json:"env_vars"`
+		}
+		optBytes, _ := json.Marshal(dockerCmd.Options)
+		if err := json.Unmarshal(optBytes, &importCmd); err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("failed to parse import_env_vars command: %v", err),
+			}
+		}
+
+		h.logger.Info("Importing env vars to container",
+			zap.String("container_id", importCmd.ContainerID),
+			zap.Int("env_vars_count", len(importCmd.EnvVars)),
+		)
+
+		// Recreate container with additional env vars
+		result, err := h.docker.RecreateContainerWithEnvVars(ctx, importCmd.ContainerID, importCmd.EnvVars)
+		if err != nil {
+			h.logger.Error("Failed to import env vars",
+				zap.Error(err),
+				zap.String("container_id", importCmd.ContainerID),
+			)
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("failed to import env vars: %v", err),
+			}
+		}
+
+		h.logger.Info("Env vars imported successfully",
+			zap.String("new_container_id", result.NewContainerID),
+		)
+
+		data, _ := json.Marshal(map[string]interface{}{
+			"new_container_id": result.NewContainerID,
+		})
+		return &agentgrpc.CommandResult{
+			Success: true,
+			Message: fmt.Sprintf("imported %d env vars to container %s", len(importCmd.EnvVars), result.NewContainerID),
+			Data:    data,
+		}
+
 	default:
 		return &agentgrpc.CommandResult{
 			Success: false,
