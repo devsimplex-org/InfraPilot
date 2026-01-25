@@ -1422,8 +1422,8 @@ export default function DockerPage() {
                                 <div className="text-sm text-gray-500 dark:text-gray-400">{container.image}</div>
                               </td>
                               <td className="px-4 py-3">
-                                {container.stack ? (
-                                  <Badge variant="primary">{container.stack}</Badge>
+                                {container.stack_name ? (
+                                  <Badge className="px-2 py-1 text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 rounded border-0">{container.stack_name}</Badge>
                                 ) : (
                                   <span className="text-gray-400 text-sm">Standalone</span>
                                 )}
