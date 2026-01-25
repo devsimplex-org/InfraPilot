@@ -1761,19 +1761,11 @@ func (h *CommandHandler) handleDockerCommand(ctx context.Context, cmd *agentgrpc
 				MountPath string `json:"mount_path"`
 			} `json:"secrets"`
 		}
-		if err := json.Unmarshal(dockerCmd.Options["secrets"].(json.RawMessage), &importCmd.Secrets); err != nil {
-			// Try parsing the whole options
-			optBytes, _ := json.Marshal(dockerCmd.Options)
-			if err := json.Unmarshal(optBytes, &importCmd); err != nil {
-				return &agentgrpc.CommandResult{
-					Success: false,
-					Message: fmt.Sprintf("failed to parse import_secrets command: %v", err),
-				}
-			}
-		}
-		if importCmd.ContainerID == "" {
-			if cid, ok := dockerCmd.Options["container_id"].(string); ok {
-				importCmd.ContainerID = cid
+		// Parse the full command payload directly
+		if err := json.Unmarshal(cmd.Command, &importCmd); err != nil {
+			return &agentgrpc.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("failed to parse import_secrets command: %v", err),
 			}
 		}
 
@@ -1826,8 +1818,8 @@ func (h *CommandHandler) handleDockerCommand(ctx context.Context, cmd *agentgrpc
 			ContainerID string            `json:"container_id"`
 			EnvVars     map[string]string `json:"env_vars"`
 		}
-		optBytes, _ := json.Marshal(dockerCmd.Options)
-		if err := json.Unmarshal(optBytes, &importCmd); err != nil {
+		// Parse the full command payload directly
+		if err := json.Unmarshal(cmd.Command, &importCmd); err != nil {
 			return &agentgrpc.CommandResult{
 				Success: false,
 				Message: fmt.Sprintf("failed to parse import_env_vars command: %v", err),
