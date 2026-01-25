@@ -1,6 +1,8 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   Package,
   AlertTriangle,
@@ -24,6 +26,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Spinner } from "@/components/ui/Spinner";
 
 export default function DashboardPage() {
+  const router = useRouter();
   // Fetch agents
   const { data: agents, isLoading: agentsLoading } = useQuery({
     queryKey: ["agents"],
@@ -50,9 +53,9 @@ export default function DashboardPage() {
   });
 
   // Fetch deployments for active agent
-  const { data: deploymentsData } = useQuery({
+  const { data: deployments } = useQuery({
     queryKey: ["deployments", activeAgent?.id],
-    queryFn: () => activeAgent ? api.getDeployments(activeAgent.id) : Promise.resolve({ deployments: [], total: 0 }),
+    queryFn: () => activeAgent ? api.getDeployments(activeAgent.id) : Promise.resolve([]),
     enabled: !!activeAgent,
   });
 
@@ -69,9 +72,8 @@ export default function DashboardPage() {
   const totalProxies = proxies?.length || 0;
   const activeAlerts = alertHistory?.filter((a) => !a.resolved_at).length || 0;
   const criticalAlerts = alertHistory?.filter((a) => !a.resolved_at && a.severity === "critical").length || 0;
-  const deployments = deploymentsData?.deployments || [];
-  const totalDeployments = deploymentsData?.total || 0;
-  const runningDeployments = deployments.filter((d: { status: string }) => d.status === "running").length;
+  const totalDeployments = deployments?.length || 0;
+  const runningDeployments = deployments?.filter((d: { status: string }) => d.status === "running").length || 0;
 
   // Calculate security posture (simple heuristic)
   const getOverallStatus = () => {
@@ -144,7 +146,7 @@ export default function DashboardPage() {
           iconColor="text-blue-600 dark:text-blue-400"
           trend={runningContainers === totalContainers ? "up" : undefined}
           trendValue={runningContainers === totalContainers ? "All healthy" : undefined}
-          onClick={() => window.location.href = "/containers"}
+          onClick={() => router.push("/containers")}
         />
 
         <StatCard
@@ -155,7 +157,7 @@ export default function DashboardPage() {
           iconColor="text-purple-600 dark:text-purple-400"
           trend={runningDeployments === totalDeployments && totalDeployments > 0 ? "up" : undefined}
           trendValue={runningDeployments === totalDeployments && totalDeployments > 0 ? "All healthy" : undefined}
-          onClick={() => window.location.href = "/deployments"}
+          onClick={() => router.push("/deployments")}
         />
 
         <StatCard
@@ -165,7 +167,7 @@ export default function DashboardPage() {
           icon={AlertTriangle}
           iconColor={criticalAlerts > 0 ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"}
           valueColor={criticalAlerts > 0 ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"}
-          onClick={() => window.location.href = "/alerts"}
+          onClick={() => router.push("/alerts")}
         />
 
         <StatCard
@@ -268,9 +270,9 @@ export default function DashboardPage() {
         <Card>
           <Card.Header
             action={
-              <a href="/containers" className="text-sm text-primary-600 hover:text-primary-700 dark:text-primary-400">
+              <Link href="/containers" className="text-sm text-primary-600 hover:text-primary-700 dark:text-primary-400">
                 View all
-              </a>
+              </Link>
             }
           >
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
