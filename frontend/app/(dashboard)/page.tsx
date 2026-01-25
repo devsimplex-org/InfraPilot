@@ -330,9 +330,9 @@ export default function DashboardPage() {
         <Card>
           <Card.Header
             action={
-              <a href="/proxies" className="text-sm text-primary-600 hover:text-primary-700 dark:text-primary-400">
+              <Link href="/proxies" className="text-sm text-primary-600 hover:text-primary-700 dark:text-primary-400">
                 View all
-              </a>
+              </Link>
             }
           >
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
