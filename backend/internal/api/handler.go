@@ -84,6 +84,11 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 			authGroup.POST("/mfa/disable", h.AuthMiddleware(), h.disableMFA)
 			authGroup.POST("/mfa/backup-codes", h.AuthMiddleware(), h.regenerateBackupCodes)
 
+			// Sensitive operation verification (requires auth)
+			authGroup.POST("/verify-password", h.AuthMiddleware(), h.verifyPassword)
+			authGroup.POST("/send-confirmation-otp", h.AuthMiddleware(), h.sendConfirmationOTP)
+			authGroup.POST("/verify-confirmation-otp", h.AuthMiddleware(), h.verifyConfirmationOTP)
+
 			// SSO/OIDC routes (public)
 			authGroup.GET("/sso/providers", h.getAvailableSSOProviders)
 			authGroup.GET("/sso/:config_id/login", h.ssoLogin)
