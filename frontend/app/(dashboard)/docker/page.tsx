@@ -139,6 +139,15 @@ export default function DockerPage() {
     failed: string[];
   } | null>(null);
 
+  // Container multi-selection
+  const [selectedContainerIds, setSelectedContainerIds] = useState<Set<string>>(new Set());
+  const [showBulkContainerModal, setShowBulkContainerModal] = useState<"stop" | "delete" | null>(null);
+  const [bulkContainerProgress, setBulkContainerProgress] = useState<{
+    total: number;
+    completed: number;
+    failed: string[];
+  } | null>(null);
+
   // Image modals
   const [showPullModal, setShowPullModal] = useState(false);
   const [pullImageRef, setPullImageRef] = useState("");
@@ -723,6 +732,104 @@ export default function DockerPage() {
     }
   };
 
+  // Container selection helpers
+  const toggleContainerSelection = (id: string) => {
+    setSelectedContainerIds((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  };
+
+  const selectAllContainers = () => {
+    if (filteredContainers) {
+      setSelectedContainerIds(new Set(filteredContainers.map((c) => c.container_id)));
+    }
+  };
+
+  const selectNoContainers = () => {
+    setSelectedContainerIds(new Set());
+  };
+
+  const selectRunningContainers = () => {
+    if (filteredContainers) {
+      setSelectedContainerIds(new Set(filteredContainers.filter((c) => c.status === "running").map((c) => c.container_id)));
+    }
+  };
+
+  const selectStoppedContainers = () => {
+    if (filteredContainers) {
+      setSelectedContainerIds(new Set(filteredContainers.filter((c) => c.status === "exited").map((c) => c.container_id)));
+    }
+  };
+
+  const isAllContainersSelected = filteredContainers && filteredContainers.length > 0 && selectedContainerIds.size === filteredContainers.length;
+  const isSomeContainersSelected = selectedContainerIds.size > 0 && !isAllContainersSelected;
+  const selectedContainersData = filteredContainers?.filter((c) => selectedContainerIds.has(c.container_id)) || [];
+  const runningSelectedCount = selectedContainersData.filter((c) => c.status === "running").length;
+  const stoppedSelectedCount = selectedContainersData.filter((c) => c.status !== "running").length;
+
+  // Bulk container operations
+  const handleBulkStopContainers = async () => {
+    if (!selectedAgent || selectedContainerIds.size === 0) return;
+
+    const containersToStop = selectedContainersData.filter((c) => c.status === "running");
+    if (containersToStop.length === 0) return;
+
+    setBulkContainerProgress({ total: containersToStop.length, completed: 0, failed: [] });
+
+    const failed: string[] = [];
+
+    for (let i = 0; i < containersToStop.length; i++) {
+      try {
+        await api.stopDockerContainer(selectedAgent, containersToStop[i].container_id);
+      } catch (error) {
+        failed.push(containersToStop[i].name || containersToStop[i].container_id.slice(0, 12));
+      }
+      setBulkContainerProgress({ total: containersToStop.length, completed: i + 1, failed });
+    }
+
+    queryClient.invalidateQueries({ queryKey: ["docker-containers", selectedAgent] });
+
+    if (failed.length === 0) {
+      setShowBulkContainerModal(null);
+      setSelectedContainerIds(new Set());
+      setBulkContainerProgress(null);
+    }
+  };
+
+  const handleBulkDeleteContainers = async () => {
+    if (!selectedAgent || selectedContainerIds.size === 0) return;
+
+    const containersToDelete = Array.from(selectedContainerIds);
+    setBulkContainerProgress({ total: containersToDelete.length, completed: 0, failed: [] });
+
+    const failed: string[] = [];
+
+    for (let i = 0; i < containersToDelete.length; i++) {
+      try {
+        await api.deleteDockerContainer(selectedAgent, containersToDelete[i], forceDelete);
+      } catch (error) {
+        const container = containers?.find((c) => c.container_id === containersToDelete[i]);
+        failed.push(container?.name || containersToDelete[i].slice(0, 12));
+      }
+      setBulkContainerProgress({ total: containersToDelete.length, completed: i + 1, failed });
+    }
+
+    queryClient.invalidateQueries({ queryKey: ["docker-containers", selectedAgent] });
+
+    if (failed.length === 0) {
+      setShowBulkContainerModal(null);
+      setSelectedContainerIds(new Set());
+      setBulkContainerProgress(null);
+      setForceDelete(false);
+    }
+  };
+
   // Metrics
   const containerMetrics = {
     total: containers?.length || 0,
@@ -1188,6 +1295,48 @@ export default function DockerPage() {
                 <StatCard label="Memory Usage" value={`${(containers?.reduce((sum, c) => sum + (c.memory_mb || 0), 0) || 0).toFixed(0)} MB`} icon={MemoryStick} iconColor="text-purple-600 dark:text-purple-400" />
               </MetricsGrid>
 
+              {/* Selection Action Bar */}
+              {filteredContainers && filteredContainers.length > 0 && (
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-500 dark:text-gray-400">Quick select:</span>
+                    <button onClick={selectAllContainers} className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors">
+                      All ({filteredContainers.length})
+                    </button>
+                    <button onClick={selectRunningContainers} disabled={containerMetrics.running === 0} className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                      Running ({containerMetrics.running})
+                    </button>
+                    <button onClick={selectStoppedContainers} disabled={containerMetrics.stopped === 0} className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                      Stopped ({containerMetrics.stopped})
+                    </button>
+                    {selectedContainerIds.size > 0 && (
+                      <button onClick={selectNoContainers} className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors">
+                        Clear
+                      </button>
+                    )}
+                  </div>
+
+                  {selectedContainerIds.size > 0 && (
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm text-gray-700 dark:text-gray-300">
+                        <strong>{selectedContainerIds.size}</strong> selected
+                        {runningSelectedCount > 0 && <span className="text-green-600 dark:text-green-400 ml-1">({runningSelectedCount} running)</span>}
+                      </span>
+                      {runningSelectedCount > 0 && (
+                        <Button variant="secondary" size="sm" onClick={() => setShowBulkContainerModal("stop")}>
+                          <Square className="h-4 w-4 mr-1" />
+                          Stop Selected
+                        </Button>
+                      )}
+                      <Button variant="danger" size="sm" onClick={() => setShowBulkContainerModal("delete")}>
+                        <Trash2 className="h-4 w-4 mr-1" />
+                        Delete Selected
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="flex gap-6">
                 {/* Filters Sidebar */}
                 <div className="w-64 flex-shrink-0">
@@ -1226,14 +1375,67 @@ export default function DockerPage() {
                     <div className="flex items-center justify-center h-64"><Spinner size="lg" /></div>
                   ) : filteredContainers.length > 0 ? (
                     <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
-                      <Table
-                        data={filteredContainers}
-                        columns={containerColumns}
-                        keyExtractor={(row) => row.container_id}
-                        onRowClick={(row) => { setSelectedContainer(row); setContainerPanelTab("details"); }}
-                        selectedRows={selectedContainer ? new Set([selectedContainer.container_id]) : undefined}
-                        hoverable
-                      />
+                      <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                        <thead className="bg-gray-50 dark:bg-gray-800">
+                          <tr>
+                            <th className="w-12 px-4 py-3">
+                              <input
+                                type="checkbox"
+                                checked={isAllContainersSelected}
+                                ref={(el) => { if (el) el.indeterminate = isSomeContainersSelected; }}
+                                onChange={(e) => e.target.checked ? selectAllContainers() : selectNoContainers()}
+                                className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                              />
+                            </th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Container</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Stack</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">CPU</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Memory</th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
+                          {filteredContainers.map((container) => (
+                            <tr
+                              key={container.container_id}
+                              className={cn(
+                                "hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer",
+                                selectedContainerIds.has(container.container_id) && "bg-blue-50 dark:bg-blue-900/20"
+                              )}
+                              onClick={() => { setSelectedContainer(container); setContainerPanelTab("details"); }}
+                            >
+                              <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                                <input
+                                  type="checkbox"
+                                  checked={selectedContainerIds.has(container.container_id)}
+                                  onChange={() => toggleContainerSelection(container.container_id)}
+                                  className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                />
+                              </td>
+                              <td className="px-4 py-3">
+                                <StatusIndicator status={container.status === "running" ? "success" : "error"} label={container.status} />
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="font-medium text-gray-900 dark:text-white">{container.name}</div>
+                                <div className="text-sm text-gray-500 dark:text-gray-400">{container.image}</div>
+                              </td>
+                              <td className="px-4 py-3">
+                                {container.stack ? (
+                                  <Badge variant="primary">{container.stack}</Badge>
+                                ) : (
+                                  <span className="text-gray-400 text-sm">Standalone</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                                {container.cpu_percent?.toFixed(1) || 0}%
+                              </td>
+                              <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                                {container.memory_mb?.toFixed(0) || 0} MB
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   ) : (
                     <EmptyState
@@ -2403,6 +2605,97 @@ export default function DockerPage() {
                   <div className="flex justify-end">
                     <Button variant="secondary" onClick={() => { setShowBulkDeleteModal(false); setSelectedImageIds(new Set()); setBulkDeleteProgress(null); setForceDelete(false); }}>
                       {bulkDeleteProgress.failed.length > 0 ? "Close" : "Done"}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Container Operations Modal */}
+      {showBulkContainerModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => !bulkContainerProgress && setShowBulkContainerModal(null)} />
+          <div className="relative bg-white dark:bg-gray-900 rounded-lg shadow-xl max-w-lg w-full mx-4 p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className={cn("p-2 rounded-full", showBulkContainerModal === "stop" ? "bg-yellow-100 dark:bg-yellow-900/30" : "bg-red-100 dark:bg-red-900/30")}>
+                {showBulkContainerModal === "stop" ? (
+                  <Square className="h-5 w-5 text-yellow-600 dark:text-yellow-400" />
+                ) : (
+                  <Trash2 className="h-5 w-5 text-red-600 dark:text-red-400" />
+                )}
+              </div>
+              <h3 className="text-lg font-semibold">
+                {showBulkContainerModal === "stop" ? `Stop ${runningSelectedCount} Containers` : `Delete ${selectedContainerIds.size} Containers`}
+              </h3>
+            </div>
+
+            {!bulkContainerProgress ? (
+              <>
+                <p className="text-gray-600 dark:text-gray-400 mb-4">
+                  {showBulkContainerModal === "stop" ? (
+                    <>Are you sure you want to stop <strong>{runningSelectedCount}</strong> running containers?</>
+                  ) : (
+                    <>Are you sure you want to delete <strong>{selectedContainerIds.size}</strong> selected containers?</>
+                  )}
+                </p>
+                <div className="max-h-48 overflow-y-auto mb-4 space-y-1">
+                  {(showBulkContainerModal === "stop" ? selectedContainersData.filter(c => c.status === "running") : selectedContainersData).map((container) => (
+                    <div key={container.container_id} className={cn("flex items-center justify-between p-2 rounded text-sm", container.status === "running" ? "bg-green-50 dark:bg-green-900/20" : "bg-gray-50 dark:bg-gray-800")}>
+                      <span className="font-mono truncate">{container.name}</span>
+                      <span className="text-xs">
+                        <StatusIndicator status={container.status === "running" ? "success" : "error"} label={container.status} size="sm" />
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                {showBulkContainerModal === "delete" && runningSelectedCount > 0 && (
+                  <div className="mb-4">
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" checked={forceDelete} onChange={(e) => setForceDelete(e.target.checked)} className="rounded border-gray-300" />
+                      <span className="text-sm text-yellow-600 dark:text-yellow-400">Force delete running containers ({runningSelectedCount} running)</span>
+                    </label>
+                  </div>
+                )}
+                <div className="flex justify-end gap-3">
+                  <Button variant="secondary" onClick={() => { setShowBulkContainerModal(null); setForceDelete(false); }}>Cancel</Button>
+                  {showBulkContainerModal === "stop" ? (
+                    <Button variant="secondary" onClick={handleBulkStopContainers}>
+                      <Square className="h-4 w-4 mr-1" />
+                      Stop {runningSelectedCount} Containers
+                    </Button>
+                  ) : (
+                    <Button variant="danger" onClick={handleBulkDeleteContainers} disabled={runningSelectedCount > 0 && !forceDelete}>
+                      Delete {selectedContainerIds.size} Containers
+                    </Button>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="space-y-4">
+                <div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span>{showBulkContainerModal === "stop" ? "Stopping containers..." : "Deleting containers..."}</span>
+                    <span>{bulkContainerProgress.completed} / {bulkContainerProgress.total}</span>
+                  </div>
+                  <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                    <div className={cn("h-2 rounded-full transition-all duration-300", showBulkContainerModal === "stop" ? "bg-yellow-500" : "bg-red-600")} style={{ width: `${(bulkContainerProgress.completed / bulkContainerProgress.total) * 100}%` }} />
+                  </div>
+                </div>
+                {bulkContainerProgress.failed.length > 0 && (
+                  <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                    <p className="text-sm font-medium text-red-600 dark:text-red-400 mb-2">Failed to {showBulkContainerModal === "stop" ? "stop" : "delete"} {bulkContainerProgress.failed.length} containers:</p>
+                    <ul className="text-xs text-red-600 dark:text-red-400 space-y-1">
+                      {bulkContainerProgress.failed.map((name, idx) => <li key={idx}>• {name}</li>)}
+                    </ul>
+                  </div>
+                )}
+                {bulkContainerProgress.completed === bulkContainerProgress.total && (
+                  <div className="flex justify-end">
+                    <Button variant="secondary" onClick={() => { setShowBulkContainerModal(null); setSelectedContainerIds(new Set()); setBulkContainerProgress(null); setForceDelete(false); }}>
+                      {bulkContainerProgress.failed.length > 0 ? "Close" : "Done"}
                     </Button>
                   </div>
                 )}
