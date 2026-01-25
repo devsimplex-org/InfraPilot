@@ -649,9 +649,13 @@ func (h *Handler) createStack(c *gin.Context) {
 			}
 		}
 
-		// Build container config
+		// Build container config with compose labels
 		containerConfig := &DeploymentContainerConfig{
 			EnvVars: envVars,
+			Labels: map[string]string{
+				"com.docker.compose.project": req.Name,
+				"com.docker.compose.service": svc.Name,
+			},
 		}
 
 		// Add networks

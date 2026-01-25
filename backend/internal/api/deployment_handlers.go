@@ -102,6 +102,7 @@ type DeploymentContainerConfig struct {
 	SecretMethod string                   `json:"secret_method,omitempty"` // "env_vars" or "docker_secrets"
 	Networks     []ContainerConfigNetwork `json:"networks,omitempty"`
 	Volumes      []ContainerConfigVolume  `json:"volumes,omitempty"`
+	Labels       map[string]string        `json:"labels,omitempty"`
 }
 
 type CreateDeploymentRequest struct {
@@ -611,15 +612,24 @@ func (h *Handler) deployContainerToAgent(ctx context.Context, deploymentID, agen
 	containerName := fmt.Sprintf("%s-%s-%s", serviceName, environment, deploymentID.String()[:8])
 
 	// Build the run command options
+	labels := map[string]interface{}{
+		"infrapilot.deployment_id": deploymentID.String(),
+		"infrapilot.service":       serviceName,
+		"infrapilot.environment":   environment,
+	}
+
+	// Merge custom labels from container config (e.g., compose project labels)
+	if containerConfig != nil && len(containerConfig.Labels) > 0 {
+		for k, v := range containerConfig.Labels {
+			labels[k] = v
+		}
+	}
+
 	options := map[string]interface{}{
 		"image_ref":      imageRef,
 		"name":           containerName,
 		"restart_policy": "unless-stopped",
-		"labels": map[string]interface{}{
-			"infrapilot.deployment_id": deploymentID.String(),
-			"infrapilot.service":       serviceName,
-			"infrapilot.environment":   environment,
-		},
+		"labels":         labels,
 	}
 
 	// Add container configuration if provided
