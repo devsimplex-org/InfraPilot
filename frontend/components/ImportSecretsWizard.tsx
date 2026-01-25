@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useState, useEffect, useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   X,
   ArrowRight,
@@ -10,7 +10,6 @@ import {
   AlertTriangle,
   Loader2,
   Upload,
-  FileText,
   Lock,
   Settings,
   Shield,
@@ -19,9 +18,16 @@ import {
   Eye,
   EyeOff,
   Trash2,
+  Circle,
 } from "lucide-react";
 import { api, Container } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import {
+  useImportWebSocket,
+  ImportProgress,
+  ImportErrorMessage,
+  ImportCompleteMessage,
+} from "@/hooks/useImportWebSocket";
 
 interface ImportSecretsWizardProps {
   isOpen: boolean;
@@ -40,6 +46,25 @@ interface ParsedSecret {
 type ImportMethod = "env_vars" | "docker_secrets";
 type WizardStep = "source" | "method" | "target" | "review" | "execute";
 
+interface ImportStep {
+  id: string;
+  label: string;
+  status: "pending" | "in_progress" | "complete" | "error";
+  message?: string;
+}
+
+const DOCKER_SECRETS_STEPS: ImportStep[] = [
+  { id: "creating_secrets", label: "Creating secrets", status: "pending" },
+  { id: "recreating_container", label: "Recreating container", status: "pending" },
+  { id: "verifying", label: "Verifying", status: "pending" },
+];
+
+const ENV_VARS_STEPS: ImportStep[] = [
+  { id: "preparing", label: "Preparing environment variables", status: "pending" },
+  { id: "recreating_container", label: "Recreating container", status: "pending" },
+  { id: "verifying", label: "Verifying", status: "pending" },
+];
+
 export function ImportSecretsWizard({
   isOpen,
   onClose,
@@ -54,6 +79,54 @@ export function ImportSecretsWizard({
   const [isExecuting, setIsExecuting] = useState(false);
   const [executionStatus, setExecutionStatus] = useState<"idle" | "running" | "success" | "error">("idle");
   const [executionMessage, setExecutionMessage] = useState("");
+  const [importSteps, setImportSteps] = useState<ImportStep[]>([]);
+  const [overallProgress, setOverallProgress] = useState(0);
+
+  // WebSocket callbacks
+  const handleProgress = useCallback((progress: ImportProgress) => {
+    setOverallProgress(progress.progress);
+    setImportSteps((prev) =>
+      prev.map((s) =>
+        s.id === progress.step
+          ? { ...s, status: progress.status, message: progress.message }
+          : s
+      )
+    );
+    if (progress.message) {
+      setExecutionMessage(progress.message);
+    }
+  }, []);
+
+  const handleError = useCallback((error: ImportErrorMessage) => {
+    setIsExecuting(false);
+    setExecutionStatus("error");
+    setExecutionMessage(error.error);
+    if (error.step) {
+      setImportSteps((prev) =>
+        prev.map((s) =>
+          s.id === error.step ? { ...s, status: "error", message: error.error } : s
+        )
+      );
+    }
+  }, []);
+
+  const handleComplete = useCallback((complete: ImportCompleteMessage) => {
+    setIsExecuting(false);
+    if (complete.success) {
+      setExecutionStatus("success");
+      setExecutionMessage(complete.message || "Import completed successfully");
+      setOverallProgress(100);
+    } else {
+      setExecutionStatus("error");
+      setExecutionMessage(complete.message || "Import failed");
+    }
+  }, []);
+
+  const { startImport, disconnect } = useImportWebSocket({
+    onProgress: handleProgress,
+    onError: handleError,
+    onComplete: handleComplete,
+  });
 
   // Reset state when opening
   useEffect(() => {
@@ -66,8 +139,13 @@ export function ImportSecretsWizard({
       setIsExecuting(false);
       setExecutionStatus("idle");
       setExecutionMessage("");
+      setImportSteps([]);
+      setOverallProgress(0);
+    } else {
+      // Disconnect WebSocket when closing
+      disconnect();
     }
-  }, [isOpen]);
+  }, [isOpen, disconnect]);
 
   // Fetch containers for the agent
   const { data: containers, isLoading: loadingContainers } = useQuery({
@@ -140,48 +218,34 @@ export function ImportSecretsWizard({
     setParsedSecrets((prev) => prev.filter((_, i) => i !== index));
   };
 
-  // Execute import
-  const executeImport = async () => {
+  // Execute import using WebSocket
+  const executeImport = () => {
     setIsExecuting(true);
     setExecutionStatus("running");
-    setExecutionMessage("Preparing import...");
+    setExecutionMessage("Connecting...");
 
-    try {
-      const selectedSecrets = parsedSecrets
-        .filter((s) => s.selected)
-        .map((s) => ({ name: s.key, value: s.value }));
+    // Initialize steps based on method
+    const steps = importMethod === "docker_secrets"
+      ? [...DOCKER_SECRETS_STEPS]
+      : [...ENV_VARS_STEPS];
+    setImportSteps(steps);
+    setOverallProgress(0);
 
-      const container = containers?.find((c: Container) => c.id === selectedContainer);
-
-      setExecutionMessage(
-        importMethod === "docker_secrets"
-          ? "Creating Docker secrets and recreating container..."
-          : "Updating container environment variables..."
-      );
-
-      const response = await api.importSecrets(agentId, {
-        container_id: selectedContainer,
-        container_name: container?.name || selectedContainer,
-        method: importMethod,
-        secrets: selectedSecrets,
+    // Build secrets map
+    const secretsMap: Record<string, string> = {};
+    parsedSecrets
+      .filter((s) => s.selected)
+      .forEach((s) => {
+        secretsMap[s.key] = s.value;
       });
 
-      if (response.success) {
-        setExecutionStatus("success");
-        setExecutionMessage(
-          importMethod === "docker_secrets"
-            ? `Successfully attached ${selectedSecrets.length} secrets to container. Secrets are mounted at /run/secrets/`
-            : `Successfully added ${selectedSecrets.length} environment variables to container.`
-        );
-      } else {
-        throw new Error(response.error || "Import failed");
-      }
-    } catch (error: any) {
-      setExecutionStatus("error");
-      setExecutionMessage(error.message || "Failed to import secrets");
-    } finally {
-      setIsExecuting(false);
-    }
+    // Start import via WebSocket
+    startImport({
+      agent_id: agentId,
+      container_id: selectedContainer,
+      method: importMethod,
+      secrets: secretsMap,
+    });
   };
 
   const selectedCount = parsedSecrets.filter((s) => s.selected).length;
@@ -589,9 +653,85 @@ export function ImportSecretsWizard({
 
             {/* Step 5: Execute */}
             {step === "execute" && (
-              <div className="py-8">
+              <div className="py-4">
+                {/* Progress bar */}
+                {executionStatus === "running" && (
+                  <div className="mb-6">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Progress
+                      </span>
+                      <span className="text-sm text-gray-500">{overallProgress}%</span>
+                    </div>
+                    <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-primary-600 transition-all duration-300 ease-out"
+                        style={{ width: `${overallProgress}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Steps list */}
+                {importSteps.length > 0 && (
+                  <div className="space-y-3 mb-6">
+                    {importSteps.map((importStep, index) => (
+                      <div
+                        key={importStep.id}
+                        className={cn(
+                          "flex items-center gap-3 p-3 rounded-lg border transition-colors",
+                          importStep.status === "in_progress"
+                            ? "border-primary-500 bg-primary-50 dark:bg-primary-900/20"
+                            : importStep.status === "complete"
+                            ? "border-green-500 bg-green-50 dark:bg-green-900/20"
+                            : importStep.status === "error"
+                            ? "border-red-500 bg-red-50 dark:bg-red-900/20"
+                            : "border-gray-200 dark:border-gray-700"
+                        )}
+                      >
+                        <div className="flex-shrink-0">
+                          {importStep.status === "in_progress" && (
+                            <Loader2 className="h-5 w-5 text-primary-600 animate-spin" />
+                          )}
+                          {importStep.status === "complete" && (
+                            <CheckCircle className="h-5 w-5 text-green-500" />
+                          )}
+                          {importStep.status === "error" && (
+                            <XCircle className="h-5 w-5 text-red-500" />
+                          )}
+                          {importStep.status === "pending" && (
+                            <Circle className="h-5 w-5 text-gray-400" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p
+                            className={cn(
+                              "text-sm font-medium",
+                              importStep.status === "in_progress"
+                                ? "text-primary-700 dark:text-primary-300"
+                                : importStep.status === "complete"
+                                ? "text-green-700 dark:text-green-300"
+                                : importStep.status === "error"
+                                ? "text-red-700 dark:text-red-300"
+                                : "text-gray-600 dark:text-gray-400"
+                            )}
+                          >
+                            {importStep.label}
+                          </p>
+                          {importStep.message && (
+                            <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                              {importStep.message}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Status message */}
                 <div className="flex flex-col items-center text-center">
-                  {executionStatus === "running" && (
+                  {executionStatus === "running" && importSteps.length === 0 && (
                     <>
                       <Loader2 className="h-12 w-12 text-primary-600 animate-spin mb-4" />
                       <p className="text-gray-600 dark:text-gray-400">{executionMessage}</p>
