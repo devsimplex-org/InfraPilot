@@ -1027,6 +1027,36 @@ export interface SBOM {
   created_at: string;
 }
 
+// Container configuration for deployments
+export interface ContainerConfigSecret {
+  name: string;
+  value: string;
+  mount_path?: string;
+}
+
+export interface ContainerConfigNetwork {
+  network_id?: string;
+  network_name?: string;
+  create_if_missing?: boolean;
+  driver?: string;
+}
+
+export interface ContainerConfigVolume {
+  volume_name?: string;
+  mount_path: string;
+  create_if_missing?: boolean;
+  host_path?: string;
+  read_only?: boolean;
+}
+
+export interface ContainerConfig {
+  env_vars?: Record<string, string>;
+  secrets?: ContainerConfigSecret[];
+  secret_method?: "env_vars" | "docker_secrets";
+  networks?: ContainerConfigNetwork[];
+  volumes?: ContainerConfigVolume[];
+}
+
 export interface CreateDeploymentRequest {
   service_name: string;
   environment: string;
@@ -1039,7 +1069,12 @@ export interface CreateDeploymentRequest {
   ci_provider?: string;
   ci_pipeline_id?: string;
   ci_build_url?: string;
+  container_config?: ContainerConfig;
 }
+
+// Type aliases for backward compatibility in DeployWizard
+export type NetworkInfo = DockerNetwork;
+export type VolumeInfo = DockerVolume;
 
 // Developer Feedback (Epic 8)
 export interface Feedback {
@@ -2392,7 +2427,7 @@ export interface SecretInventory {
   agent_id?: string;
   name: string;
   secret_type: 'api_key' | 'password' | 'certificate' | 'ssh_key' | 'oauth_token' | 'database_credential' | 'encryption_key';
-  source: 'env_var' | 'file' | 'vault' | 'k8s_secret' | 'docker_secret' | 'config';
+  source: 'env_var' | 'env_file' | 'file' | 'file_secret' | 'vault' | 'k8s_secret' | 'docker_secret' | 'config' | 'environment';
   location?: string;
   deployment_id?: string;
   container_id?: string;
@@ -2527,6 +2562,56 @@ export interface SecretExposureSummary {
   high_exposures: number;
   exposures_last_7d: number;
   exposures_last_30d: number;
+}
+
+// Secret Migration Types
+export interface SecretMigration {
+  id: string;
+  org_id: string;
+  agent_id: string;
+  container_id: string;
+  container_name: string;
+  source_type: 'env_file' | 'env_var';
+  source_path?: string;
+  status: 'pending' | 'creating_secrets' | 'stopping_container' | 'starting_container' | 'verifying' | 'completed' | 'failed' | 'rolled_back';
+  error_message?: string;
+  new_container_id?: string;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string;
+  total_secrets?: number;
+  completed_secrets?: number;
+  failed_secrets?: number;
+}
+
+export interface SecretMigrationItem {
+  id: string;
+  migration_id: string;
+  secret_name: string;
+  secret_type?: string;
+  old_source: string;
+  new_source: string;
+  status: 'pending' | 'created' | 'attached' | 'verified' | 'completed' | 'failed';
+  mount_path?: string;
+  error_message?: string;
+  created_at: string;
+}
+
+export interface SecretMigrationDetails {
+  migration: SecretMigration;
+  items: SecretMigrationItem[];
+}
+
+export interface CreateMigrationRequest {
+  container_id: string;
+  container_name: string;
+  source_type: string;
+  source_path?: string;
+  secrets: {
+    name: string;
+    value: string;
+    type?: string;
+  }[];
 }
 
 export interface CreateSecretRequest {
@@ -3557,6 +3642,13 @@ export const api = {
       { method: "DELETE" }
     ),
 
+  // Aliases for DeployWizard compatibility
+  getNetworks: (agentId: string) =>
+    fetchAPI<DockerNetwork[]>(`/agents/${agentId}/docker/networks`),
+
+  getVolumes: (agentId: string) =>
+    fetchAPI<DockerVolume[]>(`/agents/${agentId}/docker/volumes`),
+
   // Logs
   getUnifiedLogs: (
     agentId: string,
@@ -4128,6 +4220,21 @@ export const api = {
   rollbackDeployment: (agentId: string, deploymentId: string) =>
     fetchAPI<{ id: string; status: string; message: string }>(`/agents/${agentId}/deployments/${deploymentId}/rollback`, {
       method: "POST",
+    }),
+
+  redeployDeployment: (agentId: string, deploymentId: string) =>
+    fetchAPI<{ id: string; status: string; message: string }>(`/agents/${agentId}/deployments/${deploymentId}/redeploy`, {
+      method: "POST",
+    }),
+
+  syncDeploymentStatus: (agentId: string) =>
+    fetchAPI<{ message: string; synced: number; checked: number }>(`/agents/${agentId}/deployments/sync`, {
+      method: "POST",
+    }),
+
+  deleteDeployment: (agentId: string, deploymentId: string) =>
+    fetchAPI<{ message: string }>(`/agents/${agentId}/deployments/${deploymentId}`, {
+      method: "DELETE",
     }),
 
   // Services view (cross-agent)
@@ -5047,6 +5154,36 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  // Secret Migrations (agent-scoped)
+  listSecretMigrations: (agentId: string) =>
+    fetchAPI<SecretMigration[]>(`/agents/${agentId}/secrets/migrations`),
+
+  getSecretMigration: (agentId: string, migrationId: string) =>
+    fetchAPI<SecretMigrationDetails>(`/agents/${agentId}/secrets/migrations/${migrationId}`),
+
+  createSecretMigration: (agentId: string, data: CreateMigrationRequest) =>
+    fetchAPI<{ id: string; status: string }>(`/agents/${agentId}/secrets/migrations`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  rollbackSecretMigration: (agentId: string, migrationId: string) =>
+    fetchAPI<{ message: string }>(`/agents/${agentId}/secrets/migrations/${migrationId}/rollback`, {
+      method: "POST",
+    }),
+
+  // Import secrets to container
+  importSecrets: (agentId: string, data: {
+    container_id: string;
+    container_name: string;
+    method: "env_vars" | "docker_secrets";
+    secrets: { name: string; value: string }[];
+  }) =>
+    fetchAPI<{ success: boolean; error?: string; new_container_id?: string }>(`/agents/${agentId}/secrets/import`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
   // Epic 17: Background Jobs & Workers
   listJobs: (params?: {
     status?: string;
@@ -5437,4 +5574,22 @@ export const api = {
 
   // Generic fetch for custom endpoints
   fetchAPI: <T>(endpoint: string, options?: RequestInit) => fetchAPI<T>(endpoint, options),
+
+  // Sensitive operation verification
+  verifyPassword: (password: string) =>
+    fetchAPI<{ valid: boolean; error?: string }>(`/auth/verify-password`, {
+      method: "POST",
+      body: JSON.stringify({ password }),
+    }),
+
+  sendConfirmationOTP: () =>
+    fetchAPI<{ success: boolean; message: string; error?: string }>(`/auth/send-confirmation-otp`, {
+      method: "POST",
+    }),
+
+  verifyConfirmationOTP: (otp: string) =>
+    fetchAPI<{ valid: boolean; error?: string }>(`/auth/verify-confirmation-otp`, {
+      method: "POST",
+      body: JSON.stringify({ otp }),
+    }),
 };

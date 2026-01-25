@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/client"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -67,19 +69,53 @@ type Deployment struct {
 	UpdatedAt        time.Time       `json:"updated_at"`
 }
 
+// ContainerConfigSecret represents a secret to be mounted in the container
+type ContainerConfigSecret struct {
+	Name      string `json:"name"`
+	Value     string `json:"value"`
+	MountPath string `json:"mount_path,omitempty"`
+}
+
+// ContainerConfigNetwork represents a network configuration
+type ContainerConfigNetwork struct {
+	NetworkID       *string `json:"network_id,omitempty"`
+	NetworkName     *string `json:"network_name,omitempty"`
+	CreateIfMissing bool    `json:"create_if_missing,omitempty"`
+	Driver          string  `json:"driver,omitempty"`
+}
+
+// ContainerConfigVolume represents a volume configuration
+type ContainerConfigVolume struct {
+	VolumeName      *string `json:"volume_name,omitempty"`
+	MountPath       string  `json:"mount_path"`
+	CreateIfMissing bool    `json:"create_if_missing,omitempty"`
+	HostPath        *string `json:"host_path,omitempty"`
+	ReadOnly        bool    `json:"read_only,omitempty"`
+}
+
+// DeploymentContainerConfig contains the extended container configuration for deployments
+type DeploymentContainerConfig struct {
+	EnvVars      map[string]string        `json:"env_vars,omitempty"`
+	Secrets      []ContainerConfigSecret  `json:"secrets,omitempty"`
+	SecretMethod string                   `json:"secret_method,omitempty"` // "env_vars" or "docker_secrets"
+	Networks     []ContainerConfigNetwork `json:"networks,omitempty"`
+	Volumes      []ContainerConfigVolume  `json:"volumes,omitempty"`
+}
+
 type CreateDeploymentRequest struct {
-	ServiceName     string  `json:"service_name" binding:"required"`
-	Environment     string  `json:"environment" binding:"required,oneof=dev staging prod"`
-	ImageRepository string  `json:"image_repository" binding:"required"`
-	ImageTag        *string `json:"image_tag"`
-	ImageDigest     *string `json:"image_digest"`
-	GitRepo         *string `json:"git_repo"`
-	GitBranch       *string `json:"git_branch"`
-	GitCommit       *string `json:"git_commit"`
-	GitPRNumber     *int    `json:"git_pr_number"`
-	CIProvider      *string `json:"ci_provider"`
-	CIPipelineID    *string `json:"ci_pipeline_id"`
-	CIBuildURL      *string `json:"ci_build_url"`
+	ServiceName     string           `json:"service_name" binding:"required"`
+	Environment     string           `json:"environment" binding:"required,oneof=dev staging prod"`
+	ImageRepository string           `json:"image_repository" binding:"required"`
+	ImageTag        *string          `json:"image_tag"`
+	ImageDigest     *string          `json:"image_digest"`
+	GitRepo         *string          `json:"git_repo"`
+	GitBranch       *string          `json:"git_branch"`
+	GitCommit       *string          `json:"git_commit"`
+	GitPRNumber     *int             `json:"git_pr_number"`
+	CIProvider      *string          `json:"ci_provider"`
+	CIPipelineID    *string          `json:"ci_pipeline_id"`
+	CIBuildURL      *string          `json:"ci_build_url"`
+	ContainerConfig *DeploymentContainerConfig `json:"container_config,omitempty"`
 }
 
 // ==================== List Deployments ====================
@@ -222,6 +258,18 @@ func (h *Handler) createDeployment(c *gin.Context) {
 		return
 	}
 
+	// Serialize container config to JSON if provided
+	var containerConfigJSON []byte
+	if req.ContainerConfig != nil {
+		var err error
+		containerConfigJSON, err = json.Marshal(req.ContainerConfig)
+		if err != nil {
+			h.logger.Error("Failed to marshal container config", zap.Error(err))
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid container config"})
+			return
+		}
+	}
+
 	var deploymentID uuid.UUID
 	err = h.db.QueryRow(c.Request.Context(), `
 		INSERT INTO deployments (
@@ -229,15 +277,15 @@ func (h *Handler) createDeployment(c *gin.Context) {
 			image_repository, image_tag, image_digest,
 			git_repo, git_branch, git_commit, git_pr_number,
 			ci_provider, ci_pipeline_id, ci_build_url,
-			deployed_by, status
+			deployed_by, status, container_config
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'pending')
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'pending', $16)
 		RETURNING id
 	`, orgID, agentID, req.ServiceName, req.Environment,
 		req.ImageRepository, req.ImageTag, req.ImageDigest,
 		req.GitRepo, req.GitBranch, req.GitCommit, req.GitPRNumber,
 		req.CIProvider, req.CIPipelineID, req.CIBuildURL,
-		userID,
+		userID, containerConfigJSON,
 	).Scan(&deploymentID)
 
 	if err != nil {
@@ -262,7 +310,7 @@ func (h *Handler) createDeployment(c *gin.Context) {
 		imageDigest = *req.ImageDigest
 	}
 	// Use background context for async pipeline (request context will be canceled)
-	go h.runDeploymentPipeline(context.Background(), orgID, deploymentID, req.ImageRepository, imageTag, imageDigest)
+	go h.runDeploymentPipeline(context.Background(), orgID, deploymentID, req.ImageRepository, imageTag, imageDigest, req.ContainerConfig)
 
 	c.JSON(http.StatusCreated, gin.H{
 		"id":      deploymentID,
@@ -273,7 +321,7 @@ func (h *Handler) createDeployment(c *gin.Context) {
 
 // ==================== Deployment Pipeline ====================
 
-func (h *Handler) runDeploymentPipeline(ctx context.Context, orgID, deploymentID uuid.UUID, imageRepo, imageTag, imageDigest string) {
+func (h *Handler) runDeploymentPipeline(ctx context.Context, orgID, deploymentID uuid.UUID, imageRepo, imageTag, imageDigest string, containerConfig *DeploymentContainerConfig) {
 	logger := h.logger.With(
 		zap.String("deployment_id", deploymentID.String()),
 		zap.String("org_id", orgID.String()),
@@ -517,7 +565,7 @@ func (h *Handler) runDeploymentPipeline(ctx context.Context, orgID, deploymentID
 			return
 		}
 
-		containerResult, err := h.deployContainerToAgent(ctx, deploymentID, agentID, imageRef, deployment.ServiceName, deployment.Environment)
+		containerResult, err := h.deployContainerToAgent(ctx, deploymentID, agentID, imageRef, deployment.ServiceName, deployment.Environment, containerConfig)
 		if err != nil {
 			h.updateDeploymentStatus(ctx, deploymentID.String(), "failed",
 				fmt.Sprintf("Container deployment failed: %v", err))
@@ -552,7 +600,7 @@ func (h *Handler) runDeploymentPipeline(ctx context.Context, orgID, deploymentID
 }
 
 // deployContainerToAgent sends a command to the agent to run a container
-func (h *Handler) deployContainerToAgent(ctx context.Context, deploymentID, agentID uuid.UUID, imageRef, serviceName, environment string) (*agentgrpc.ContainerRunResult, error) {
+func (h *Handler) deployContainerToAgent(ctx context.Context, deploymentID, agentID uuid.UUID, imageRef, serviceName, environment string, containerConfig *DeploymentContainerConfig) (*agentgrpc.ContainerRunResult, error) {
 	// Generate container name
 	containerName := fmt.Sprintf("%s-%s-%s", serviceName, environment, deploymentID.String()[:8])
 
@@ -566,6 +614,69 @@ func (h *Handler) deployContainerToAgent(ctx context.Context, deploymentID, agen
 			"infrapilot.service":       serviceName,
 			"infrapilot.environment":   environment,
 		},
+	}
+
+	// Add container configuration if provided
+	if containerConfig != nil {
+		// Add environment variables
+		if len(containerConfig.EnvVars) > 0 && containerConfig.SecretMethod != "docker_secrets" {
+			options["env"] = containerConfig.EnvVars
+		}
+
+		// Add secrets configuration
+		if len(containerConfig.Secrets) > 0 {
+			secretsOpts := make([]map[string]interface{}, len(containerConfig.Secrets))
+			for i, s := range containerConfig.Secrets {
+				secretsOpts[i] = map[string]interface{}{
+					"name":       s.Name,
+					"value":      s.Value,
+					"mount_path": s.MountPath,
+				}
+			}
+			options["secrets"] = secretsOpts
+			options["secret_method"] = containerConfig.SecretMethod
+		}
+
+		// Add networks configuration
+		if len(containerConfig.Networks) > 0 {
+			networksOpts := make([]map[string]interface{}, len(containerConfig.Networks))
+			for i, n := range containerConfig.Networks {
+				netOpt := map[string]interface{}{
+					"create_if_missing": n.CreateIfMissing,
+				}
+				if n.NetworkID != nil {
+					netOpt["network_id"] = *n.NetworkID
+				}
+				if n.NetworkName != nil {
+					netOpt["network_name"] = *n.NetworkName
+				}
+				if n.Driver != "" {
+					netOpt["driver"] = n.Driver
+				}
+				networksOpts[i] = netOpt
+			}
+			options["networks"] = networksOpts
+		}
+
+		// Add volumes configuration
+		if len(containerConfig.Volumes) > 0 {
+			volumesOpts := make([]map[string]interface{}, len(containerConfig.Volumes))
+			for i, v := range containerConfig.Volumes {
+				volOpt := map[string]interface{}{
+					"mount_path":        v.MountPath,
+					"create_if_missing": v.CreateIfMissing,
+					"read_only":         v.ReadOnly,
+				}
+				if v.VolumeName != nil {
+					volOpt["volume_name"] = *v.VolumeName
+				}
+				if v.HostPath != nil {
+					volOpt["host_path"] = *v.HostPath
+				}
+				volumesOpts[i] = volOpt
+			}
+			options["volumes"] = volumesOpts
+		}
 	}
 
 	optionsJSON, err := json.Marshal(options)
@@ -683,6 +794,116 @@ func (h *Handler) rollbackDeployment(c *gin.Context) {
 	})
 }
 
+// ==================== Redeploy Deployment ====================
+
+func (h *Handler) redeployDeployment(c *gin.Context) {
+	orgID := c.MustGet("org_id").(uuid.UUID)
+	userID := c.MustGet("user_id").(uuid.UUID)
+	agentID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid agent ID"})
+		return
+	}
+	deploymentID, err := uuid.Parse(c.Param("did"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid deployment ID"})
+		return
+	}
+
+	// Fetch original deployment with all fields needed for redeployment
+	var original struct {
+		ServiceName     string
+		Environment     string
+		ImageRegistry   *string
+		ImageRepository string
+		ImageTag        *string
+		ImageDigest     *string
+		GitRepo         *string
+		GitBranch       *string
+		GitCommit       *string
+		CIProvider      *string
+		CIPipelineID    *string
+		CIBuildURL      *string
+		ContainerConfig []byte
+	}
+
+	err = h.db.QueryRow(c.Request.Context(), `
+		SELECT service_name, environment, image_registry, image_repository,
+		       image_tag, image_digest, git_repo, git_branch, git_commit,
+		       ci_provider, ci_pipeline_id, ci_build_url, container_config
+		FROM deployments
+		WHERE id = $1 AND org_id = $2 AND agent_id = $3
+	`, deploymentID, orgID, agentID).Scan(
+		&original.ServiceName, &original.Environment, &original.ImageRegistry, &original.ImageRepository,
+		&original.ImageTag, &original.ImageDigest, &original.GitRepo, &original.GitBranch, &original.GitCommit,
+		&original.CIProvider, &original.CIPipelineID, &original.CIBuildURL, &original.ContainerConfig,
+	)
+
+	if err != nil {
+		h.logger.Error("Deployment not found for redeploy", zap.Error(err))
+		c.JSON(http.StatusNotFound, gin.H{"error": "deployment not found"})
+		return
+	}
+
+	// Create new deployment copying all configuration from the original
+	newID := uuid.New()
+	_, err = h.db.Exec(c.Request.Context(), `
+		INSERT INTO deployments (
+			id, org_id, agent_id, service_name, environment,
+			image_registry, image_repository, image_tag, image_digest,
+			git_repo, git_branch, git_commit,
+			ci_provider, ci_pipeline_id, ci_build_url,
+			container_config, replaces_deployment_id,
+			status, deployed_by, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 'pending', $18, NOW(), NOW())
+	`, newID, orgID, agentID, original.ServiceName, original.Environment,
+		original.ImageRegistry, original.ImageRepository, original.ImageTag, original.ImageDigest,
+		original.GitRepo, original.GitBranch, original.GitCommit,
+		original.CIProvider, original.CIPipelineID, original.CIBuildURL,
+		original.ContainerConfig, deploymentID, userID,
+	)
+
+	if err != nil {
+		h.logger.Error("Failed to create redeploy deployment", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create redeployment"})
+		return
+	}
+
+	h.logger.Info("Redeployment created",
+		zap.String("original_deployment", deploymentID.String()),
+		zap.String("new_deployment", newID.String()),
+		zap.String("service", original.ServiceName),
+	)
+
+	// Parse container config for pipeline
+	var containerConfig *DeploymentContainerConfig
+	if len(original.ContainerConfig) > 0 {
+		if err := json.Unmarshal(original.ContainerConfig, &containerConfig); err != nil {
+			h.logger.Warn("Failed to parse container config for redeploy", zap.Error(err))
+		}
+	}
+
+	// Prepare image tag and digest for pipeline
+	imageTag := ""
+	if original.ImageTag != nil {
+		imageTag = *original.ImageTag
+	}
+	imageDigest := ""
+	if original.ImageDigest != nil {
+		imageDigest = *original.ImageDigest
+	}
+
+	// Trigger deployment pipeline asynchronously
+	go h.runDeploymentPipeline(context.Background(), orgID, newID,
+		original.ImageRepository, imageTag, imageDigest, containerConfig)
+
+	c.JSON(http.StatusOK, gin.H{
+		"id":      newID.String(),
+		"status":  "pending",
+		"message": "Redeployment created and pipeline initiated",
+	})
+}
+
 // ==================== Update Deployment Status ====================
 
 func (h *Handler) updateDeploymentStatus(ctx context.Context, id, status, message string) error {
@@ -701,6 +922,193 @@ func (h *Handler) updateDeploymentStatus(ctx context.Context, id, status, messag
 	}
 
 	return err
+}
+
+// ==================== Sync Deployment Status ====================
+
+// syncDeploymentStatus checks actual container state and updates deployment records
+func (h *Handler) syncDeploymentStatus(c *gin.Context) {
+	orgID := c.MustGet("org_id").(uuid.UUID)
+	agentID := c.Param("id")
+
+	// Get all "running" or "deploying" deployments with a container_id
+	rows, err := h.db.Query(c.Request.Context(), `
+		SELECT id, container_id, container_name, service_name
+		FROM deployments
+		WHERE org_id = $1 AND agent_id = $2
+		  AND status IN ('running', 'deploying')
+		  AND container_id IS NOT NULL
+	`, orgID, agentID)
+	if err != nil {
+		h.logger.Error("Failed to query deployments for sync", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query deployments"})
+		return
+	}
+	defer rows.Close()
+
+	type deploymentInfo struct {
+		ID            uuid.UUID
+		ContainerID   string
+		ContainerName *string
+		ServiceName   string
+	}
+	var deployments []deploymentInfo
+	for rows.Next() {
+		var d deploymentInfo
+		if err := rows.Scan(&d.ID, &d.ContainerID, &d.ContainerName, &d.ServiceName); err != nil {
+			continue
+		}
+		deployments = append(deployments, d)
+	}
+
+	if len(deployments) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"message": "no running deployments to sync",
+			"synced":  0,
+		})
+		return
+	}
+
+	// Connect to Docker to get actual container state
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		h.logger.Error("Failed to connect to Docker for sync", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to connect to Docker"})
+		return
+	}
+	defer cli.Close()
+
+	// List all containers (including stopped)
+	containers, err := cli.ContainerList(c.Request.Context(), container.ListOptions{All: true})
+	if err != nil {
+		h.logger.Error("Failed to list containers for sync", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list containers"})
+		return
+	}
+
+	// Build a map of existing container IDs
+	containerMap := make(map[string]string) // containerID -> state
+	for _, ctr := range containers {
+		containerMap[ctr.ID] = ctr.State
+		// Also check short ID (first 12 chars)
+		if len(ctr.ID) >= 12 {
+			containerMap[ctr.ID[:12]] = ctr.State
+		}
+	}
+
+	// Check each deployment and update if container is missing or stopped
+	syncedCount := 0
+	for _, d := range deployments {
+		state, exists := containerMap[d.ContainerID]
+		// Also try short ID match
+		if !exists && len(d.ContainerID) >= 12 {
+			state, exists = containerMap[d.ContainerID[:12]]
+		}
+
+		var newStatus, statusMessage string
+		if !exists {
+			newStatus = "stopped"
+			statusMessage = "Container no longer exists"
+		} else if state == "exited" || state == "dead" {
+			newStatus = "stopped"
+			statusMessage = fmt.Sprintf("Container %s", state)
+		}
+
+		if newStatus != "" {
+			_, err := h.db.Exec(c.Request.Context(), `
+				UPDATE deployments
+				SET status = $1, status_message = $2, updated_at = NOW()
+				WHERE id = $3
+			`, newStatus, statusMessage, d.ID)
+			if err != nil {
+				h.logger.Warn("Failed to update deployment status during sync",
+					zap.String("deployment_id", d.ID.String()),
+					zap.Error(err),
+				)
+				continue
+			}
+			h.logger.Info("Synced deployment status",
+				zap.String("deployment_id", d.ID.String()),
+				zap.String("service", d.ServiceName),
+				zap.String("new_status", newStatus),
+			)
+			syncedCount++
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": fmt.Sprintf("synced %d deployments", syncedCount),
+		"synced":  syncedCount,
+		"checked": len(deployments),
+	})
+}
+
+// ==================== Delete Deployment ====================
+
+// deleteDeployment removes a deployment record from the database
+func (h *Handler) deleteDeployment(c *gin.Context) {
+	orgID := c.MustGet("org_id").(uuid.UUID)
+	agentID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid agent ID"})
+		return
+	}
+	deploymentID, err := uuid.Parse(c.Param("did"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid deployment ID"})
+		return
+	}
+
+	// Check if deployment exists and get its status
+	var status string
+	var containerID *string
+	err = h.db.QueryRow(c.Request.Context(), `
+		SELECT status, container_id
+		FROM deployments
+		WHERE id = $1 AND org_id = $2 AND agent_id = $3
+	`, deploymentID, orgID, agentID).Scan(&status, &containerID)
+
+	if err != nil {
+		h.logger.Error("Deployment not found for delete", zap.Error(err))
+		c.JSON(http.StatusNotFound, gin.H{"error": "deployment not found"})
+		return
+	}
+
+	// If the container is still running, warn the user
+	if status == "running" && containerID != nil {
+		c.JSON(http.StatusConflict, gin.H{
+			"error":   "deployment has a running container",
+			"message": "Stop the container first or use force=true to delete anyway",
+		})
+		return
+	}
+
+	// Delete the deployment record
+	result, err := h.db.Exec(c.Request.Context(), `
+		DELETE FROM deployments
+		WHERE id = $1 AND org_id = $2 AND agent_id = $3
+	`, deploymentID, orgID, agentID)
+
+	if err != nil {
+		h.logger.Error("Failed to delete deployment", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete deployment"})
+		return
+	}
+
+	rowsAffected := result.RowsAffected()
+	if rowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "deployment not found"})
+		return
+	}
+
+	h.logger.Info("Deployment deleted",
+		zap.String("deployment_id", deploymentID.String()),
+		zap.String("agent_id", agentID.String()),
+	)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "deployment deleted successfully",
+	})
 }
 
 // ==================== List Services ====================

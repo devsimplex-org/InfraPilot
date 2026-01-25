@@ -18,12 +18,11 @@ import {
   Check,
   ExternalLink,
   Trash2,
-  AlertTriangle,
-  X,
 } from "lucide-react";
 import { api, Container } from "@/lib/api";
 import { Terminal } from "@/components/containers/Terminal";
 import { cn } from "@/lib/utils";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
@@ -724,199 +723,70 @@ export default function ContainersPage() {
       </SlideOver>
 
       {/* Modals */}
-      {showStopModal && selectedContainer && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setShowStopModal(false)} />
-          <div className="relative bg-white dark:bg-gray-900 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
-            <button
-              onClick={() => setShowStopModal(false)}
-              className="absolute top-4 right-4 p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
-            >
-              <X className="h-5 w-5 text-gray-500" />
-            </button>
-            <div className="flex items-center gap-3 mb-4">
-              <div className="p-2 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg">
-                <Square className="h-6 w-6 text-yellow-600 dark:text-yellow-400" />
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Stop Container</h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Are you sure you want to stop this container?</p>
-              </div>
-            </div>
-            <div className="mb-4 p-3 bg-gray-100 dark:bg-gray-800 rounded-lg">
-              <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Container</p>
-              <code className="text-sm text-gray-900 dark:text-white font-mono">{selectedContainer.name}</code>
-            </div>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowStopModal(false)}
-                className="flex-1 px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  handleContainerAction("stop", selectedContainer);
-                  setShowStopModal(false);
-                }}
-                disabled={stopMutation.isPending}
-                className="flex-1 px-4 py-2 text-white bg-yellow-600 hover:bg-yellow-700 disabled:bg-yellow-400 disabled:cursor-not-allowed rounded-lg transition-colors flex items-center justify-center gap-2"
-              >
-                {stopMutation.isPending ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
-                    Stopping...
-                  </>
-                ) : (
-                  <>
-                    <Square className="h-4 w-4" />
-                    Stop Container
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        isOpen={showStopModal && !!selectedContainer}
+        onClose={() => setShowStopModal(false)}
+        onConfirm={() => {
+          if (selectedContainer) {
+            handleContainerAction("stop", selectedContainer);
+          }
+        }}
+        title="Stop Container"
+        message={`Are you sure you want to stop this container?\n\nContainer: ${selectedContainer?.name || ''}`}
+        confirmText="Stop Container"
+        variant="warning"
+        icon="stop"
+        isLoading={stopMutation.isPending}
+      />
 
-      {showRestartModal && selectedContainer && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setShowRestartModal(false)} />
-          <div className="relative bg-white dark:bg-gray-900 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
-            <button
-              onClick={() => setShowRestartModal(false)}
-              className="absolute top-4 right-4 p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
-            >
-              <X className="h-5 w-5 text-gray-500" />
-            </button>
-            <div className="flex items-center gap-3 mb-4">
-              <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
-                <RotateCcw className="h-6 w-6 text-blue-600 dark:text-blue-400" />
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Restart Container</h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Are you sure you want to restart this container?</p>
-              </div>
-            </div>
-            <div className="mb-4 p-3 bg-gray-100 dark:bg-gray-800 rounded-lg">
-              <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Container</p>
-              <code className="text-sm text-gray-900 dark:text-white font-mono">{selectedContainer.name}</code>
-            </div>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-              This will briefly interrupt any services running in this container.
-            </p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowRestartModal(false)}
-                className="flex-1 px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  handleContainerAction("restart", selectedContainer);
-                  setShowRestartModal(false);
-                }}
-                disabled={restartMutation.isPending}
-                className="flex-1 px-4 py-2 text-white bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed rounded-lg transition-colors flex items-center justify-center gap-2"
-              >
-                {restartMutation.isPending ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
-                    Restarting...
-                  </>
-                ) : (
-                  <>
-                    <RotateCcw className="h-4 w-4" />
-                    Restart Container
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        isOpen={showRestartModal && !!selectedContainer}
+        onClose={() => setShowRestartModal(false)}
+        onConfirm={() => {
+          if (selectedContainer) {
+            handleContainerAction("restart", selectedContainer);
+          }
+        }}
+        title="Restart Container"
+        message={`Are you sure you want to restart this container?\n\nContainer: ${selectedContainer?.name || ''}\n\nThis will briefly interrupt any services running in this container.`}
+        confirmText="Restart Container"
+        variant="default"
+        icon="redeploy"
+        isLoading={restartMutation.isPending}
+      />
 
-      {showDeleteModal && selectedContainer && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setShowDeleteModal(false)} />
-          <div className="relative bg-white dark:bg-gray-900 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
-            <button
-              onClick={() => setShowDeleteModal(false)}
-              className="absolute top-4 right-4 p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
-            >
-              <X className="h-5 w-5 text-gray-500" />
-            </button>
-            <div className="flex items-center gap-3 mb-4">
-              <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-lg">
-                <AlertTriangle className="h-6 w-6 text-red-600 dark:text-red-400" />
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Delete Container</h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400">This action cannot be undone</p>
-              </div>
-            </div>
-            <div className="mb-4">
-              <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
-                To confirm deletion, type the container name:
-              </p>
-              <div className="p-3 bg-gray-100 dark:bg-gray-800 rounded-lg mb-3">
-                <code className="text-sm text-gray-900 dark:text-white font-mono">{selectedContainer.name}</code>
-              </div>
-              <input
-                type="text"
-                value={deleteConfirmName}
-                onChange={(e) => setDeleteConfirmName(e.target.value)}
-                placeholder="Type container name to confirm"
-                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-red-500 focus:border-transparent"
-              />
-            </div>
-            {selectedContainer.status === "running" && (
-              <div className="mb-4">
-                <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                  <input
-                    type="checkbox"
-                    checked={forceDelete}
-                    onChange={(e) => setForceDelete(e.target.checked)}
-                    className="rounded border-gray-300 dark:border-gray-700 text-red-600 focus:ring-red-500"
-                  />
-                  Force delete (stop container first)
-                </label>
-              </div>
-            )}
-            {deleteError && (
-              <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg">
-                <p className="text-sm text-red-600 dark:text-red-400">{deleteError}</p>
-              </div>
-            )}
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowDeleteModal(false)}
-                className="flex-1 px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => deleteMutation.mutate()}
-                disabled={deleteConfirmName !== selectedContainer.name || deleteMutation.isPending}
-                className="flex-1 px-4 py-2 text-white bg-red-600 hover:bg-red-700 disabled:bg-red-400 disabled:cursor-not-allowed rounded-lg transition-colors flex items-center justify-center gap-2"
-              >
-                {deleteMutation.isPending ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
-                    Deleting...
-                  </>
-                ) : (
-                  <>
-                    <Trash2 className="h-4 w-4" />
-                    Delete Container
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        isOpen={showDeleteModal && !!selectedContainer}
+        onClose={() => {
+          setShowDeleteModal(false);
+          setDeleteConfirmName("");
+          setForceDelete(false);
+          setDeleteError(null);
+        }}
+        onConfirm={() => deleteMutation.mutate()}
+        title="Delete Container"
+        message="This action cannot be undone."
+        confirmText="Delete Container"
+        variant="danger"
+        icon="delete"
+        isLoading={deleteMutation.isPending}
+        confirmLevel="name"
+        confirmValue={selectedContainer?.name}
+        error={deleteError}
+        onInputChange={setDeleteConfirmName}
+      >
+        {selectedContainer?.status === "running" && (
+          <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+            <input
+              type="checkbox"
+              checked={forceDelete}
+              onChange={(e) => setForceDelete(e.target.checked)}
+              className="rounded border-gray-300 dark:border-gray-700 text-red-600 focus:ring-red-500"
+            />
+            Force delete (stop container first)
+          </label>
+        )}
+      </ConfirmDialog>
     </div>
   );
 }
