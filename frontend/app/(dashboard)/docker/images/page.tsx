@@ -395,7 +395,7 @@ export default function ImagesPage() {
         breadcrumbs={
           <Breadcrumb
             items={[
-              { label: "Deploy", href: "/dashboard" },
+              { label: "Docker", href: "/docker" },
               { label: "Images", current: true },
             ]}
           />
