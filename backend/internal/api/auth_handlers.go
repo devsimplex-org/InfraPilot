@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/pquerna/otp/totp"
+	"go.uber.org/zap"
 )
 
 type LoginRequest struct {
@@ -596,7 +597,6 @@ func (h *Handler) verifyPassword(c *gin.Context) {
 // sendConfirmationOTP sends an OTP code to the user's email for sensitive operation confirmation
 func (h *Handler) sendConfirmationOTP(c *gin.Context) {
 	userID := c.MustGet("user_id").(uuid.UUID)
-	orgID := c.MustGet("org_id").(uuid.UUID)
 
 	// Get user's email
 	var email string
@@ -629,8 +629,8 @@ func (h *Handler) sendConfirmationOTP(c *gin.Context) {
 	// TODO: Integrate with email service to send OTP
 	// For now, log the OTP generation (email sending would be added later)
 	h.logger.Info("Confirmation OTP generated",
-		"user_id", userID.String(),
-		"email", email)
+		zap.String("user_id", userID.String()),
+		zap.String("email", email))
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
