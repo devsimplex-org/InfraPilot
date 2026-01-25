@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import {
   Package,
   Shield,
@@ -11,6 +11,8 @@ import {
   FileCode,
   ExternalLink,
   RefreshCw,
+  RotateCcw,
+  Trash2,
   Download,
   Container,
   Clock,
@@ -28,9 +30,11 @@ import { StatusIndicator } from "@/components/ui/StatusIndicator";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { FilterPanel, type FilterGroup } from "@/components/ui/FilterPanel";
 import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { cn } from "@/lib/utils";
 
 type PanelTab = "overview" | "scan" | "vulnerabilities" | "sbom";
+type ConfirmAction = { type: "redeploy" | "delete"; deployment: Deployment } | null;
 
 export default function DeploymentsPage() {
   const queryClient = useQueryClient();
@@ -41,6 +45,47 @@ export default function DeploymentsPage() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [environmentFilter, setEnvironmentFilter] = useState<string>("all");
   const [searchFilter, setSearchFilter] = useState("");
+  const [redeployingId, setRedeployingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null);
+
+  // Redeploy mutation
+  const redeployMutation = useMutation({
+    mutationFn: (deploymentId: string) => {
+      if (!selectedAgent) throw new Error("No agent selected");
+      return api.redeployDeployment(selectedAgent, deploymentId);
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["deployments", selectedAgent] });
+      setRedeployingId(null);
+      // Optionally select the new deployment
+      if (data.id) {
+        // The new deployment will appear in the list after refetch
+      }
+    },
+    onError: () => {
+      setRedeployingId(null);
+    },
+  });
+
+  // Delete mutation
+  const deleteMutation = useMutation({
+    mutationFn: (deploymentId: string) => {
+      if (!selectedAgent) throw new Error("No agent selected");
+      return api.deleteDeployment(selectedAgent, deploymentId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["deployments", selectedAgent] });
+      setDeletingId(null);
+      // Close the slide-over if the deleted deployment was selected
+      if (selectedDeployment?.id === deletingId) {
+        setSelectedDeployment(null);
+      }
+    },
+    onError: () => {
+      setDeletingId(null);
+    },
+  });
 
   // Fetch agents
   const { data: agents } = useQuery({
@@ -94,6 +139,20 @@ export default function DeploymentsPage() {
       setSelectedAgent(activeAgents[0].id);
     }
   }, [activeAgents, selectedAgent]);
+
+  // Sync deployment status with actual container state when agent changes
+  useEffect(() => {
+    if (selectedAgent) {
+      api.syncDeploymentStatus(selectedAgent).then((result) => {
+        if (result.synced > 0) {
+          // Refresh deployments list if any were synced
+          queryClient.invalidateQueries({ queryKey: ["deployments", selectedAgent] });
+        }
+      }).catch(() => {
+        // Silently ignore sync errors - not critical
+      });
+    }
+  }, [selectedAgent, queryClient]);
 
   // Calculate metrics
   const metrics = useMemo(() => {
@@ -353,6 +412,41 @@ export default function DeploymentsPage() {
         );
       },
     },
+    {
+      key: "actions",
+      header: "Actions",
+      render: (_value: unknown, row: Deployment) => {
+        if (!row?.id) return null;
+        const isRedeploying = redeployingId === row.id;
+        const isDeleting = deletingId === row.id;
+        return (
+          <div className="flex items-center gap-1">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setConfirmAction({ type: "redeploy", deployment: row });
+              }}
+              disabled={isRedeploying}
+              className="p-1.5 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 rounded disabled:opacity-50"
+              title="Redeploy"
+            >
+              <RotateCcw className={cn("h-4 w-4", isRedeploying && "animate-spin")} />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setConfirmAction({ type: "delete", deployment: row });
+              }}
+              disabled={isDeleting || row.status === "running"}
+              className="p-1.5 text-gray-400 hover:text-red-600 dark:hover:text-red-400 rounded disabled:opacity-50"
+              title={row.status === "running" ? "Stop container first" : "Delete deployment"}
+            >
+              <Trash2 className={cn("h-4 w-4", isDeleting && "animate-pulse")} />
+            </button>
+          </div>
+        );
+      },
+    },
   ];
 
   // Vulnerability filters
@@ -569,9 +663,30 @@ export default function DeploymentsPage() {
         {selectedDeployment && (
           <>
             <SlideOver.Header onClose={() => setSelectedDeployment(null)} showCloseButton>
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{selectedDeployment.service_name}</h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400">{selectedDeployment.environment}</p>
+              <div className="flex items-center justify-between w-full pr-8">
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{selectedDeployment.service_name}</h2>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">{selectedDeployment.environment}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setConfirmAction({ type: "redeploy", deployment: selectedDeployment })}
+                    disabled={redeployingId === selectedDeployment.id}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    <RotateCcw className={cn("h-4 w-4", redeployingId === selectedDeployment.id && "animate-spin")} />
+                    Redeploy
+                  </button>
+                  <button
+                    onClick={() => setConfirmAction({ type: "delete", deployment: selectedDeployment })}
+                    disabled={deletingId === selectedDeployment.id || selectedDeployment.status === "running"}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 rounded-lg transition-colors disabled:opacity-50"
+                    title={selectedDeployment.status === "running" ? "Stop container first" : "Delete deployment"}
+                  >
+                    <Trash2 className={cn("h-4 w-4", deletingId === selectedDeployment.id && "animate-pulse")} />
+                    Delete
+                  </button>
+                </div>
               </div>
             </SlideOver.Header>
 
@@ -1158,6 +1273,40 @@ export default function DeploymentsPage() {
           </>
         )}
       </SlideOver>
+
+      {/* Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={!!confirmAction}
+        onClose={() => setConfirmAction(null)}
+        onConfirm={() => {
+          if (!confirmAction) return;
+          if (confirmAction.type === "redeploy") {
+            setRedeployingId(confirmAction.deployment.id);
+            redeployMutation.mutate(confirmAction.deployment.id);
+          } else if (confirmAction.type === "delete") {
+            setDeletingId(confirmAction.deployment.id);
+            deleteMutation.mutate(confirmAction.deployment.id);
+          }
+          setConfirmAction(null);
+        }}
+        title={
+          confirmAction?.type === "redeploy"
+            ? `Redeploy ${confirmAction.deployment.service_name}?`
+            : confirmAction?.type === "delete"
+            ? `Delete ${confirmAction?.deployment.service_name}?`
+            : ""
+        }
+        message={
+          confirmAction?.type === "redeploy"
+            ? "This will create a new deployment with the same configuration and run the full pipeline (security scan, policy check, deploy)."
+            : confirmAction?.type === "delete"
+            ? "This will permanently remove the deployment record. The container will not be affected."
+            : ""
+        }
+        confirmText={confirmAction?.type === "redeploy" ? "Redeploy" : "Delete"}
+        variant={confirmAction?.type === "delete" ? "danger" : "default"}
+        icon={confirmAction?.type === "delete" ? "delete" : "redeploy"}
+      />
     </>
   );
 }

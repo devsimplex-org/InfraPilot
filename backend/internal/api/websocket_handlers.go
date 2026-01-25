@@ -1037,3 +1037,408 @@ func (h *Handler) agentCommandStream(c *gin.Context) {
 	h.logger.Info("Agent disconnected from WebSocket",
 		zap.String("agent_id", agentIDStr))
 }
+
+// =====================
+// Import Secrets WebSocket
+// =====================
+
+// ImportWSRequest represents a request to import secrets via WebSocket
+type ImportWSRequest struct {
+	AgentID     string            `json:"agent_id"`
+	ContainerID string            `json:"container_id"`
+	Method      string            `json:"method"` // "docker_secrets" or "env_vars"
+	Secrets     map[string]string `json:"secrets"`
+}
+
+// ImportWSProgressMessage is sent for import progress updates
+type ImportWSProgressMessage struct {
+	Type     string `json:"type"`     // "progress"
+	Step     string `json:"step"`     // "creating_secrets", "stopping_container", "recreating_container", "starting_container", "verifying"
+	Status   string `json:"status"`   // "pending", "in_progress", "complete", "error"
+	Progress int    `json:"progress"` // 0-100 percentage
+	Message  string `json:"message,omitempty"`
+}
+
+// ImportWSErrorMessage is sent when an error occurs
+type ImportWSErrorMessage struct {
+	Type  string `json:"type"` // "error"
+	Step  string `json:"step,omitempty"`
+	Error string `json:"error"`
+}
+
+// ImportWSCompleteMessage is sent when import is complete
+type ImportWSCompleteMessage struct {
+	Type           string `json:"type"` // "complete"
+	Success        bool   `json:"success"`
+	NewContainerID string `json:"new_container_id,omitempty"`
+	SecretsCount   int    `json:"secrets_count"`
+	Message        string `json:"message,omitempty"`
+}
+
+// importSecretsWebSocket handles WebSocket connections for secrets import operations
+func (h *Handler) importSecretsWebSocket(c *gin.Context) {
+	// Get org_id from context (set by auth middleware)
+	orgID, exists := c.Get("org_id")
+	if !exists {
+		c.JSON(401, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	// Upgrade to WebSocket
+	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		h.logger.Error("Failed to upgrade WebSocket for import", zap.Error(err))
+		return
+	}
+	defer conn.Close()
+
+	h.logger.Info("Import WebSocket connection established",
+		zap.String("org_id", orgID.(uuid.UUID).String()))
+
+	// Mutex for thread-safe sending
+	var sendMu sync.Mutex
+	sendJSON := func(v interface{}) error {
+		sendMu.Lock()
+		defer sendMu.Unlock()
+		return conn.WriteJSON(v)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan struct{})
+
+	// Keep connection alive with pings
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				sendMu.Lock()
+				err := conn.WriteMessage(websocket.PingMessage, nil)
+				sendMu.Unlock()
+				if err != nil {
+					cancel()
+					return
+				}
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// Read messages from client
+	for {
+		_, message, err := conn.ReadMessage()
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+				h.logger.Debug("Import WebSocket read error", zap.Error(err))
+			}
+			break
+		}
+
+		var req ImportWSRequest
+		if err := json.Unmarshal(message, &req); err != nil {
+			sendJSON(ImportWSErrorMessage{
+				Type:  "error",
+				Error: "Invalid request format",
+			})
+			continue
+		}
+
+		// Process import request in goroutine
+		go h.processImportWSRequest(ctx, orgID.(uuid.UUID), req, sendJSON)
+	}
+
+	close(done)
+	h.logger.Info("Import WebSocket connection closed",
+		zap.String("org_id", orgID.(uuid.UUID).String()))
+}
+
+// processImportWSRequest handles an import request from WebSocket
+func (h *Handler) processImportWSRequest(ctx context.Context, orgID uuid.UUID, req ImportWSRequest, send func(interface{}) error) {
+	// Validate agent ID
+	agentID, err := uuid.Parse(req.AgentID)
+	if err != nil {
+		send(ImportWSErrorMessage{
+			Type:  "error",
+			Error: "Invalid agent ID",
+		})
+		return
+	}
+
+	// Check if agent is connected
+	if !agentgrpc.IsAgentConnected(agentID.String()) {
+		send(ImportWSErrorMessage{
+			Type:  "error",
+			Error: "Agent not connected",
+		})
+		return
+	}
+
+	// Validate method
+	if req.Method != "docker_secrets" && req.Method != "env_vars" {
+		send(ImportWSErrorMessage{
+			Type:  "error",
+			Error: "Invalid method. Must be 'docker_secrets' or 'env_vars'",
+		})
+		return
+	}
+
+	// Validate secrets
+	if len(req.Secrets) == 0 {
+		send(ImportWSErrorMessage{
+			Type:  "error",
+			Error: "No secrets provided",
+		})
+		return
+	}
+
+	h.logger.Info("Processing import request via WebSocket",
+		zap.String("agent_id", req.AgentID),
+		zap.String("container_id", req.ContainerID),
+		zap.String("method", req.Method),
+		zap.Int("secrets_count", len(req.Secrets)))
+
+	if req.Method == "docker_secrets" {
+		h.processDockerSecretsImport(ctx, agentID.String(), req, send)
+	} else {
+		h.processEnvVarsImport(ctx, agentID.String(), req, send)
+	}
+}
+
+// processDockerSecretsImport handles importing secrets as Docker file secrets
+func (h *Handler) processDockerSecretsImport(ctx context.Context, agentID string, req ImportWSRequest, send func(interface{}) error) {
+	// Step 1: Creating secrets
+	send(ImportWSProgressMessage{
+		Type:     "progress",
+		Step:     "creating_secrets",
+		Status:   "in_progress",
+		Progress: 10,
+		Message:  "Creating file secrets...",
+	})
+
+	// Build secrets list for the agent
+	secrets := make([]struct {
+		Name      string `json:"name"`
+		Value     string `json:"value"`
+		MountPath string `json:"mount_path"`
+	}, 0, len(req.Secrets))
+
+	for name, value := range req.Secrets {
+		secrets = append(secrets, struct {
+			Name      string `json:"name"`
+			Value     string `json:"value"`
+			MountPath string `json:"mount_path"`
+		}{
+			Name:      name,
+			Value:     value,
+			MountPath: "/run/secrets/" + name,
+		})
+	}
+
+	importCmd := struct {
+		Action      string `json:"action"`
+		ContainerID string `json:"container_id"`
+		Secrets     []struct {
+			Name      string `json:"name"`
+			Value     string `json:"value"`
+			MountPath string `json:"mount_path"`
+		} `json:"secrets"`
+	}{
+		Action:      "import_secrets",
+		ContainerID: req.ContainerID,
+		Secrets:     secrets,
+	}
+
+	cmdPayload, _ := json.Marshal(importCmd)
+	cmd := &agentgrpc.BackendMessage{
+		RequestId: uuid.New().String(),
+		Type:      "docker",
+		Command:   cmdPayload,
+	}
+
+	// Step 2: Sending command to agent
+	send(ImportWSProgressMessage{
+		Type:     "progress",
+		Step:     "recreating_container",
+		Status:   "in_progress",
+		Progress: 30,
+		Message:  "Recreating container with secrets...",
+	})
+
+	// Send command with 5 minute timeout
+	resp, err := agentgrpc.SendCommand(agentID, cmd, 5*time.Minute)
+	if err != nil {
+		send(ImportWSErrorMessage{
+			Type:  "error",
+			Step:  "recreating_container",
+			Error: err.Error(),
+		})
+		return
+	}
+
+	result, err := resp.GetCommandResult()
+	if err != nil || result == nil {
+		send(ImportWSErrorMessage{
+			Type:  "error",
+			Step:  "recreating_container",
+			Error: "Failed to get command result",
+		})
+		return
+	}
+
+	if !result.Success {
+		send(ImportWSErrorMessage{
+			Type:  "error",
+			Step:  "recreating_container",
+			Error: result.Message,
+		})
+		return
+	}
+
+	// Step 3: Verifying
+	send(ImportWSProgressMessage{
+		Type:     "progress",
+		Step:     "verifying",
+		Status:   "in_progress",
+		Progress: 80,
+		Message:  "Verifying container is running...",
+	})
+
+	// Extract new container ID from result data
+	var newContainerID string
+	if result.Data != nil {
+		var resultData map[string]interface{}
+		if err := json.Unmarshal(result.Data, &resultData); err == nil {
+			if id, ok := resultData["new_container_id"].(string); ok {
+				newContainerID = id
+			}
+		}
+	}
+
+	// Step 4: Complete
+	send(ImportWSProgressMessage{
+		Type:     "progress",
+		Step:     "verifying",
+		Status:   "complete",
+		Progress: 100,
+		Message:  "Import complete",
+	})
+
+	send(ImportWSCompleteMessage{
+		Type:           "complete",
+		Success:        true,
+		NewContainerID: newContainerID,
+		SecretsCount:   len(req.Secrets),
+		Message:        "Secrets imported successfully as Docker file secrets",
+	})
+}
+
+// processEnvVarsImport handles importing secrets as environment variables
+func (h *Handler) processEnvVarsImport(ctx context.Context, agentID string, req ImportWSRequest, send func(interface{}) error) {
+	// Step 1: Preparing
+	send(ImportWSProgressMessage{
+		Type:     "progress",
+		Step:     "preparing",
+		Status:   "in_progress",
+		Progress: 10,
+		Message:  "Preparing environment variables...",
+	})
+
+	importCmd := struct {
+		Action      string            `json:"action"`
+		ContainerID string            `json:"container_id"`
+		EnvVars     map[string]string `json:"env_vars"`
+	}{
+		Action:      "import_env_vars",
+		ContainerID: req.ContainerID,
+		EnvVars:     req.Secrets,
+	}
+
+	cmdPayload, _ := json.Marshal(importCmd)
+	cmd := &agentgrpc.BackendMessage{
+		RequestId: uuid.New().String(),
+		Type:      "docker",
+		Command:   cmdPayload,
+	}
+
+	// Step 2: Recreating container
+	send(ImportWSProgressMessage{
+		Type:     "progress",
+		Step:     "recreating_container",
+		Status:   "in_progress",
+		Progress: 30,
+		Message:  "Recreating container with environment variables...",
+	})
+
+	// Send command with 5 minute timeout
+	resp, err := agentgrpc.SendCommand(agentID, cmd, 5*time.Minute)
+	if err != nil {
+		send(ImportWSErrorMessage{
+			Type:  "error",
+			Step:  "recreating_container",
+			Error: err.Error(),
+		})
+		return
+	}
+
+	result, err := resp.GetCommandResult()
+	if err != nil || result == nil {
+		send(ImportWSErrorMessage{
+			Type:  "error",
+			Step:  "recreating_container",
+			Error: "Failed to get command result",
+		})
+		return
+	}
+
+	if !result.Success {
+		send(ImportWSErrorMessage{
+			Type:  "error",
+			Step:  "recreating_container",
+			Error: result.Message,
+		})
+		return
+	}
+
+	// Step 3: Verifying
+	send(ImportWSProgressMessage{
+		Type:     "progress",
+		Step:     "verifying",
+		Status:   "in_progress",
+		Progress: 80,
+		Message:  "Verifying container is running...",
+	})
+
+	// Extract new container ID from result data
+	var newContainerID string
+	if result.Data != nil {
+		var resultData map[string]interface{}
+		if err := json.Unmarshal(result.Data, &resultData); err == nil {
+			if id, ok := resultData["new_container_id"].(string); ok {
+				newContainerID = id
+			}
+		}
+	}
+
+	// Step 4: Complete
+	send(ImportWSProgressMessage{
+		Type:     "progress",
+		Step:     "verifying",
+		Status:   "complete",
+		Progress: 100,
+		Message:  "Import complete",
+	})
+
+	send(ImportWSCompleteMessage{
+		Type:           "complete",
+		Success:        true,
+		NewContainerID: newContainerID,
+		SecretsCount:   len(req.Secrets),
+		Message:        "Secrets imported successfully as environment variables",
+	})
+}

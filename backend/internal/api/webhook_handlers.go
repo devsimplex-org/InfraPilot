@@ -334,7 +334,7 @@ func (h *Handler) createDeploymentFromWebhook(ctx context.Context, config *webho
 	}
 
 	// Start deployment pipeline in background (scan → SBOM → policy → deploy)
-	go h.runDeploymentPipeline(context.Background(), orgID, deployment.ID, metadata.ImageRepo, metadata.ImageTag, imageDigest)
+	go h.runDeploymentPipeline(context.Background(), orgID, deployment.ID, metadata.ImageRepo, metadata.ImageTag, imageDigest, nil)
 
 	return deployment.ID, nil
 }

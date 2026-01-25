@@ -84,6 +84,11 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 			authGroup.POST("/mfa/disable", h.AuthMiddleware(), h.disableMFA)
 			authGroup.POST("/mfa/backup-codes", h.AuthMiddleware(), h.regenerateBackupCodes)
 
+			// Sensitive operation verification (requires auth)
+			authGroup.POST("/verify-password", h.AuthMiddleware(), h.verifyPassword)
+			authGroup.POST("/send-confirmation-otp", h.AuthMiddleware(), h.sendConfirmationOTP)
+			authGroup.POST("/verify-confirmation-otp", h.AuthMiddleware(), h.verifyConfirmationOTP)
+
 			// SSO/OIDC routes (public)
 			authGroup.GET("/sso/providers", h.getAvailableSSOProviders)
 			authGroup.GET("/sso/:config_id/login", h.ssoLogin)
@@ -199,6 +204,9 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				agents.GET("/:id/deployments/:did", h.getDeployment)
 				agents.GET("/:id/deployments/:did/spine", h.getDeploymentSpine)
 				agents.POST("/:id/deployments/:did/rollback", h.RequireModifyContainers(), h.rollbackDeployment)
+				agents.POST("/:id/deployments/:did/redeploy", h.RequireModifyContainers(), h.redeployDeployment)
+				agents.DELETE("/:id/deployments/:did", h.RequireModifyContainers(), h.deleteDeployment)
+				agents.POST("/:id/deployments/sync", h.syncDeploymentStatus)
 
 				// Webhooks (Epic 4: Dev Integration)
 				agents.GET("/:id/webhooks", h.listWebhooks)
@@ -212,7 +220,16 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 			// CVE-Centric View (Epic 1: Supply Chain Security)
 			agents.GET(":id/cves", h.getCVESummaries)
 			agents.GET(":id/cves/:cve_id", h.getCVEDetail)
-			}
+
+			// Secret Migrations (agent-scoped)
+			agents.GET("/:id/secrets/migrations", h.listSecretMigrations)
+			agents.POST("/:id/secrets/migrations", h.RequireModifyContainers(), h.createMigration)
+			agents.GET("/:id/secrets/migrations/:migration_id", h.getMigration)
+			agents.POST("/:id/secrets/migrations/:migration_id/rollback", h.RequireModifyContainers(), h.rollbackMigration)
+
+			// Secret Import (import .env to container)
+			agents.POST("/:id/secrets/import", h.RequireModifyContainers(), h.importSecrets)
+		}
 
 			// Services view (cross-agent)
 			protected.GET("/services", h.listServices)
@@ -223,7 +240,8 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 			protected.POST("/scans", h.RequireModifyContainers(), h.triggerImageScan)
 			protected.GET("/scans", h.listScans)
 			protected.GET("/scans/ws", h.scanWebSocket) // WebSocket for real-time scans (must be before :sid)
-			protected.GET("/pulls/ws", h.pullWebSocket) // WebSocket for real-time image pulls
+			protected.GET("/pulls/ws", h.pullWebSocket)   // WebSocket for real-time image pulls
+			protected.GET("/imports/ws", h.importSecretsWebSocket) // WebSocket for real-time secrets import
 			protected.GET("/scans/:sid", h.getScanDetails)
 			protected.GET("/scans/:sid/vulnerabilities", h.getScanVulnerabilities)
 

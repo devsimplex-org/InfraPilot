@@ -23,7 +23,7 @@ import {
 import { api, DockerImage } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { ScanModal, ScanImage } from "@/components/ui/ScanModal";
-import { DeployDialog } from "@/components/DeployDialog";
+import { DeployWizard } from "@/components/DeployWizard";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
@@ -62,7 +62,7 @@ export default function ImagesPage() {
   const [scanImages, setScanImages] = useState<ScanImage[]>([]);
 
   // Deploy dialog state
-  const [showDeployDialog, setShowDeployDialog] = useState(false);
+  const [showDeployWizard, setShowDeployDialog] = useState(false);
   const [deployImageInfo, setDeployImageInfo] = useState<{
     repository: string;
     tag: string;
@@ -1012,10 +1012,10 @@ export default function ImagesPage() {
 
       {/* Deploy Dialog */}
       {deployImageInfo && (
-        <DeployDialog
-          isOpen={showDeployDialog}
+        <DeployWizard
+          isOpen={showDeployWizard}
           onClose={() => {
-            setShowDeployDialog(false);
+            setShowDeployWizard(false);
             setDeployImageInfo(null);
           }}
           imageRepository={deployImageInfo.repository}
