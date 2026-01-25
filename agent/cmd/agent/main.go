@@ -1776,19 +1776,58 @@ func (h *CommandHandler) scanContainerEnvFiles(ctx context.Context, containerID,
 	var secrets []ScannedSecret
 
 	// Common locations to check for .env files
-	envFilePaths := []string{
-		"/app/.env",
-		"/app/.env.local",
-		"/app/.env.production",
-		"/.env",
-		"/home/.env",
-		"/var/www/.env",
-		"/var/www/html/.env",
-		"/opt/app/.env",
-		"/src/.env",
+	// Include various environment-specific variants
+	basePaths := []string{"/app", "/", "/home", "/var/www", "/var/www/html", "/opt/app", "/src", "/root"}
+	envVariants := []string{
+		".env",
+		".env.local",
+		".env.production",
+		".env.prod",
+		".env.development",
+		".env.dev",
+		".env.staging",
+		".env.stage",
+		".env.test",
+		".env.example", // Often contains real values by mistake
 	}
 
-	for _, envPath := range envFilePaths {
+	// First, find which .env files actually exist using a single command
+	// This is much faster than checking each path individually
+	var envFilePaths []string
+	for _, basePath := range basePaths {
+		for _, variant := range envVariants {
+			if basePath == "/" {
+				envFilePaths = append(envFilePaths, "/"+variant)
+			} else {
+				envFilePaths = append(envFilePaths, basePath+"/"+variant)
+			}
+		}
+	}
+
+	// Use ls to check which files exist in one command (faster than individual checks)
+	lsArgs := append([]string{"ls", "-1"}, envFilePaths...)
+	execID, err := h.docker.ExecCreate(ctx, containerID, lsArgs)
+	var existingFiles []string
+	if err == nil {
+		output, err := h.docker.ExecAttach(ctx, execID)
+		if err == nil && output != "" {
+			// ls outputs existing files, one per line
+			for _, line := range strings.Split(output, "\n") {
+				line = strings.TrimSpace(line)
+				if line != "" && !strings.HasPrefix(line, "ls:") {
+					existingFiles = append(existingFiles, line)
+				}
+			}
+		}
+	}
+
+	// If ls didn't work (no ls in container), fall back to checking a smaller set
+	if len(existingFiles) == 0 {
+		// Just check the most common locations
+		existingFiles = []string{"/app/.env", "/.env", "/var/www/.env", "/src/.env"}
+	}
+
+	for _, envPath := range existingFiles {
 		// Try to read the .env file using cat
 		execID, err := h.docker.ExecCreate(ctx, containerID, []string{"cat", envPath})
 		if err != nil {

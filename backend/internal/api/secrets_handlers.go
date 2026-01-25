@@ -913,8 +913,8 @@ func (h *Handler) scanAgentSecrets(ctx context.Context, orgID, agentID, scanID u
 		Command:   cmdPayload,
 	}
 
-	// Send command to agent
-	resp, err := agentgrpc.SendCommand(agentID.String(), cmd, 60*time.Second)
+	// Send command to agent - use longer timeout for scanning many containers/paths
+	resp, err := agentgrpc.SendCommand(agentID.String(), cmd, 3*time.Minute)
 	if err != nil {
 		return nil, err
 	}
