@@ -70,6 +70,7 @@ import { FilterPanel } from "@/components/ui/FilterPanel";
 import { Terminal } from "@/components/containers/Terminal";
 import { ScanModal, ScanImage } from "@/components/ui/ScanModal";
 import { DeployWizard } from "@/components/DeployWizard";
+import { StackDeployWizard } from "@/components/StackDeployWizard";
 import { Card } from "@/components/ui/Card";
 import { usePullWebSocket, PullProgress } from "@/hooks/usePullWebSocket";
 
@@ -148,6 +149,9 @@ export default function DockerPage() {
   // Deploy dialog
   const [showDeployWizard, setShowDeployWizard] = useState(false);
   const [deployImageInfo, setDeployImageInfo] = useState<{ repository: string; tag: string } | null>(null);
+
+  // Stack deploy wizard
+  const [showStackDeployWizard, setShowStackDeployWizard] = useState(false);
 
   // Volume create modal
   const [showCreateVolumeModal, setShowCreateVolumeModal] = useState(false);
@@ -1070,6 +1074,12 @@ export default function DockerPage() {
                   </option>
                 ))}
               </select>
+              {activeTab === "overview" && (
+                <Button variant="primary" size="sm" onClick={() => setShowStackDeployWizard(true)}>
+                  <Layers className="h-4 w-4 mr-1" />
+                  Deploy Stack
+                </Button>
+              )}
               {activeTab === "images" && (
                 <Button variant="primary" size="sm" onClick={() => setShowPullModal(true)}>
                   <Download className="h-4 w-4 mr-1" />
@@ -2455,6 +2465,16 @@ export default function DockerPage() {
           imageTag={deployImageInfo.tag}
         />
       )}
+
+      {/* Stack Deploy Wizard */}
+      <StackDeployWizard
+        isOpen={showStackDeployWizard}
+        onClose={() => setShowStackDeployWizard(false)}
+        onSuccess={(stackId) => {
+          queryClient.invalidateQueries({ queryKey: ["containers"] });
+          queryClient.invalidateQueries({ queryKey: ["stacks"] });
+        }}
+      />
     </div>
   );
 }
