@@ -786,7 +786,7 @@ export default function DockerPage() {
 
     for (let i = 0; i < containersToStop.length; i++) {
       try {
-        await api.stopDockerContainer(selectedAgent, containersToStop[i].container_id);
+        await api.stopContainer(selectedAgent, containersToStop[i].container_id);
       } catch (error) {
         failed.push(containersToStop[i].name || containersToStop[i].container_id.slice(0, 12));
       }
@@ -805,17 +805,19 @@ export default function DockerPage() {
   const handleBulkDeleteContainers = async () => {
     if (!selectedAgent || selectedContainerIds.size === 0) return;
 
-    const containersToDelete = Array.from(selectedContainerIds);
+    const containersToDelete = selectedContainersData;
     setBulkContainerProgress({ total: containersToDelete.length, completed: 0, failed: [] });
 
     const failed: string[] = [];
 
     for (let i = 0; i < containersToDelete.length; i++) {
       try {
-        await api.deleteDockerContainer(selectedAgent, containersToDelete[i], forceDelete);
+        const container = containersToDelete[i];
+        const containerName = container.name || container.container_id.slice(0, 12);
+        await api.deleteContainer(selectedAgent, container.container_id, containerName, forceDelete);
       } catch (error) {
-        const container = containers?.find((c) => c.container_id === containersToDelete[i]);
-        failed.push(container?.name || containersToDelete[i].slice(0, 12));
+        const container = containersToDelete[i];
+        failed.push(container.name || container.container_id.slice(0, 12));
       }
       setBulkContainerProgress({ total: containersToDelete.length, completed: i + 1, failed });
     }
@@ -1413,7 +1415,7 @@ export default function DockerPage() {
                                 />
                               </td>
                               <td className="px-4 py-3">
-                                <StatusIndicator status={container.status === "running" ? "success" : "error"} label={container.status} />
+                                <StatusIndicator status={getStatusLevel(container.status)} label={container.status} />
                               </td>
                               <td className="px-4 py-3">
                                 <div className="font-medium text-gray-900 dark:text-white">{container.name}</div>
@@ -2646,7 +2648,7 @@ export default function DockerPage() {
                     <div key={container.container_id} className={cn("flex items-center justify-between p-2 rounded text-sm", container.status === "running" ? "bg-green-50 dark:bg-green-900/20" : "bg-gray-50 dark:bg-gray-800")}>
                       <span className="font-mono truncate">{container.name}</span>
                       <span className="text-xs">
-                        <StatusIndicator status={container.status === "running" ? "success" : "error"} label={container.status} size="sm" />
+                        <StatusIndicator status={getStatusLevel(container.status)} label={container.status} size="sm" />
                       </span>
                     </div>
                   ))}
