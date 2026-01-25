@@ -170,7 +170,7 @@ export default function VolumesPage() {
         breadcrumbs={
           <Breadcrumb
             items={[
-              { label: "Platform", href: "/dashboard" },
+              { label: "Docker", href: "/docker" },
               { label: "Volumes", current: true },
             ]}
           />

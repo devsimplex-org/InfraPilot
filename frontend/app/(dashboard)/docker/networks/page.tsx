@@ -248,7 +248,7 @@ export default function NetworksPage() {
         breadcrumbs={
           <Breadcrumb
             items={[
-              { label: "Platform", href: "/dashboard" },
+              { label: "Docker", href: "/docker" },
               { label: "Networks", current: true },
             ]}
           />
