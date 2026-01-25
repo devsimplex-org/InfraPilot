@@ -12,6 +12,7 @@ import {
   Clock,
   Users,
   FileText,
+  Rocket,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -136,7 +137,7 @@ export default function DashboardPage() {
       {/* Key Metrics Grid */}
       <MetricsGrid columns={4}>
         <StatCard
-          label="Deployments"
+          label="Containers"
           value={totalContainers}
           description={runningContainers === totalContainers ? "All running" : `${runningContainers} running`}
           icon={Package}
@@ -144,6 +145,17 @@ export default function DashboardPage() {
           trend={runningContainers === totalContainers ? "up" : undefined}
           trendValue={runningContainers === totalContainers ? "All healthy" : undefined}
           onClick={() => window.location.href = "/containers"}
+        />
+
+        <StatCard
+          label="Deployments"
+          value={totalDeployments}
+          description={runningDeployments === totalDeployments ? "All running" : `${runningDeployments} running`}
+          icon={Rocket}
+          iconColor="text-purple-600 dark:text-purple-400"
+          trend={runningDeployments === totalDeployments && totalDeployments > 0 ? "up" : undefined}
+          trendValue={runningDeployments === totalDeployments && totalDeployments > 0 ? "All healthy" : undefined}
+          onClick={() => window.location.href = "/deployments"}
         />
 
         <StatCard
@@ -164,15 +176,6 @@ export default function DashboardPage() {
           iconColor="text-purple-600 dark:text-purple-400"
           trend={activeAlerts === 0 ? "up" : "down"}
           trendValue={activeAlerts === 0 ? "No issues" : `${activeAlerts} to resolve`}
-        />
-
-        <StatCard
-          label="Infrastructure"
-          value={`${activeAgents}/${totalAgents}`}
-          description={activeAgents === totalAgents ? "All agents online" : `${totalAgents - activeAgents} offline`}
-          icon={Activity}
-          iconColor="text-green-600 dark:text-green-400"
-          trend={activeAgents === totalAgents ? "up" : undefined}
         />
       </MetricsGrid>
 
