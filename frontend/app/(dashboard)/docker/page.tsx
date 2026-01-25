@@ -746,8 +746,8 @@ export default function DockerPage() {
   };
 
   const selectAllContainers = () => {
-    if (filteredContainers) {
-      setSelectedContainerIds(new Set(filteredContainers.map((c) => c.container_id)));
+    if (selectableContainers) {
+      setSelectedContainerIds(new Set(selectableContainers.map((c) => c.container_id)));
     }
   };
 
@@ -755,19 +755,30 @@ export default function DockerPage() {
     setSelectedContainerIds(new Set());
   };
 
+  // Check if a container is the management container (cannot be stopped/deleted)
+  const isManagementContainer = (container: Container) => {
+    const protectedNames = ["infrapilot", "infrapilot-ee", "infrapilot_ee"];
+    if (protectedNames.includes(container.name)) return true;
+    if (container.image.includes("infrapilot")) return true;
+    return false;
+  };
+
+  // Get selectable containers (excludes management container)
+  const selectableContainers = filteredContainers?.filter((c) => !isManagementContainer(c)) || [];
+
   const selectRunningContainers = () => {
-    if (filteredContainers) {
-      setSelectedContainerIds(new Set(filteredContainers.filter((c) => c.status === "running").map((c) => c.container_id)));
+    if (selectableContainers) {
+      setSelectedContainerIds(new Set(selectableContainers.filter((c) => c.status === "running").map((c) => c.container_id)));
     }
   };
 
   const selectStoppedContainers = () => {
-    if (filteredContainers) {
-      setSelectedContainerIds(new Set(filteredContainers.filter((c) => c.status === "exited").map((c) => c.container_id)));
+    if (selectableContainers) {
+      setSelectedContainerIds(new Set(selectableContainers.filter((c) => c.status === "exited").map((c) => c.container_id)));
     }
   };
 
-  const isAllContainersSelected = filteredContainers && filteredContainers.length > 0 && selectedContainerIds.size === filteredContainers.length;
+  const isAllContainersSelected = selectableContainers && selectableContainers.length > 0 && selectedContainerIds.size === selectableContainers.length;
   const isSomeContainersSelected = selectedContainerIds.size > 0 && !isAllContainersSelected;
   const selectedContainersData = filteredContainers?.filter((c) => selectedContainerIds.has(c.container_id)) || [];
   const runningSelectedCount = selectedContainersData.filter((c) => c.status === "running").length;
@@ -1303,7 +1314,7 @@ export default function DockerPage() {
                   <div className="flex items-center gap-2">
                     <span className="text-sm text-gray-500 dark:text-gray-400">Quick select:</span>
                     <button onClick={selectAllContainers} className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors">
-                      All ({filteredContainers.length})
+                      All ({selectableContainers.length})
                     </button>
                     <button onClick={selectRunningContainers} disabled={containerMetrics.running === 0} className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                       Running ({containerMetrics.running})
@@ -1407,12 +1418,20 @@ export default function DockerPage() {
                               onClick={() => { setSelectedContainer(container); setContainerPanelTab("details"); }}
                             >
                               <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                                <input
-                                  type="checkbox"
-                                  checked={selectedContainerIds.has(container.container_id)}
-                                  onChange={() => toggleContainerSelection(container.container_id)}
-                                  className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                                />
+                                {isManagementContainer(container) ? (
+                                  <span className="inline-flex items-center justify-center h-4 w-4 text-xs text-gray-400" title="Cannot modify management container">
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                                      <path fillRule="evenodd" d="M10 1a4.5 4.5 0 00-4.5 4.5V9H5a2 2 0 00-2 2v6a2 2 0 002 2h10a2 2 0 002-2v-6a2 2 0 00-2-2h-.5V5.5A4.5 4.5 0 0010 1zm3 8V5.5a3 3 0 10-6 0V9h6z" clipRule="evenodd" />
+                                    </svg>
+                                  </span>
+                                ) : (
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedContainerIds.has(container.container_id)}
+                                    onChange={() => toggleContainerSelection(container.container_id)}
+                                    className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                  />
+                                )}
                               </td>
                               <td className="px-4 py-3">
                                 <StatusIndicator status={getStatusLevel(container.status)} label={container.status} />
