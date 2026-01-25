@@ -95,6 +95,23 @@ export function ImportSecretsWizard({
     if (progress.message) {
       setExecutionMessage(progress.message);
     }
+
+    // If progress is 100% and verifying is complete, treat as success
+    // This handles cases where the complete message might be delayed
+    if (progress.progress === 100 && progress.step === "verifying" && progress.status === "complete") {
+      // Small delay to allow complete message to arrive first
+      setTimeout(() => {
+        setIsExecuting((executing) => {
+          if (executing) {
+            // Complete message hasn't arrived yet, trigger success
+            setExecutionStatus("success");
+            setExecutionMessage(progress.message || "Import completed successfully");
+            return false;
+          }
+          return executing;
+        });
+      }, 500);
+    }
   }, []);
 
   const handleError = useCallback((error: ImportErrorMessage) => {
@@ -672,8 +689,8 @@ export function ImportSecretsWizard({
                   </div>
                 )}
 
-                {/* Steps list */}
-                {importSteps.length > 0 && (
+                {/* Steps list - only show while running */}
+                {importSteps.length > 0 && executionStatus === "running" && (
                   <div className="space-y-3 mb-6">
                     {importSteps.map((importStep, index) => (
                       <div
@@ -743,7 +760,14 @@ export function ImportSecretsWizard({
                       <p className="text-lg font-medium text-gray-900 dark:text-white mb-2">
                         Import Successful
                       </p>
-                      <p className="text-gray-600 dark:text-gray-400">{executionMessage}</p>
+                      <p className="text-gray-600 dark:text-gray-400 mb-4">{executionMessage}</p>
+                      <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3 text-left max-w-md">
+                        <p className="text-sm text-green-800 dark:text-green-200">
+                          {importMethod === "docker_secrets"
+                            ? "Secrets are now mounted at /run/secrets/ inside the container."
+                            : "Environment variables are now available in the container."}
+                        </p>
+                      </div>
                     </>
                   )}
                   {executionStatus === "error" && (
