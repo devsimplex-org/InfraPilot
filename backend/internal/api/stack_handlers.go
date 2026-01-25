@@ -915,9 +915,9 @@ func (h *Handler) updateStackStatus(ctx context.Context, stackID uuid.UUID, stat
 	return err
 }
 
-// ==================== List Stacks ====================
+// ==================== List Managed Stacks ====================
 
-func (h *Handler) listStacks(c *gin.Context) {
+func (h *Handler) listManagedStacks(c *gin.Context) {
 	orgID := c.MustGet("org_id").(uuid.UUID)
 	agentID := c.Param("id")
 
@@ -959,7 +959,7 @@ func (h *Handler) listStacks(c *gin.Context) {
 
 // ==================== Get Stack ====================
 
-func (h *Handler) getStack(c *gin.Context) {
+func (h *Handler) getManagedStack(c *gin.Context) {
 	orgID := c.MustGet("org_id").(uuid.UUID)
 	agentID := c.Param("id")
 	stackID := c.Param("sid")
@@ -1086,7 +1086,7 @@ func (h *Handler) getStackProgress(c *gin.Context) {
 
 // ==================== Delete Stack ====================
 
-func (h *Handler) deleteStack(c *gin.Context) {
+func (h *Handler) deleteManagedStack(c *gin.Context) {
 	orgID := c.MustGet("org_id").(uuid.UUID)
 	agentID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
