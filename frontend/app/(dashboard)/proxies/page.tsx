@@ -44,6 +44,7 @@ import {
   Tabs,
   Input,
 } from "@/components/ui/page-layout";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 type PanelTab = "details" | "security" | "ratelimits" | "config";
 type UpstreamMode = "manual" | "container";
@@ -56,6 +57,7 @@ export default function ProxiesPage() {
   const [panelTab, setPanelTab] = useState<PanelTab>("details");
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   // Form state for create
   const [proxyType, setProxyType] = useState<ProxyTypeMode>("upstream");
@@ -281,6 +283,7 @@ export default function ProxiesPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["proxies", selectedAgent] });
       setSelectedProxy(null);
+      setShowDeleteConfirm(false);
     },
   });
 
@@ -832,11 +835,7 @@ export default function ProxiesPage() {
                     variant="danger"
                     size="sm"
                     icon={Trash2}
-                    onClick={() => {
-                      if (confirm("Are you sure you want to delete this proxy?")) {
-                        deleteMutation.mutate(selectedProxy.id);
-                      }
-                    }}
+                    onClick={() => setShowDeleteConfirm(true)}
                   >
                     Delete
                   </Button>
@@ -1597,6 +1596,23 @@ export default function ProxiesPage() {
         onSuccess={() => {
           queryClient.invalidateQueries({ queryKey: ["proxies", selectedAgent] });
         }}
+      />
+
+      {/* Delete Proxy Confirmation */}
+      <ConfirmDialog
+        isOpen={showDeleteConfirm && !!selectedProxy}
+        onClose={() => setShowDeleteConfirm(false)}
+        onConfirm={() => {
+          if (selectedProxy) {
+            deleteMutation.mutate(selectedProxy.id);
+          }
+        }}
+        title="Delete Proxy"
+        message={`Are you sure you want to delete the proxy for "${selectedProxy?.domain}"?\n\nThis will remove the nginx configuration and SSL certificates.`}
+        confirmText="Delete Proxy"
+        variant="danger"
+        icon="delete"
+        isLoading={deleteMutation.isPending}
       />
     </div>
   );

@@ -48,6 +48,13 @@ export default function DashboardPage() {
     enabled: !!activeAgent,
   });
 
+  // Fetch deployments for active agent
+  const { data: deploymentsData } = useQuery({
+    queryKey: ["deployments", activeAgent?.id],
+    queryFn: () => activeAgent ? api.getDeployments(activeAgent.id) : Promise.resolve({ deployments: [], total: 0 }),
+    enabled: !!activeAgent,
+  });
+
   // Fetch alert history
   const { data: alertHistory } = useQuery({
     queryKey: ["alertHistory"],
@@ -61,6 +68,9 @@ export default function DashboardPage() {
   const totalProxies = proxies?.length || 0;
   const activeAlerts = alertHistory?.filter((a) => !a.resolved_at).length || 0;
   const criticalAlerts = alertHistory?.filter((a) => !a.resolved_at && a.severity === "critical").length || 0;
+  const deployments = deploymentsData?.deployments || [];
+  const totalDeployments = deploymentsData?.total || 0;
+  const runningDeployments = deployments.filter((d: { status: string }) => d.status === "running").length;
 
   // Calculate security posture (simple heuristic)
   const getOverallStatus = () => {
