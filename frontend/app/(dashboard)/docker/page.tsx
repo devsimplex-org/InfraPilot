@@ -888,11 +888,12 @@ export default function DockerPage() {
           {/* Containers Tab */}
           {activeTab === "containers" && (
             <div className="space-y-4">
-              <MetricsGrid columns={4}>
+              <MetricsGrid columns={5}>
                 <StatCard label="Total" value={containerMetrics.total} icon={ContainerIcon} iconColor="text-blue-600 dark:text-blue-400" />
                 <StatCard label="Running" value={containerMetrics.running} icon={Play} iconColor="text-green-600 dark:text-green-400" />
                 <StatCard label="Stopped" value={containerMetrics.stopped} icon={Square} iconColor="text-red-600 dark:text-red-400" />
-                <StatCard label="CPU Usage" value={`${(containers?.reduce((sum, c) => sum + (c.cpu_percent || 0), 0) || 0).toFixed(1)}%`} icon={Cpu} iconColor="text-purple-600 dark:text-purple-400" />
+                <StatCard label="CPU Usage" value={`${(containers?.reduce((sum, c) => sum + (c.cpu_percent || 0), 0) || 0).toFixed(1)}%`} icon={Cpu} iconColor="text-blue-600 dark:text-blue-400" />
+                <StatCard label="Memory Usage" value={`${(containers?.reduce((sum, c) => sum + (c.memory_mb || 0), 0) || 0).toFixed(0)} MB`} icon={MemoryStick} iconColor="text-purple-600 dark:text-purple-400" />
               </MetricsGrid>
 
               <div className="flex gap-6">
