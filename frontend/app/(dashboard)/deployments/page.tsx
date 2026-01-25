@@ -30,9 +30,11 @@ import { StatusIndicator } from "@/components/ui/StatusIndicator";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { FilterPanel, type FilterGroup } from "@/components/ui/FilterPanel";
 import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { cn } from "@/lib/utils";
 
 type PanelTab = "overview" | "scan" | "vulnerabilities" | "sbom";
+type ConfirmAction = { type: "redeploy" | "delete"; deployment: Deployment } | null;
 
 export default function DeploymentsPage() {
   const queryClient = useQueryClient();
@@ -45,6 +47,7 @@ export default function DeploymentsPage() {
   const [searchFilter, setSearchFilter] = useState("");
   const [redeployingId, setRedeployingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null);
 
   // Redeploy mutation
   const redeployMutation = useMutation({
@@ -421,10 +424,7 @@ export default function DeploymentsPage() {
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                if (confirm(`Redeploy ${row.service_name}?\n\nThis will create a new deployment with the same configuration and run the full pipeline (security scan, policy check, deploy).`)) {
-                  setRedeployingId(row.id);
-                  redeployMutation.mutate(row.id);
-                }
+                setConfirmAction({ type: "redeploy", deployment: row });
               }}
               disabled={isRedeploying}
               className="p-1.5 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 rounded disabled:opacity-50"
@@ -435,10 +435,7 @@ export default function DeploymentsPage() {
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                if (confirm(`Delete deployment ${row.service_name}?\n\nThis will permanently remove the deployment record. The container will not be affected.`)) {
-                  setDeletingId(row.id);
-                  deleteMutation.mutate(row.id);
-                }
+                setConfirmAction({ type: "delete", deployment: row });
               }}
               disabled={isDeleting || row.status === "running"}
               className="p-1.5 text-gray-400 hover:text-red-600 dark:hover:text-red-400 rounded disabled:opacity-50"
@@ -673,12 +670,7 @@ export default function DeploymentsPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => {
-                      if (confirm(`Redeploy ${selectedDeployment.service_name}?\n\nThis will create a new deployment with the same configuration and run the full pipeline (security scan, policy check, deploy).`)) {
-                        setRedeployingId(selectedDeployment.id);
-                        redeployMutation.mutate(selectedDeployment.id);
-                      }
-                    }}
+                    onClick={() => setConfirmAction({ type: "redeploy", deployment: selectedDeployment })}
                     disabled={redeployingId === selectedDeployment.id}
                     className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50"
                   >
@@ -686,12 +678,7 @@ export default function DeploymentsPage() {
                     Redeploy
                   </button>
                   <button
-                    onClick={() => {
-                      if (confirm(`Delete deployment ${selectedDeployment.service_name}?\n\nThis will permanently remove the deployment record. The container will not be affected.`)) {
-                        setDeletingId(selectedDeployment.id);
-                        deleteMutation.mutate(selectedDeployment.id);
-                      }
-                    }}
+                    onClick={() => setConfirmAction({ type: "delete", deployment: selectedDeployment })}
                     disabled={deletingId === selectedDeployment.id || selectedDeployment.status === "running"}
                     className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 rounded-lg transition-colors disabled:opacity-50"
                     title={selectedDeployment.status === "running" ? "Stop container first" : "Delete deployment"}
@@ -1286,6 +1273,40 @@ export default function DeploymentsPage() {
           </>
         )}
       </SlideOver>
+
+      {/* Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={!!confirmAction}
+        onClose={() => setConfirmAction(null)}
+        onConfirm={() => {
+          if (!confirmAction) return;
+          if (confirmAction.type === "redeploy") {
+            setRedeployingId(confirmAction.deployment.id);
+            redeployMutation.mutate(confirmAction.deployment.id);
+          } else if (confirmAction.type === "delete") {
+            setDeletingId(confirmAction.deployment.id);
+            deleteMutation.mutate(confirmAction.deployment.id);
+          }
+          setConfirmAction(null);
+        }}
+        title={
+          confirmAction?.type === "redeploy"
+            ? `Redeploy ${confirmAction.deployment.service_name}?`
+            : confirmAction?.type === "delete"
+            ? `Delete ${confirmAction?.deployment.service_name}?`
+            : ""
+        }
+        message={
+          confirmAction?.type === "redeploy"
+            ? "This will create a new deployment with the same configuration and run the full pipeline (security scan, policy check, deploy)."
+            : confirmAction?.type === "delete"
+            ? "This will permanently remove the deployment record. The container will not be affected."
+            : ""
+        }
+        confirmText={confirmAction?.type === "redeploy" ? "Redeploy" : "Delete"}
+        variant={confirmAction?.type === "delete" ? "danger" : "default"}
+        icon={confirmAction?.type === "delete" ? "delete" : "redeploy"}
+      />
     </>
   );
 }
