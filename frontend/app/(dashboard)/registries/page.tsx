@@ -54,7 +54,7 @@ import {
 } from "@/components/ui/page-layout";
 import { ScanModal, ScanImage } from "@/components/ui/ScanModal";
 import { usePullWebSocket, PullProgress } from "@/hooks/usePullWebSocket";
-import { DeployDialog } from "@/components/DeployDialog";
+import { DeployWizard } from "@/components/DeployWizard";
 
 type Tab = "registries" | "browse";
 
@@ -90,7 +90,7 @@ export default function RegistriesPage() {
   const [scanImages, setScanImages] = useState<ScanImage[]>([]);
 
   // Deploy dialog state
-  const [showDeployDialog, setShowDeployDialog] = useState(false);
+  const [showDeployWizard, setShowDeployDialog] = useState(false);
   const [deployImageInfo, setDeployImageInfo] = useState<{
     repository: string;
     tag: string;
@@ -1189,12 +1189,12 @@ export default function RegistriesPage() {
         mode="both"
       />
 
-      {/* Deploy Dialog */}
+      {/* Deploy Wizard */}
       {deployImageInfo && (
-        <DeployDialog
-          isOpen={showDeployDialog}
+        <DeployWizard
+          isOpen={showDeployWizard}
           onClose={() => {
-            setShowDeployDialog(false);
+            setShowDeployWizard(false);
             setDeployImageInfo(null);
           }}
           imageRepository={deployImageInfo.repository}

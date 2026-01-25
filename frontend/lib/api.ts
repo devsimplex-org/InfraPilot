@@ -1027,6 +1027,36 @@ export interface SBOM {
   created_at: string;
 }
 
+// Container configuration for deployments
+export interface ContainerConfigSecret {
+  name: string;
+  value: string;
+  mount_path?: string;
+}
+
+export interface ContainerConfigNetwork {
+  network_id?: string;
+  network_name?: string;
+  create_if_missing?: boolean;
+  driver?: string;
+}
+
+export interface ContainerConfigVolume {
+  volume_name?: string;
+  mount_path: string;
+  create_if_missing?: boolean;
+  host_path?: string;
+  read_only?: boolean;
+}
+
+export interface ContainerConfig {
+  env_vars?: Record<string, string>;
+  secrets?: ContainerConfigSecret[];
+  secret_method?: "env_vars" | "docker_secrets";
+  networks?: ContainerConfigNetwork[];
+  volumes?: ContainerConfigVolume[];
+}
+
 export interface CreateDeploymentRequest {
   service_name: string;
   environment: string;
@@ -1039,7 +1069,12 @@ export interface CreateDeploymentRequest {
   ci_provider?: string;
   ci_pipeline_id?: string;
   ci_build_url?: string;
+  container_config?: ContainerConfig;
 }
+
+// Type aliases for backward compatibility in DeployWizard
+export type NetworkInfo = DockerNetwork;
+export type VolumeInfo = DockerVolume;
 
 // Developer Feedback (Epic 8)
 export interface Feedback {
@@ -3606,6 +3641,13 @@ export const api = {
       `/agents/${agentId}/docker/images/${encodeURIComponent(imageId)}${force ? "?force=true" : ""}`,
       { method: "DELETE" }
     ),
+
+  // Aliases for DeployWizard compatibility
+  getNetworks: (agentId: string) =>
+    fetchAPI<DockerNetwork[]>(`/agents/${agentId}/docker/networks`),
+
+  getVolumes: (agentId: string) =>
+    fetchAPI<DockerVolume[]>(`/agents/${agentId}/docker/volumes`),
 
   // Logs
   getUnifiedLogs: (
