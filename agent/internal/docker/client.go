@@ -13,6 +13,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/registry"
 	"github.com/docker/docker/api/types/volume"
@@ -1127,6 +1128,45 @@ type ContainerRunResult struct {
 	Status      string `json:"status"`
 }
 
+// SecretConfig represents a secret to mount in a container
+type SecretConfig struct {
+	Name      string `json:"name"`
+	Value     string `json:"value"`
+	MountPath string `json:"mount_path"`
+}
+
+// NetworkConfig represents a network configuration for container deployment
+type NetworkConfig struct {
+	NetworkID       string `json:"network_id,omitempty"`
+	NetworkName     string `json:"network_name,omitempty"`
+	CreateIfMissing bool   `json:"create_if_missing,omitempty"`
+	Driver          string `json:"driver,omitempty"`
+}
+
+// VolumeConfig represents a volume configuration for container deployment
+type VolumeConfig struct {
+	VolumeName      string `json:"volume_name,omitempty"`
+	MountPath       string `json:"mount_path"`
+	CreateIfMissing bool   `json:"create_if_missing,omitempty"`
+	HostPath        string `json:"host_path,omitempty"`
+	ReadOnly        bool   `json:"read_only,omitempty"`
+}
+
+// ContainerRunExtendedConfig holds extended configuration for running a container
+type ContainerRunExtendedConfig struct {
+	ImageRef      string
+	Name          string
+	NetworkID     string
+	Env           map[string]string
+	Ports         map[string]string
+	RestartPolicy string
+	Labels        map[string]string
+	Secrets       []SecretConfig
+	SecretMethod  string // "env_vars" or "docker_secrets"
+	Networks      []NetworkConfig
+	Volumes       []VolumeConfig
+}
+
 // RunContainer creates and starts a new container
 func (c *Client) RunContainer(ctx context.Context, cfg ContainerRunConfig) (*ContainerRunResult, error) {
 	// Step 1: Pull the image if it doesn't exist locally
@@ -1219,6 +1259,329 @@ func (c *Client) RunContainer(ctx context.Context, cfg ContainerRunConfig) (*Con
 		Name:        cfg.Name,
 		Status:      "running",
 	}, nil
+}
+
+// RunContainerExtended creates and starts a container with extended configuration
+// including secrets, networks, and volumes
+func (c *Client) RunContainerExtended(ctx context.Context, cfg ContainerRunExtendedConfig) (*ContainerRunResult, error) {
+	// Step 1: Pull the image if it doesn't exist locally
+	_, _, err := c.cli.ImageInspectWithRaw(ctx, cfg.ImageRef)
+	if err != nil {
+		reader, err := c.cli.ImagePull(ctx, cfg.ImageRef, image.PullOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("failed to pull image %s: %w", cfg.ImageRef, err)
+		}
+		defer reader.Close()
+		io.Copy(io.Discard, reader)
+	}
+
+	// Step 2: Create networks if needed
+	createdNetworkIDs := make(map[string]string) // name -> ID
+	for _, netCfg := range cfg.Networks {
+		networkName := netCfg.NetworkName
+		if networkName == "" && netCfg.NetworkID != "" {
+			// Use network ID directly
+			continue
+		}
+
+		if netCfg.CreateIfMissing && networkName != "" {
+			// Check if network exists
+			networks, err := c.cli.NetworkList(ctx, network.ListOptions{
+				Filters: filters.NewArgs(filters.Arg("name", networkName)),
+			})
+			if err != nil {
+				return nil, fmt.Errorf("failed to list networks: %w", err)
+			}
+
+			// Find exact match
+			var exists bool
+			for _, n := range networks {
+				if n.Name == networkName {
+					exists = true
+					createdNetworkIDs[networkName] = n.ID
+					break
+				}
+			}
+
+			if !exists {
+				// Create the network
+				driver := netCfg.Driver
+				if driver == "" {
+					driver = "bridge"
+				}
+				resp, err := c.cli.NetworkCreate(ctx, networkName, network.CreateOptions{
+					Driver:     driver,
+					Attachable: true,
+				})
+				if err != nil {
+					return nil, fmt.Errorf("failed to create network %s: %w", networkName, err)
+				}
+				createdNetworkIDs[networkName] = resp.ID
+			}
+		}
+	}
+
+	// Step 3: Create volumes if needed
+	for _, volCfg := range cfg.Volumes {
+		if volCfg.CreateIfMissing && volCfg.VolumeName != "" && volCfg.HostPath == "" {
+			// Check if volume exists
+			_, err := c.cli.VolumeInspect(ctx, volCfg.VolumeName)
+			if err != nil {
+				// Volume doesn't exist, create it
+				_, err = c.cli.VolumeCreate(ctx, volume.CreateOptions{
+					Name:   volCfg.VolumeName,
+					Driver: "local",
+				})
+				if err != nil {
+					return nil, fmt.Errorf("failed to create volume %s: %w", volCfg.VolumeName, err)
+				}
+			}
+		}
+	}
+
+	// Step 4: Build environment variables
+	envList := make([]string, 0, len(cfg.Env))
+	for k, v := range cfg.Env {
+		envList = append(envList, fmt.Sprintf("%s=%s", k, v))
+	}
+
+	// Add secrets as env vars if method is env_vars
+	if cfg.SecretMethod == "env_vars" || cfg.SecretMethod == "" {
+		for _, secret := range cfg.Secrets {
+			envList = append(envList, fmt.Sprintf("%s=%s", secret.Name, secret.Value))
+		}
+	}
+
+	// Step 5: Build mounts for volumes and secrets
+	var mounts []mount.Mount
+
+	// Add volume mounts
+	for _, volCfg := range cfg.Volumes {
+		if volCfg.HostPath != "" {
+			// Bind mount
+			mounts = append(mounts, mount.Mount{
+				Type:     mount.TypeBind,
+				Source:   volCfg.HostPath,
+				Target:   volCfg.MountPath,
+				ReadOnly: volCfg.ReadOnly,
+			})
+		} else if volCfg.VolumeName != "" {
+			// Named volume
+			mounts = append(mounts, mount.Mount{
+				Type:     mount.TypeVolume,
+				Source:   volCfg.VolumeName,
+				Target:   volCfg.MountPath,
+				ReadOnly: volCfg.ReadOnly,
+			})
+		}
+	}
+
+	// Add secrets as file mounts if method is docker_secrets
+	if cfg.SecretMethod == "docker_secrets" {
+		secretsBasePath := "/var/lib/infrapilot/secrets"
+		for _, secret := range cfg.Secrets {
+			mountPath := secret.MountPath
+			if mountPath == "" {
+				mountPath = fmt.Sprintf("/run/secrets/%s", secret.Name)
+			}
+
+			// Create secret file on host (will be bind-mounted)
+			secretPath := fmt.Sprintf("%s/%s", secretsBasePath, secret.Name)
+
+			// Use a helper container to create the secret file
+			if err := c.createSecretFile(ctx, secretsBasePath, secret.Name, secret.Value); err != nil {
+				return nil, fmt.Errorf("failed to create secret file for %s: %w", secret.Name, err)
+			}
+
+			mounts = append(mounts, mount.Mount{
+				Type:     mount.TypeBind,
+				Source:   secretPath,
+				Target:   mountPath,
+				ReadOnly: true,
+			})
+		}
+	}
+
+	// Step 6: Build container configuration
+	containerConfig := &container.Config{
+		Image:  cfg.ImageRef,
+		Env:    envList,
+		Labels: cfg.Labels,
+	}
+
+	// Step 7: Build host configuration
+	hostConfig := &container.HostConfig{
+		Mounts: mounts,
+	}
+
+	// Set restart policy
+	switch cfg.RestartPolicy {
+	case "always":
+		hostConfig.RestartPolicy = container.RestartPolicy{Name: "always"}
+	case "unless-stopped":
+		hostConfig.RestartPolicy = container.RestartPolicy{Name: "unless-stopped"}
+	case "on-failure":
+		hostConfig.RestartPolicy = container.RestartPolicy{Name: "on-failure", MaximumRetryCount: 5}
+	default:
+		hostConfig.RestartPolicy = container.RestartPolicy{Name: "no"}
+	}
+
+	// Configure port bindings
+	if len(cfg.Ports) > 0 {
+		portBindings := make(map[nat.Port][]nat.PortBinding)
+		exposedPorts := make(map[nat.Port]struct{})
+
+		for containerPort, hostPort := range cfg.Ports {
+			port := nat.Port(containerPort + "/tcp")
+			exposedPorts[port] = struct{}{}
+			portBindings[port] = []nat.PortBinding{
+				{HostIP: "0.0.0.0", HostPort: hostPort},
+			}
+		}
+
+		containerConfig.ExposedPorts = exposedPorts
+		hostConfig.PortBindings = portBindings
+	}
+
+	// Step 8: Build network configuration
+	var networkConfig *network.NetworkingConfig
+
+	// Get the first network to attach during creation
+	var primaryNetworkID string
+	if cfg.NetworkID != "" {
+		primaryNetworkID = cfg.NetworkID
+	} else if len(cfg.Networks) > 0 {
+		netCfg := cfg.Networks[0]
+		if netCfg.NetworkID != "" {
+			primaryNetworkID = netCfg.NetworkID
+		} else if id, ok := createdNetworkIDs[netCfg.NetworkName]; ok {
+			primaryNetworkID = id
+		}
+	}
+
+	if primaryNetworkID != "" {
+		networkConfig = &network.NetworkingConfig{
+			EndpointsConfig: map[string]*network.EndpointSettings{
+				primaryNetworkID: {},
+			},
+		}
+	}
+
+	// Step 9: Create the container
+	resp, err := c.cli.ContainerCreate(ctx, containerConfig, hostConfig, networkConfig, nil, cfg.Name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create container: %w", err)
+	}
+
+	containerID := resp.ID
+	shortID := containerID
+	if len(shortID) > 12 {
+		shortID = shortID[:12]
+	}
+
+	// Step 10: Connect to additional networks
+	for i, netCfg := range cfg.Networks {
+		if i == 0 {
+			continue // Skip the first one, already connected
+		}
+
+		var networkID string
+		if netCfg.NetworkID != "" {
+			networkID = netCfg.NetworkID
+		} else if id, ok := createdNetworkIDs[netCfg.NetworkName]; ok {
+			networkID = id
+		} else {
+			// Try to find the network by name
+			networks, _ := c.cli.NetworkList(ctx, network.ListOptions{
+				Filters: filters.NewArgs(filters.Arg("name", netCfg.NetworkName)),
+			})
+			for _, n := range networks {
+				if n.Name == netCfg.NetworkName {
+					networkID = n.ID
+					break
+				}
+			}
+		}
+
+		if networkID != "" {
+			if err := c.cli.NetworkConnect(ctx, networkID, containerID, nil); err != nil {
+				// Log but don't fail
+				fmt.Printf("Warning: failed to connect container to network %s: %v\n", netCfg.NetworkName, err)
+			}
+		}
+	}
+
+	// Step 11: Start the container
+	if err := c.cli.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
+		// Cleanup
+		c.cli.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true})
+		return nil, fmt.Errorf("failed to start container: %w", err)
+	}
+
+	return &ContainerRunResult{
+		ContainerID: shortID,
+		Name:        cfg.Name,
+		Status:      "running",
+	}, nil
+}
+
+// createSecretFile creates a secret file on the host filesystem using a helper container
+func (c *Client) createSecretFile(ctx context.Context, basePath, name, value string) error {
+	secretPath := fmt.Sprintf("%s/%s", basePath, name)
+
+	// Create directory and file with proper permissions using alpine
+	createCmd := fmt.Sprintf(`
+		mkdir -p %s && \
+		chmod 700 %s && \
+		printf '%%s' "$SECRET_VALUE" > %s && \
+		chmod 400 %s
+	`, basePath, basePath, secretPath, secretPath)
+
+	containerCfg := &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sh", "-c", createCmd},
+		Env:   []string{fmt.Sprintf("SECRET_VALUE=%s", value)},
+	}
+
+	hostCfg := &container.HostConfig{
+		Binds:      []string{basePath + ":" + basePath},
+		AutoRemove: true,
+	}
+
+	// Pull alpine if not available
+	_, _, err := c.cli.ImageInspectWithRaw(ctx, "alpine:latest")
+	if err != nil {
+		reader, err := c.cli.ImagePull(ctx, "alpine:latest", image.PullOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to pull alpine: %w", err)
+		}
+		defer reader.Close()
+		io.Copy(io.Discard, reader)
+	}
+
+	// Create and run the helper container
+	resp, err := c.cli.ContainerCreate(ctx, containerCfg, hostCfg, nil, nil, "")
+	if err != nil {
+		return fmt.Errorf("failed to create helper container: %w", err)
+	}
+
+	if err := c.cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+		c.cli.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true})
+		return fmt.Errorf("failed to start helper container: %w", err)
+	}
+
+	// Wait for completion
+	statusCh, errCh := c.cli.ContainerWait(ctx, resp.ID, container.WaitConditionNotRunning)
+	select {
+	case err := <-errCh:
+		if err != nil {
+			return fmt.Errorf("error waiting for helper container: %w", err)
+		}
+	case <-statusCh:
+		// Success
+	}
+
+	return nil
 }
 
 // ============ Secret Management Types ============

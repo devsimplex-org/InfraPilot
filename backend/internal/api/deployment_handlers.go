@@ -67,19 +67,53 @@ type Deployment struct {
 	UpdatedAt        time.Time       `json:"updated_at"`
 }
 
+// ContainerConfigSecret represents a secret to be mounted in the container
+type ContainerConfigSecret struct {
+	Name      string `json:"name"`
+	Value     string `json:"value"`
+	MountPath string `json:"mount_path,omitempty"`
+}
+
+// ContainerConfigNetwork represents a network configuration
+type ContainerConfigNetwork struct {
+	NetworkID       *string `json:"network_id,omitempty"`
+	NetworkName     *string `json:"network_name,omitempty"`
+	CreateIfMissing bool    `json:"create_if_missing,omitempty"`
+	Driver          string  `json:"driver,omitempty"`
+}
+
+// ContainerConfigVolume represents a volume configuration
+type ContainerConfigVolume struct {
+	VolumeName      *string `json:"volume_name,omitempty"`
+	MountPath       string  `json:"mount_path"`
+	CreateIfMissing bool    `json:"create_if_missing,omitempty"`
+	HostPath        *string `json:"host_path,omitempty"`
+	ReadOnly        bool    `json:"read_only,omitempty"`
+}
+
+// ContainerConfig contains the extended container configuration
+type ContainerConfig struct {
+	EnvVars      map[string]string        `json:"env_vars,omitempty"`
+	Secrets      []ContainerConfigSecret  `json:"secrets,omitempty"`
+	SecretMethod string                   `json:"secret_method,omitempty"` // "env_vars" or "docker_secrets"
+	Networks     []ContainerConfigNetwork `json:"networks,omitempty"`
+	Volumes      []ContainerConfigVolume  `json:"volumes,omitempty"`
+}
+
 type CreateDeploymentRequest struct {
-	ServiceName     string  `json:"service_name" binding:"required"`
-	Environment     string  `json:"environment" binding:"required,oneof=dev staging prod"`
-	ImageRepository string  `json:"image_repository" binding:"required"`
-	ImageTag        *string `json:"image_tag"`
-	ImageDigest     *string `json:"image_digest"`
-	GitRepo         *string `json:"git_repo"`
-	GitBranch       *string `json:"git_branch"`
-	GitCommit       *string `json:"git_commit"`
-	GitPRNumber     *int    `json:"git_pr_number"`
-	CIProvider      *string `json:"ci_provider"`
-	CIPipelineID    *string `json:"ci_pipeline_id"`
-	CIBuildURL      *string `json:"ci_build_url"`
+	ServiceName     string           `json:"service_name" binding:"required"`
+	Environment     string           `json:"environment" binding:"required,oneof=dev staging prod"`
+	ImageRepository string           `json:"image_repository" binding:"required"`
+	ImageTag        *string          `json:"image_tag"`
+	ImageDigest     *string          `json:"image_digest"`
+	GitRepo         *string          `json:"git_repo"`
+	GitBranch       *string          `json:"git_branch"`
+	GitCommit       *string          `json:"git_commit"`
+	GitPRNumber     *int             `json:"git_pr_number"`
+	CIProvider      *string          `json:"ci_provider"`
+	CIPipelineID    *string          `json:"ci_pipeline_id"`
+	CIBuildURL      *string          `json:"ci_build_url"`
+	ContainerConfig *ContainerConfig `json:"container_config,omitempty"`
 }
 
 // ==================== List Deployments ====================
@@ -222,6 +256,18 @@ func (h *Handler) createDeployment(c *gin.Context) {
 		return
 	}
 
+	// Serialize container config to JSON if provided
+	var containerConfigJSON []byte
+	if req.ContainerConfig != nil {
+		var err error
+		containerConfigJSON, err = json.Marshal(req.ContainerConfig)
+		if err != nil {
+			h.logger.Error("Failed to marshal container config", zap.Error(err))
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid container config"})
+			return
+		}
+	}
+
 	var deploymentID uuid.UUID
 	err = h.db.QueryRow(c.Request.Context(), `
 		INSERT INTO deployments (
@@ -229,15 +275,15 @@ func (h *Handler) createDeployment(c *gin.Context) {
 			image_repository, image_tag, image_digest,
 			git_repo, git_branch, git_commit, git_pr_number,
 			ci_provider, ci_pipeline_id, ci_build_url,
-			deployed_by, status
+			deployed_by, status, container_config
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'pending')
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'pending', $16)
 		RETURNING id
 	`, orgID, agentID, req.ServiceName, req.Environment,
 		req.ImageRepository, req.ImageTag, req.ImageDigest,
 		req.GitRepo, req.GitBranch, req.GitCommit, req.GitPRNumber,
 		req.CIProvider, req.CIPipelineID, req.CIBuildURL,
-		userID,
+		userID, containerConfigJSON,
 	).Scan(&deploymentID)
 
 	if err != nil {
@@ -262,7 +308,7 @@ func (h *Handler) createDeployment(c *gin.Context) {
 		imageDigest = *req.ImageDigest
 	}
 	// Use background context for async pipeline (request context will be canceled)
-	go h.runDeploymentPipeline(context.Background(), orgID, deploymentID, req.ImageRepository, imageTag, imageDigest)
+	go h.runDeploymentPipeline(context.Background(), orgID, deploymentID, req.ImageRepository, imageTag, imageDigest, req.ContainerConfig)
 
 	c.JSON(http.StatusCreated, gin.H{
 		"id":      deploymentID,
@@ -273,7 +319,7 @@ func (h *Handler) createDeployment(c *gin.Context) {
 
 // ==================== Deployment Pipeline ====================
 
-func (h *Handler) runDeploymentPipeline(ctx context.Context, orgID, deploymentID uuid.UUID, imageRepo, imageTag, imageDigest string) {
+func (h *Handler) runDeploymentPipeline(ctx context.Context, orgID, deploymentID uuid.UUID, imageRepo, imageTag, imageDigest string, containerConfig *ContainerConfig) {
 	logger := h.logger.With(
 		zap.String("deployment_id", deploymentID.String()),
 		zap.String("org_id", orgID.String()),
@@ -517,7 +563,7 @@ func (h *Handler) runDeploymentPipeline(ctx context.Context, orgID, deploymentID
 			return
 		}
 
-		containerResult, err := h.deployContainerToAgent(ctx, deploymentID, agentID, imageRef, deployment.ServiceName, deployment.Environment)
+		containerResult, err := h.deployContainerToAgent(ctx, deploymentID, agentID, imageRef, deployment.ServiceName, deployment.Environment, containerConfig)
 		if err != nil {
 			h.updateDeploymentStatus(ctx, deploymentID.String(), "failed",
 				fmt.Sprintf("Container deployment failed: %v", err))
@@ -552,7 +598,7 @@ func (h *Handler) runDeploymentPipeline(ctx context.Context, orgID, deploymentID
 }
 
 // deployContainerToAgent sends a command to the agent to run a container
-func (h *Handler) deployContainerToAgent(ctx context.Context, deploymentID, agentID uuid.UUID, imageRef, serviceName, environment string) (*agentgrpc.ContainerRunResult, error) {
+func (h *Handler) deployContainerToAgent(ctx context.Context, deploymentID, agentID uuid.UUID, imageRef, serviceName, environment string, containerConfig *ContainerConfig) (*agentgrpc.ContainerRunResult, error) {
 	// Generate container name
 	containerName := fmt.Sprintf("%s-%s-%s", serviceName, environment, deploymentID.String()[:8])
 
@@ -566,6 +612,69 @@ func (h *Handler) deployContainerToAgent(ctx context.Context, deploymentID, agen
 			"infrapilot.service":       serviceName,
 			"infrapilot.environment":   environment,
 		},
+	}
+
+	// Add container configuration if provided
+	if containerConfig != nil {
+		// Add environment variables
+		if len(containerConfig.EnvVars) > 0 && containerConfig.SecretMethod != "docker_secrets" {
+			options["env"] = containerConfig.EnvVars
+		}
+
+		// Add secrets configuration
+		if len(containerConfig.Secrets) > 0 {
+			secretsOpts := make([]map[string]interface{}, len(containerConfig.Secrets))
+			for i, s := range containerConfig.Secrets {
+				secretsOpts[i] = map[string]interface{}{
+					"name":       s.Name,
+					"value":      s.Value,
+					"mount_path": s.MountPath,
+				}
+			}
+			options["secrets"] = secretsOpts
+			options["secret_method"] = containerConfig.SecretMethod
+		}
+
+		// Add networks configuration
+		if len(containerConfig.Networks) > 0 {
+			networksOpts := make([]map[string]interface{}, len(containerConfig.Networks))
+			for i, n := range containerConfig.Networks {
+				netOpt := map[string]interface{}{
+					"create_if_missing": n.CreateIfMissing,
+				}
+				if n.NetworkID != nil {
+					netOpt["network_id"] = *n.NetworkID
+				}
+				if n.NetworkName != nil {
+					netOpt["network_name"] = *n.NetworkName
+				}
+				if n.Driver != "" {
+					netOpt["driver"] = n.Driver
+				}
+				networksOpts[i] = netOpt
+			}
+			options["networks"] = networksOpts
+		}
+
+		// Add volumes configuration
+		if len(containerConfig.Volumes) > 0 {
+			volumesOpts := make([]map[string]interface{}, len(containerConfig.Volumes))
+			for i, v := range containerConfig.Volumes {
+				volOpt := map[string]interface{}{
+					"mount_path":        v.MountPath,
+					"create_if_missing": v.CreateIfMissing,
+					"read_only":         v.ReadOnly,
+				}
+				if v.VolumeName != nil {
+					volOpt["volume_name"] = *v.VolumeName
+				}
+				if v.HostPath != nil {
+					volOpt["host_path"] = *v.HostPath
+				}
+				volumesOpts[i] = volOpt
+			}
+			options["volumes"] = volumesOpts
+		}
 	}
 
 	optionsJSON, err := json.Marshal(options)

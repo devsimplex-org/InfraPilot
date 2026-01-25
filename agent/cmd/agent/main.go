@@ -1441,6 +1441,7 @@ func (h *CommandHandler) handleDockerCommand(ctx context.Context, cmd *agentgrpc
 		name := getStringOption(dockerCmd.Options, "name")
 		networkID := getStringOption(dockerCmd.Options, "network_id")
 		restartPolicy := getStringOption(dockerCmd.Options, "restart_policy")
+		secretMethod := getStringOption(dockerCmd.Options, "secret_method")
 
 		if imageRef == "" {
 			return &agentgrpc.CommandResult{
@@ -1485,6 +1486,85 @@ func (h *CommandHandler) handleDockerCommand(ctx context.Context, cmd *agentgrpc
 			}
 		}
 
+		// Parse secrets configuration
+		var secrets []docker.SecretConfig
+		if secretsList, ok := dockerCmd.Options["secrets"].([]interface{}); ok {
+			for _, s := range secretsList {
+				if secretMap, ok := s.(map[string]interface{}); ok {
+					secret := docker.SecretConfig{
+						Name:      getStringFromMap(secretMap, "name"),
+						Value:     getStringFromMap(secretMap, "value"),
+						MountPath: getStringFromMap(secretMap, "mount_path"),
+					}
+					secrets = append(secrets, secret)
+				}
+			}
+		}
+
+		// Parse networks configuration
+		var networks []docker.NetworkConfig
+		if networksList, ok := dockerCmd.Options["networks"].([]interface{}); ok {
+			for _, n := range networksList {
+				if netMap, ok := n.(map[string]interface{}); ok {
+					network := docker.NetworkConfig{
+						NetworkID:       getStringFromMap(netMap, "network_id"),
+						NetworkName:     getStringFromMap(netMap, "network_name"),
+						CreateIfMissing: getBoolFromMap(netMap, "create_if_missing"),
+						Driver:          getStringFromMap(netMap, "driver"),
+					}
+					networks = append(networks, network)
+				}
+			}
+		}
+
+		// Parse volumes configuration
+		var volumes []docker.VolumeConfig
+		if volumesList, ok := dockerCmd.Options["volumes"].([]interface{}); ok {
+			for _, v := range volumesList {
+				if volMap, ok := v.(map[string]interface{}); ok {
+					volume := docker.VolumeConfig{
+						VolumeName:      getStringFromMap(volMap, "volume_name"),
+						MountPath:       getStringFromMap(volMap, "mount_path"),
+						CreateIfMissing: getBoolFromMap(volMap, "create_if_missing"),
+						HostPath:        getStringFromMap(volMap, "host_path"),
+						ReadOnly:        getBoolFromMap(volMap, "read_only"),
+					}
+					volumes = append(volumes, volume)
+				}
+			}
+		}
+
+		// Use extended run if we have secrets, networks, or volumes
+		if len(secrets) > 0 || len(networks) > 0 || len(volumes) > 0 {
+			result, err := h.docker.RunContainerExtended(ctx, docker.ContainerRunExtendedConfig{
+				ImageRef:      imageRef,
+				Name:          name,
+				NetworkID:     networkID,
+				Env:           env,
+				Ports:         ports,
+				RestartPolicy: restartPolicy,
+				Labels:        labels,
+				Secrets:       secrets,
+				SecretMethod:  secretMethod,
+				Networks:      networks,
+				Volumes:       volumes,
+			})
+			if err != nil {
+				return &agentgrpc.CommandResult{
+					Success: false,
+					Message: err.Error(),
+				}
+			}
+
+			data, _ := json.Marshal(result)
+			return &agentgrpc.CommandResult{
+				Success: true,
+				Message: "container started with extended configuration",
+				Data:    data,
+			}
+		}
+
+		// Use basic run for simple containers
 		result, err := h.docker.RunContainer(ctx, docker.ContainerRunConfig{
 			ImageRef:      imageRef,
 			Name:          name,
@@ -2102,6 +2182,30 @@ func getStringOption(options map[string]interface{}, key string) string {
 		}
 	}
 	return ""
+}
+
+func getStringFromMap(m map[string]interface{}, key string) string {
+	if m == nil {
+		return ""
+	}
+	if val, ok := m[key]; ok {
+		if str, ok := val.(string); ok {
+			return str
+		}
+	}
+	return ""
+}
+
+func getBoolFromMap(m map[string]interface{}, key string) bool {
+	if m == nil {
+		return false
+	}
+	if val, ok := m[key]; ok {
+		if b, ok := val.(bool); ok {
+			return b
+		}
+	}
+	return false
 }
 
 // ============ Certificate Renewal ============
