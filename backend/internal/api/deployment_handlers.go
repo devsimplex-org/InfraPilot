@@ -39,34 +39,36 @@ const (
 )
 
 type Deployment struct {
-	ID               uuid.UUID       `json:"id"`
-	OrgID            uuid.UUID       `json:"org_id"`
-	AgentID          uuid.UUID       `json:"agent_id"`
-	ServiceName      string          `json:"service_name"`
-	Environment      string          `json:"environment"`
-	ImageRegistry    *string         `json:"image_registry,omitempty"`
-	ImageRepository  string          `json:"image_repository"`
-	ImageTag         *string         `json:"image_tag,omitempty"`
-	ImageDigest      *string         `json:"image_digest,omitempty"`
-	GitRepo          *string         `json:"git_repo,omitempty"`
-	GitBranch        *string         `json:"git_branch,omitempty"`
-	GitCommit        *string         `json:"git_commit,omitempty"`
-	CIProvider       *string         `json:"ci_provider,omitempty"`
-	CIPipelineID     *string         `json:"ci_pipeline_id,omitempty"`
-	CIBuildURL       *string         `json:"ci_build_url,omitempty"`
-	ScanResultID     *uuid.UUID      `json:"scan_result_id,omitempty"`
-	SBOMID           *uuid.UUID      `json:"sbom_id,omitempty"`
-	PolicyDecision   PolicyDecision  `json:"policy_decision"`
-	PolicyReason     *string         `json:"policy_reason,omitempty"`
+	ID               uuid.UUID        `json:"id"`
+	OrgID            uuid.UUID        `json:"org_id"`
+	AgentID          uuid.UUID        `json:"agent_id"`
+	ServiceName      string           `json:"service_name"`
+	Environment      string           `json:"environment"`
+	ImageRegistry    *string          `json:"image_registry,omitempty"`
+	ImageRepository  string           `json:"image_repository"`
+	ImageTag         *string          `json:"image_tag,omitempty"`
+	ImageDigest      *string          `json:"image_digest,omitempty"`
+	GitRepo          *string          `json:"git_repo,omitempty"`
+	GitBranch        *string          `json:"git_branch,omitempty"`
+	GitCommit        *string          `json:"git_commit,omitempty"`
+	CIProvider       *string          `json:"ci_provider,omitempty"`
+	CIPipelineID     *string          `json:"ci_pipeline_id,omitempty"`
+	CIBuildURL       *string          `json:"ci_build_url,omitempty"`
+	ScanResultID     *uuid.UUID       `json:"scan_result_id,omitempty"`
+	SBOMID           *uuid.UUID       `json:"sbom_id,omitempty"`
+	PolicyDecision   PolicyDecision   `json:"policy_decision"`
+	PolicyReason     *string          `json:"policy_reason,omitempty"`
 	Status           DeploymentStatus `json:"status"`
-	StatusMessage    *string         `json:"status_message,omitempty"`
-	ContainerID      *string         `json:"container_id,omitempty"`
-	ContainerName    *string         `json:"container_name,omitempty"`
-	ProxyHostID      *uuid.UUID      `json:"proxy_host_id,omitempty"`
-	DeployedBy       *uuid.UUID      `json:"deployed_by,omitempty"`
-	DeployedAt       *time.Time      `json:"deployed_at,omitempty"`
-	CreatedAt        time.Time       `json:"created_at"`
-	UpdatedAt        time.Time       `json:"updated_at"`
+	StatusMessage    *string          `json:"status_message,omitempty"`
+	ContainerID      *string          `json:"container_id,omitempty"`
+	ContainerName    *string          `json:"container_name,omitempty"`
+	ProxyHostID      *uuid.UUID       `json:"proxy_host_id,omitempty"`
+	StackID          *uuid.UUID       `json:"stack_id,omitempty"`
+	ServiceOrder     int              `json:"service_order,omitempty"`
+	DeployedBy       *uuid.UUID       `json:"deployed_by,omitempty"`
+	DeployedAt       *time.Time       `json:"deployed_at,omitempty"`
+	CreatedAt        time.Time        `json:"created_at"`
+	UpdatedAt        time.Time        `json:"updated_at"`
 }
 
 // ContainerConfigSecret represents a secret to be mounted in the container
@@ -138,6 +140,7 @@ func (h *Handler) listDeployments(c *gin.Context) {
 		       policy_decision, policy_reason,
 		       status, status_message,
 		       container_id, container_name, proxy_host_id,
+		       stack_id, service_order,
 		       deployed_by, deployed_at, created_at, updated_at
 		FROM deployments
 		WHERE org_id = $1 AND agent_id = $2
@@ -183,6 +186,7 @@ func (h *Handler) listDeployments(c *gin.Context) {
 			&d.PolicyDecision, &d.PolicyReason,
 			&d.Status, &d.StatusMessage,
 			&d.ContainerID, &d.ContainerName, &d.ProxyHostID,
+			&d.StackID, &d.ServiceOrder,
 			&d.DeployedBy, &d.DeployedAt, &d.CreatedAt, &d.UpdatedAt,
 		); err != nil {
 			h.logger.Warn("Failed to scan deployment", zap.Error(err))
@@ -211,6 +215,7 @@ func (h *Handler) getDeployment(c *gin.Context) {
 		       policy_decision, policy_reason,
 		       status, status_message,
 		       container_id, container_name, proxy_host_id,
+		       stack_id, service_order,
 		       deployed_by, deployed_at, created_at, updated_at
 		FROM deployments
 		WHERE id = $1 AND org_id = $2 AND agent_id = $3
@@ -223,6 +228,7 @@ func (h *Handler) getDeployment(c *gin.Context) {
 		&d.PolicyDecision, &d.PolicyReason,
 		&d.Status, &d.StatusMessage,
 		&d.ContainerID, &d.ContainerName, &d.ProxyHostID,
+		&d.StackID, &d.ServiceOrder,
 		&d.DeployedBy, &d.DeployedAt, &d.CreatedAt, &d.UpdatedAt,
 	)
 
