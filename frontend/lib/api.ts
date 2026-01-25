@@ -5574,4 +5574,22 @@ export const api = {
 
   // Generic fetch for custom endpoints
   fetchAPI: <T>(endpoint: string, options?: RequestInit) => fetchAPI<T>(endpoint, options),
+
+  // Sensitive operation verification
+  verifyPassword: (password: string) =>
+    fetchAPI<{ valid: boolean; error?: string }>(`/auth/verify-password`, {
+      method: "POST",
+      body: JSON.stringify({ password }),
+    }),
+
+  sendConfirmationOTP: () =>
+    fetchAPI<{ success: boolean; message: string; error?: string }>(`/auth/send-confirmation-otp`, {
+      method: "POST",
+    }),
+
+  verifyConfirmationOTP: (otp: string) =>
+    fetchAPI<{ valid: boolean; error?: string }>(`/auth/verify-confirmation-otp`, {
+      method: "POST",
+      body: JSON.stringify({ otp }),
+    }),
 };
