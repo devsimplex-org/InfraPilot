@@ -7,6 +7,7 @@ import {
   X,
   Layers,
   FileCode,
+  FileText,
   Variable,
   Server,
   Network,
@@ -22,6 +23,7 @@ import {
   Plus,
   Trash2,
   RefreshCw,
+  ClipboardPaste,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button, Input } from "@/components/ui/page-layout";
@@ -82,6 +84,9 @@ export function StackDeployWizard({
 
   // Step 2: Variables
   const [variables, setVariables] = useState<Record<string, string>>({});
+  const [envInputMethod, setEnvInputMethod] = useState<"manual" | "file">("manual");
+  const [envFileContent, setEnvFileContent] = useState("");
+  const [envParseWarning, setEnvParseWarning] = useState<string | null>(null);
 
   // Step 3: Services
   const [serviceConfigs, setServiceConfigs] = useState<Record<string, ServiceConfig>>({});
@@ -191,12 +196,72 @@ export function StackDeployWizard({
       setParseError(null);
       setParsedCompose(null);
       setVariables({});
+      setEnvInputMethod("manual");
+      setEnvFileContent("");
+      setEnvParseWarning(null);
       setServiceConfigs({});
       setStackId(null);
       setErrorMessage(null);
       setProgress(null);
     }
   }, [isOpen]);
+
+  // Parse .env file content and update variables
+  const parseEnvFile = (content: string) => {
+    const parsed: Record<string, string> = {};
+    const lines = content.split("\n");
+    let matched = 0;
+    let total = 0;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      // Skip empty lines and comments
+      if (!trimmed || trimmed.startsWith("#")) continue;
+
+      // Parse KEY=VALUE format
+      const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+      if (match) {
+        total++;
+        const [, key, value] = match;
+        // Remove surrounding quotes if present
+        let cleanValue = value.trim();
+        if ((cleanValue.startsWith('"') && cleanValue.endsWith('"')) ||
+            (cleanValue.startsWith("'") && cleanValue.endsWith("'"))) {
+          cleanValue = cleanValue.slice(1, -1);
+        }
+
+        // Only set if this variable is expected by the compose file
+        if (parsedCompose?.variables.some((v) => v.name === key)) {
+          parsed[key] = cleanValue;
+          matched++;
+        }
+      }
+    }
+
+    // Update variables with parsed values (merge with existing)
+    setVariables((prev) => ({ ...prev, ...parsed }));
+
+    // Show warning if some variables weren't matched
+    if (total > 0 && matched < total) {
+      setEnvParseWarning(`Matched ${matched} of ${total} variables from .env file`);
+    } else if (matched > 0) {
+      setEnvParseWarning(null);
+    }
+  };
+
+  // Handle .env file upload
+  const handleEnvFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const content = event.target?.result as string;
+        setEnvFileContent(content);
+        parseEnvFile(content);
+      };
+      reader.readAsText(file);
+    }
+  };
 
   // File upload handler
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -411,39 +476,120 @@ export function StackDeployWizard({
       case "variables":
         return (
           <div className="space-y-4">
-            <p className="text-sm text-zinc-400">
-              Set values for variables found in your compose file. Variables use the format{" "}
-              <code className="text-indigo-400">${"{VARIABLE}"}</code> or{" "}
-              <code className="text-indigo-400">${"{VARIABLE:-default}"}</code>.
-            </p>
+            {/* Input method tabs */}
+            <div className="flex gap-2 p-1 bg-zinc-800/50 rounded-lg">
+              <button
+                onClick={() => setEnvInputMethod("manual")}
+                className={cn(
+                  "flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm transition-colors",
+                  envInputMethod === "manual"
+                    ? "bg-zinc-700 text-white"
+                    : "text-zinc-400 hover:text-white"
+                )}
+              >
+                <Variable className="h-4 w-4" />
+                Manual Entry
+              </button>
+              <button
+                onClick={() => setEnvInputMethod("file")}
+                className={cn(
+                  "flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm transition-colors",
+                  envInputMethod === "file"
+                    ? "bg-zinc-700 text-white"
+                    : "text-zinc-400 hover:text-white"
+                )}
+              >
+                <FileText className="h-4 w-4" />
+                From .env File
+              </button>
+            </div>
 
-            {parsedCompose?.variables && parsedCompose.variables.length > 0 ? (
+            {envInputMethod === "file" ? (
               <div className="space-y-3">
-                {parsedCompose.variables.map((v) => (
-                  <div key={v.name} className="flex items-center gap-3">
-                    <div className="w-48">
-                      <span className="text-sm font-mono text-zinc-300">{v.name}</span>
-                      {v.default && (
-                        <span className="text-xs text-zinc-500 ml-2">
-                          (default: {v.default})
-                        </span>
-                      )}
-                    </div>
-                    <Input
-                      value={variables[v.name] || ""}
-                      onChange={(e) =>
-                        setVariables((prev) => ({ ...prev, [v.name]: e.target.value }))
-                      }
-                      placeholder={v.default || "Enter value..."}
-                      className="flex-1"
+                <p className="text-sm text-zinc-400">
+                  Upload or paste your <code className="text-indigo-400">.env</code> file.
+                  Matching variables will be automatically populated.
+                </p>
+
+                <div className="flex items-center gap-2">
+                  <label className="cursor-pointer flex items-center gap-2 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-zinc-300 hover:bg-zinc-700 transition-colors">
+                    <Upload className="h-4 w-4" />
+                    Upload .env
+                    <input
+                      type="file"
+                      accept=".env,.env.*"
+                      onChange={handleEnvFileUpload}
+                      className="hidden"
                     />
+                  </label>
+                  <span className="text-zinc-500 text-sm">or paste below</span>
+                </div>
+
+                <textarea
+                  value={envFileContent}
+                  onChange={(e) => {
+                    setEnvFileContent(e.target.value);
+                    parseEnvFile(e.target.value);
+                  }}
+                  placeholder={`# Paste your .env content here\nPOSTGRES_PASSWORD=secret123\nJWT_SECRET=my-jwt-secret\nREDIS_PASSWORD=redis-pass`}
+                  className="w-full h-40 px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-white font-mono text-sm resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+
+                {envParseWarning && (
+                  <div className="p-2 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-400 text-sm flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                    {envParseWarning}
                   </div>
-                ))}
+                )}
+
+                {Object.keys(variables).filter((k) => variables[k]).length > 0 && (
+                  <div className="p-3 bg-green-500/10 border border-green-500/30 rounded-lg text-green-400 text-sm">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle className="h-4 w-4" />
+                      <span>
+                        {Object.keys(variables).filter((k) => variables[k]).length} variables populated
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
-              <div className="text-center py-8 text-zinc-500">
-                No variables found in your compose file.
-              </div>
+              <>
+                <p className="text-sm text-zinc-400">
+                  Set values for variables found in your compose file. Variables use the format{" "}
+                  <code className="text-indigo-400">${"{VARIABLE}"}</code> or{" "}
+                  <code className="text-indigo-400">${"{VARIABLE:-default}"}</code>.
+                </p>
+
+                {parsedCompose?.variables && parsedCompose.variables.length > 0 ? (
+                  <div className="space-y-3 max-h-64 overflow-y-auto pr-2">
+                    {parsedCompose.variables.map((v) => (
+                      <div key={v.name} className="flex items-center gap-3">
+                        <div className="w-48 flex-shrink-0">
+                          <span className="text-sm font-mono text-zinc-300">{v.name}</span>
+                          {v.default && (
+                            <span className="text-xs text-zinc-500 block truncate">
+                              default: {v.default}
+                            </span>
+                          )}
+                        </div>
+                        <Input
+                          value={variables[v.name] || ""}
+                          onChange={(e) =>
+                            setVariables((prev) => ({ ...prev, [v.name]: e.target.value }))
+                          }
+                          placeholder={v.default || "Enter value..."}
+                          className="flex-1"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-zinc-500">
+                    No variables found in your compose file.
+                  </div>
+                )}
+              </>
             )}
 
             <div className="pt-4 border-t border-zinc-800">
