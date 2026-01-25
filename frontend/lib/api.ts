@@ -4227,6 +4227,16 @@ export const api = {
       method: "POST",
     }),
 
+  syncDeploymentStatus: (agentId: string) =>
+    fetchAPI<{ message: string; synced: number; checked: number }>(`/agents/${agentId}/deployments/sync`, {
+      method: "POST",
+    }),
+
+  deleteDeployment: (agentId: string, deploymentId: string) =>
+    fetchAPI<{ message: string }>(`/agents/${agentId}/deployments/${deploymentId}`, {
+      method: "DELETE",
+    }),
+
   // Services view (cross-agent)
   listServices: () => fetchAPI<Array<{ service_name: string; environment: string; agent_count: number }>>("/services"),
 

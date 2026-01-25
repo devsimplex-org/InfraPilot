@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/client"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -920,6 +922,193 @@ func (h *Handler) updateDeploymentStatus(ctx context.Context, id, status, messag
 	}
 
 	return err
+}
+
+// ==================== Sync Deployment Status ====================
+
+// syncDeploymentStatus checks actual container state and updates deployment records
+func (h *Handler) syncDeploymentStatus(c *gin.Context) {
+	orgID := c.MustGet("org_id").(uuid.UUID)
+	agentID := c.Param("id")
+
+	// Get all "running" or "deploying" deployments with a container_id
+	rows, err := h.db.Query(c.Request.Context(), `
+		SELECT id, container_id, container_name, service_name
+		FROM deployments
+		WHERE org_id = $1 AND agent_id = $2
+		  AND status IN ('running', 'deploying')
+		  AND container_id IS NOT NULL
+	`, orgID, agentID)
+	if err != nil {
+		h.logger.Error("Failed to query deployments for sync", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query deployments"})
+		return
+	}
+	defer rows.Close()
+
+	type deploymentInfo struct {
+		ID            uuid.UUID
+		ContainerID   string
+		ContainerName *string
+		ServiceName   string
+	}
+	var deployments []deploymentInfo
+	for rows.Next() {
+		var d deploymentInfo
+		if err := rows.Scan(&d.ID, &d.ContainerID, &d.ContainerName, &d.ServiceName); err != nil {
+			continue
+		}
+		deployments = append(deployments, d)
+	}
+
+	if len(deployments) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"message": "no running deployments to sync",
+			"synced":  0,
+		})
+		return
+	}
+
+	// Connect to Docker to get actual container state
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		h.logger.Error("Failed to connect to Docker for sync", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to connect to Docker"})
+		return
+	}
+	defer cli.Close()
+
+	// List all containers (including stopped)
+	containers, err := cli.ContainerList(c.Request.Context(), container.ListOptions{All: true})
+	if err != nil {
+		h.logger.Error("Failed to list containers for sync", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list containers"})
+		return
+	}
+
+	// Build a map of existing container IDs
+	containerMap := make(map[string]string) // containerID -> state
+	for _, ctr := range containers {
+		containerMap[ctr.ID] = ctr.State
+		// Also check short ID (first 12 chars)
+		if len(ctr.ID) >= 12 {
+			containerMap[ctr.ID[:12]] = ctr.State
+		}
+	}
+
+	// Check each deployment and update if container is missing or stopped
+	syncedCount := 0
+	for _, d := range deployments {
+		state, exists := containerMap[d.ContainerID]
+		// Also try short ID match
+		if !exists && len(d.ContainerID) >= 12 {
+			state, exists = containerMap[d.ContainerID[:12]]
+		}
+
+		var newStatus, statusMessage string
+		if !exists {
+			newStatus = "stopped"
+			statusMessage = "Container no longer exists"
+		} else if state == "exited" || state == "dead" {
+			newStatus = "stopped"
+			statusMessage = fmt.Sprintf("Container %s", state)
+		}
+
+		if newStatus != "" {
+			_, err := h.db.Exec(c.Request.Context(), `
+				UPDATE deployments
+				SET status = $1, status_message = $2, updated_at = NOW()
+				WHERE id = $3
+			`, newStatus, statusMessage, d.ID)
+			if err != nil {
+				h.logger.Warn("Failed to update deployment status during sync",
+					zap.String("deployment_id", d.ID.String()),
+					zap.Error(err),
+				)
+				continue
+			}
+			h.logger.Info("Synced deployment status",
+				zap.String("deployment_id", d.ID.String()),
+				zap.String("service", d.ServiceName),
+				zap.String("new_status", newStatus),
+			)
+			syncedCount++
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": fmt.Sprintf("synced %d deployments", syncedCount),
+		"synced":  syncedCount,
+		"checked": len(deployments),
+	})
+}
+
+// ==================== Delete Deployment ====================
+
+// deleteDeployment removes a deployment record from the database
+func (h *Handler) deleteDeployment(c *gin.Context) {
+	orgID := c.MustGet("org_id").(uuid.UUID)
+	agentID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid agent ID"})
+		return
+	}
+	deploymentID, err := uuid.Parse(c.Param("did"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid deployment ID"})
+		return
+	}
+
+	// Check if deployment exists and get its status
+	var status string
+	var containerID *string
+	err = h.db.QueryRow(c.Request.Context(), `
+		SELECT status, container_id
+		FROM deployments
+		WHERE id = $1 AND org_id = $2 AND agent_id = $3
+	`, deploymentID, orgID, agentID).Scan(&status, &containerID)
+
+	if err != nil {
+		h.logger.Error("Deployment not found for delete", zap.Error(err))
+		c.JSON(http.StatusNotFound, gin.H{"error": "deployment not found"})
+		return
+	}
+
+	// If the container is still running, warn the user
+	if status == "running" && containerID != nil {
+		c.JSON(http.StatusConflict, gin.H{
+			"error":   "deployment has a running container",
+			"message": "Stop the container first or use force=true to delete anyway",
+		})
+		return
+	}
+
+	// Delete the deployment record
+	result, err := h.db.Exec(c.Request.Context(), `
+		DELETE FROM deployments
+		WHERE id = $1 AND org_id = $2 AND agent_id = $3
+	`, deploymentID, orgID, agentID)
+
+	if err != nil {
+		h.logger.Error("Failed to delete deployment", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete deployment"})
+		return
+	}
+
+	rowsAffected := result.RowsAffected()
+	if rowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "deployment not found"})
+		return
+	}
+
+	h.logger.Info("Deployment deleted",
+		zap.String("deployment_id", deploymentID.String()),
+		zap.String("agent_id", agentID.String()),
+	)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "deployment deleted successfully",
+	})
 }
 
 // ==================== List Services ====================

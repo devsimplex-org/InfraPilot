@@ -156,6 +156,7 @@ export function DeployWizard({
       setSecretMethod("env_vars");
       setEnvFileContent("");
       setEnvTabIndex(0);
+      setParseWarning(null);
       setSelectedNetworks([]);
       setNewNetworkName("");
       setNewNetworkDriver("bridge");
@@ -196,30 +197,44 @@ export function DeployWizard({
   };
 
   // Parse .env file content
-  const parseEnvContent = useCallback((content: string) => {
+  const parseEnvContent = useCallback((content: string): { parsed: EnvVar[]; skipped: string[] } => {
     const lines = content.split("\n");
     const parsed: EnvVar[] = [];
+    const skipped: string[] = [];
 
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith("#")) continue;
 
-      const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
-      if (match) {
-        const [, key, rawValue] = match;
-        let value = rawValue.trim();
+      // Find the first = sign to split key and value
+      const eqIndex = trimmed.indexOf("=");
+      if (eqIndex > 0) {
+        const key = trimmed.substring(0, eqIndex).trim();
+        let value = trimmed.substring(eqIndex + 1).trim();
+
+        // Remove surrounding quotes if present
         if (
           (value.startsWith('"') && value.endsWith('"')) ||
           (value.startsWith("'") && value.endsWith("'"))
         ) {
           value = value.slice(1, -1);
         }
-        parsed.push({ key, value, masked: true });
+
+        // Validate key format (warn but still allow)
+        if (key) {
+          parsed.push({ key, value, masked: true });
+        }
+      } else {
+        // Line doesn't contain =, skip it and record
+        skipped.push(trimmed);
       }
     }
 
-    return parsed;
+    return { parsed, skipped };
   }, []);
+
+  // State for parse warnings
+  const [parseWarning, setParseWarning] = useState<string | null>(null);
 
   // Handle .env file upload
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -229,9 +244,14 @@ export function DeployWizard({
       reader.onload = (evt) => {
         const content = evt.target?.result as string;
         setEnvFileContent(content);
-        const parsed = parseEnvContent(content);
+        const { parsed, skipped } = parseEnvContent(content);
         setEnvVars(parsed);
         setEnvTabIndex(0); // Switch to manual tab to show parsed vars
+        if (skipped.length > 0) {
+          setParseWarning(`${skipped.length} line(s) skipped (no KEY=value format): ${skipped.slice(0, 3).join(", ")}${skipped.length > 3 ? "..." : ""}`);
+        } else {
+          setParseWarning(null);
+        }
       };
       reader.readAsText(file);
     }
@@ -239,9 +259,34 @@ export function DeployWizard({
 
   // Handle paste .env content
   const handlePasteEnv = () => {
-    const parsed = parseEnvContent(envFileContent);
+    const { parsed, skipped } = parseEnvContent(envFileContent);
     setEnvVars(parsed);
     setEnvTabIndex(0);
+    if (skipped.length > 0) {
+      setParseWarning(`${skipped.length} line(s) skipped (no KEY=value format): ${skipped.slice(0, 3).join(", ")}${skipped.length > 3 ? "..." : ""}`);
+    } else {
+      setParseWarning(null);
+    }
+  };
+
+  // Handle paste in key input field - auto-parse KEY=VALUE format
+  const handleKeyPaste = (e: React.ClipboardEvent<HTMLInputElement>, index: number) => {
+    const pastedText = e.clipboardData.getData("text").trim();
+    // Check if pasted text contains = (likely KEY=VALUE format)
+    if (pastedText.includes("=")) {
+      e.preventDefault();
+      const { parsed } = parseEnvContent(pastedText);
+      if (parsed.length > 0) {
+        // Replace current empty row with first parsed, add rest
+        const updated = [...envVars];
+        updated[index] = parsed[0];
+        // Add remaining parsed vars after current index
+        for (let i = 1; i < parsed.length; i++) {
+          updated.splice(index + i, 0, parsed[i]);
+        }
+        setEnvVars(updated);
+      }
+    }
   };
 
   // Add env var
@@ -671,7 +716,8 @@ export function DeployWizard({
                                         type="text"
                                         value={envVar.key}
                                         onChange={(e) => updateEnvVar(idx, "key", e.target.value)}
-                                        placeholder="KEY"
+                                        onPaste={(e) => handleKeyPaste(e, idx)}
+                                        placeholder="KEY (or paste KEY=value)"
                                         className="flex-1 px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white placeholder-gray-400 text-sm font-mono"
                                       />
                                       <span className="text-gray-400">=</span>
@@ -738,6 +784,16 @@ export function DeployWizard({
                                   <Button variant="secondary" size="sm" onClick={handlePasteEnv} disabled={!envFileContent.trim()}>
                                     Parse & Import
                                   </Button>
+                                  {parseWarning && (
+                                    <div className="mt-2 p-2 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                                      <p className="text-xs text-yellow-700 dark:text-yellow-400">
+                                        {parseWarning}
+                                      </p>
+                                      <p className="text-xs text-yellow-600 dark:text-yellow-500 mt-1">
+                                        Env vars must be in KEY=value format (one per line)
+                                      </p>
+                                    </div>
+                                  )}
                                 </div>
                               </Tab.Panel>
                             </Tab.Panels>
