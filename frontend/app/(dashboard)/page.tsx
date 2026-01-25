@@ -146,7 +146,7 @@ export default function DashboardPage() {
           iconColor="text-blue-600 dark:text-blue-400"
           trend={runningContainers === totalContainers ? "up" : undefined}
           trendValue={runningContainers === totalContainers ? "All healthy" : undefined}
-          onClick={() => router.push("/docker/containers")}
+          onClick={() => router.push("/docker#containers")}
         />
 
         <StatCard
@@ -270,7 +270,7 @@ export default function DashboardPage() {
         <Card>
           <Card.Header
             action={
-              <Link href="/docker/containers" className="text-sm text-primary-600 hover:text-primary-700 dark:text-primary-400">
+              <Link href="/docker#containers" className="text-sm text-primary-600 hover:text-primary-700 dark:text-primary-400">
                 View all
               </Link>
             }
