@@ -11,6 +11,7 @@ import {
   FileCode,
   ExternalLink,
   RefreshCw,
+  RotateCcw,
   Download,
   Container,
   Clock,
@@ -41,6 +42,26 @@ export default function DeploymentsPage() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [environmentFilter, setEnvironmentFilter] = useState<string>("all");
   const [searchFilter, setSearchFilter] = useState("");
+  const [redeployingId, setRedeployingId] = useState<string | null>(null);
+
+  // Redeploy mutation
+  const redeployMutation = useMutation({
+    mutationFn: (deploymentId: string) => {
+      if (!selectedAgent) throw new Error("No agent selected");
+      return api.redeployDeployment(selectedAgent, deploymentId);
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["deployments", selectedAgent] });
+      setRedeployingId(null);
+      // Optionally select the new deployment
+      if (data.id) {
+        // The new deployment will appear in the list after refetch
+      }
+    },
+    onError: () => {
+      setRedeployingId(null);
+    },
+  });
 
   // Fetch agents
   const { data: agents } = useQuery({
