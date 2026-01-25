@@ -1049,7 +1049,7 @@ export interface ContainerConfigVolume {
   read_only?: boolean;
 }
 
-export interface ContainerConfig {
+export interface DeploymentContainerConfig {
   env_vars?: Record<string, string>;
   secrets?: ContainerConfigSecret[];
   secret_method?: "env_vars" | "docker_secrets";
@@ -1069,7 +1069,7 @@ export interface CreateDeploymentRequest {
   ci_provider?: string;
   ci_pipeline_id?: string;
   ci_build_url?: string;
-  container_config?: ContainerConfig;
+  container_config?: DeploymentContainerConfig;
 }
 
 // Type aliases for backward compatibility in DeployWizard
@@ -3641,13 +3641,6 @@ export const api = {
       `/agents/${agentId}/docker/images/${encodeURIComponent(imageId)}${force ? "?force=true" : ""}`,
       { method: "DELETE" }
     ),
-
-  // Aliases for DeployWizard compatibility
-  getNetworks: (agentId: string) =>
-    fetchAPI<DockerNetwork[]>(`/agents/${agentId}/docker/networks`),
-
-  getVolumes: (agentId: string) =>
-    fetchAPI<DockerVolume[]>(`/agents/${agentId}/docker/volumes`),
 
   // Logs
   getUnifiedLogs: (

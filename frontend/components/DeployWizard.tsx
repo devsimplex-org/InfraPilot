@@ -31,6 +31,7 @@ import { Button, Input } from "@/components/ui/page-layout";
 import {
   api,
   CreateDeploymentRequest,
+  DeploymentContainerConfig,
   NetworkInfo,
   VolumeInfo,
 } from "@/lib/api";
@@ -140,7 +141,7 @@ export function DeployWizard({
   // Fetch volumes for the default agent
   const { data: volumes, isLoading: volumesLoading } = useQuery({
     queryKey: ["volumes", defaultAgent?.id],
-    queryFn: () => api.getVolumes(defaultAgent!.id),
+    queryFn: () => api.getDockerVolumes(defaultAgent!.id),
     enabled: !!defaultAgent?.id && isOpen,
   });
 
@@ -455,7 +456,7 @@ export function DeployWizard({
       : undefined;
 
     // Build container_config
-    const containerConfig: CreateDeploymentRequest["container_config"] = {};
+    const containerConfig: DeploymentContainerConfig = {};
 
     if (Object.keys(envVarsMap).length > 0) {
       if (secretMethod === "env_vars") {
@@ -973,7 +974,7 @@ export function DeployWizard({
                             </div>
                           ) : (
                             <div className="space-y-2">
-                              {volumes?.map((volume) => {
+                              {volumes?.map((volume: VolumeInfo) => {
                                 const isSelected = selectedVolumes.some((v) => v.volumeName === volume.name);
                                 const selectedVol = selectedVolumes.find((v) => v.volumeName === volume.name);
                                 return (
