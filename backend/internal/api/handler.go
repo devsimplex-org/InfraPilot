@@ -199,6 +199,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				agents.GET("/:id/deployments/:did", h.getDeployment)
 				agents.GET("/:id/deployments/:did/spine", h.getDeploymentSpine)
 				agents.POST("/:id/deployments/:did/rollback", h.RequireModifyContainers(), h.rollbackDeployment)
+				agents.POST("/:id/deployments/:did/redeploy", h.RequireModifyContainers(), h.redeployDeployment)
 
 				// Webhooks (Epic 4: Dev Integration)
 				agents.GET("/:id/webhooks", h.listWebhooks)

@@ -4222,6 +4222,11 @@ export const api = {
       method: "POST",
     }),
 
+  redeployDeployment: (agentId: string, deploymentId: string) =>
+    fetchAPI<{ id: string; status: string; message: string }>(`/agents/${agentId}/deployments/${deploymentId}/redeploy`, {
+      method: "POST",
+    }),
+
   // Services view (cross-agent)
   listServices: () => fetchAPI<Array<{ service_name: string; environment: string; agent_count: number }>>("/services"),
 

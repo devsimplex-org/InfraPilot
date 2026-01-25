@@ -91,8 +91,8 @@ type ContainerConfigVolume struct {
 	ReadOnly        bool    `json:"read_only,omitempty"`
 }
 
-// ContainerConfig contains the extended container configuration
-type ContainerConfig struct {
+// DeploymentContainerConfig contains the extended container configuration for deployments
+type DeploymentContainerConfig struct {
 	EnvVars      map[string]string        `json:"env_vars,omitempty"`
 	Secrets      []ContainerConfigSecret  `json:"secrets,omitempty"`
 	SecretMethod string                   `json:"secret_method,omitempty"` // "env_vars" or "docker_secrets"
@@ -113,7 +113,7 @@ type CreateDeploymentRequest struct {
 	CIProvider      *string          `json:"ci_provider"`
 	CIPipelineID    *string          `json:"ci_pipeline_id"`
 	CIBuildURL      *string          `json:"ci_build_url"`
-	ContainerConfig *ContainerConfig `json:"container_config,omitempty"`
+	ContainerConfig *DeploymentContainerConfig `json:"container_config,omitempty"`
 }
 
 // ==================== List Deployments ====================
@@ -319,7 +319,7 @@ func (h *Handler) createDeployment(c *gin.Context) {
 
 // ==================== Deployment Pipeline ====================
 
-func (h *Handler) runDeploymentPipeline(ctx context.Context, orgID, deploymentID uuid.UUID, imageRepo, imageTag, imageDigest string, containerConfig *ContainerConfig) {
+func (h *Handler) runDeploymentPipeline(ctx context.Context, orgID, deploymentID uuid.UUID, imageRepo, imageTag, imageDigest string, containerConfig *DeploymentContainerConfig) {
 	logger := h.logger.With(
 		zap.String("deployment_id", deploymentID.String()),
 		zap.String("org_id", orgID.String()),
@@ -598,7 +598,7 @@ func (h *Handler) runDeploymentPipeline(ctx context.Context, orgID, deploymentID
 }
 
 // deployContainerToAgent sends a command to the agent to run a container
-func (h *Handler) deployContainerToAgent(ctx context.Context, deploymentID, agentID uuid.UUID, imageRef, serviceName, environment string, containerConfig *ContainerConfig) (*agentgrpc.ContainerRunResult, error) {
+func (h *Handler) deployContainerToAgent(ctx context.Context, deploymentID, agentID uuid.UUID, imageRef, serviceName, environment string, containerConfig *DeploymentContainerConfig) (*agentgrpc.ContainerRunResult, error) {
 	// Generate container name
 	containerName := fmt.Sprintf("%s-%s-%s", serviceName, environment, deploymentID.String()[:8])
 
@@ -789,6 +789,116 @@ func (h *Handler) rollbackDeployment(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"id":      newDeploymentID,
 		"message": "Rollback initiated successfully",
+	})
+}
+
+// ==================== Redeploy Deployment ====================
+
+func (h *Handler) redeployDeployment(c *gin.Context) {
+	orgID := c.MustGet("org_id").(uuid.UUID)
+	userID := c.MustGet("user_id").(uuid.UUID)
+	agentID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid agent ID"})
+		return
+	}
+	deploymentID, err := uuid.Parse(c.Param("did"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid deployment ID"})
+		return
+	}
+
+	// Fetch original deployment with all fields needed for redeployment
+	var original struct {
+		ServiceName     string
+		Environment     string
+		ImageRegistry   *string
+		ImageRepository string
+		ImageTag        *string
+		ImageDigest     *string
+		GitRepo         *string
+		GitBranch       *string
+		GitCommit       *string
+		CIProvider      *string
+		CIPipelineID    *string
+		CIBuildURL      *string
+		ContainerConfig []byte
+	}
+
+	err = h.db.QueryRow(c.Request.Context(), `
+		SELECT service_name, environment, image_registry, image_repository,
+		       image_tag, image_digest, git_repo, git_branch, git_commit,
+		       ci_provider, ci_pipeline_id, ci_build_url, container_config
+		FROM deployments
+		WHERE id = $1 AND org_id = $2 AND agent_id = $3
+	`, deploymentID, orgID, agentID).Scan(
+		&original.ServiceName, &original.Environment, &original.ImageRegistry, &original.ImageRepository,
+		&original.ImageTag, &original.ImageDigest, &original.GitRepo, &original.GitBranch, &original.GitCommit,
+		&original.CIProvider, &original.CIPipelineID, &original.CIBuildURL, &original.ContainerConfig,
+	)
+
+	if err != nil {
+		h.logger.Error("Deployment not found for redeploy", zap.Error(err))
+		c.JSON(http.StatusNotFound, gin.H{"error": "deployment not found"})
+		return
+	}
+
+	// Create new deployment copying all configuration from the original
+	newID := uuid.New()
+	_, err = h.db.Exec(c.Request.Context(), `
+		INSERT INTO deployments (
+			id, org_id, agent_id, service_name, environment,
+			image_registry, image_repository, image_tag, image_digest,
+			git_repo, git_branch, git_commit,
+			ci_provider, ci_pipeline_id, ci_build_url,
+			container_config, replaces_deployment_id,
+			status, deployed_by, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 'pending', $18, NOW(), NOW())
+	`, newID, orgID, agentID, original.ServiceName, original.Environment,
+		original.ImageRegistry, original.ImageRepository, original.ImageTag, original.ImageDigest,
+		original.GitRepo, original.GitBranch, original.GitCommit,
+		original.CIProvider, original.CIPipelineID, original.CIBuildURL,
+		original.ContainerConfig, deploymentID, userID,
+	)
+
+	if err != nil {
+		h.logger.Error("Failed to create redeploy deployment", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create redeployment"})
+		return
+	}
+
+	h.logger.Info("Redeployment created",
+		zap.String("original_deployment", deploymentID.String()),
+		zap.String("new_deployment", newID.String()),
+		zap.String("service", original.ServiceName),
+	)
+
+	// Parse container config for pipeline
+	var containerConfig *DeploymentContainerConfig
+	if len(original.ContainerConfig) > 0 {
+		if err := json.Unmarshal(original.ContainerConfig, &containerConfig); err != nil {
+			h.logger.Warn("Failed to parse container config for redeploy", zap.Error(err))
+		}
+	}
+
+	// Prepare image tag and digest for pipeline
+	imageTag := ""
+	if original.ImageTag != nil {
+		imageTag = *original.ImageTag
+	}
+	imageDigest := ""
+	if original.ImageDigest != nil {
+		imageDigest = *original.ImageDigest
+	}
+
+	// Trigger deployment pipeline asynchronously
+	go h.runDeploymentPipeline(context.Background(), orgID, newID,
+		original.ImageRepository, imageTag, imageDigest, containerConfig)
+
+	c.JSON(http.StatusOK, gin.H{
+		"id":      newID.String(),
+		"status":  "pending",
+		"message": "Redeployment created and pipeline initiated",
 	})
 }
 

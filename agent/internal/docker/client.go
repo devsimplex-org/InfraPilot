@@ -1357,6 +1357,10 @@ func (c *Client) RunContainerExtended(ctx context.Context, cfg ContainerRunExten
 
 	// Add volume mounts
 	for _, volCfg := range cfg.Volumes {
+		// Skip volumes with empty or invalid mount paths
+		if volCfg.MountPath == "" || volCfg.MountPath == "/" {
+			continue
+		}
 		if volCfg.HostPath != "" {
 			// Bind mount
 			mounts = append(mounts, mount.Mount{

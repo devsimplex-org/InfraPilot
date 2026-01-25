@@ -430,10 +430,14 @@ export function DeployWizard({
       }));
     }
 
-    if (selectedVolumes.length > 0) {
-      containerConfig.volumes = selectedVolumes.map((v) => ({
+    // Filter out volumes with empty or invalid mount paths
+    const validVolumes = selectedVolumes.filter(
+      (v) => v.mountPath.trim() !== "" && v.mountPath.trim() !== "/"
+    );
+    if (validVolumes.length > 0) {
+      containerConfig.volumes = validVolumes.map((v) => ({
         volume_name: v.volumeName,
-        mount_path: v.mountPath,
+        mount_path: v.mountPath.trim(),
         create_if_missing: v.isNew,
         host_path: v.hostPath,
         read_only: v.readOnly,
