@@ -25,13 +25,23 @@ import {
   FileText,
   Globe,
   FolderOpen,
+  Download,
+  Plus,
+  Tag,
+  Shield,
+  CheckSquare,
+  MinusSquare,
+  Rocket,
+  AlertTriangle,
+  X,
+  Database,
 } from "lucide-react";
 import { api, Container, DockerImage, DockerVolume, DockerNetwork } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
-import { Tabs, Button } from "@/components/ui/page-layout";
+import { Tabs, Button, Input } from "@/components/ui/page-layout";
 import { Table } from "@/components/ui/Table";
 import { Badge } from "@/components/ui/Badge";
 import { StatusIndicator } from "@/components/ui/StatusIndicator";
@@ -39,7 +49,10 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Spinner } from "@/components/ui/Spinner";
 import { SlideOver } from "@/components/ui/SlideOver";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { FilterPanel } from "@/components/ui/FilterPanel";
 import { Terminal } from "@/components/containers/Terminal";
+import { ScanModal, ScanImage } from "@/components/ui/ScanModal";
+import { DeployWizard } from "@/components/DeployWizard";
 
 const tabs = [
   { id: "overview", label: "Overview" },
@@ -50,6 +63,7 @@ const tabs = [
 ];
 
 type ContainerPanelTab = "details" | "logs" | "terminal";
+type StatusFilter = "all" | "running" | "exited" | "paused";
 
 export default function DockerPage() {
   const router = useRouter();
@@ -76,6 +90,36 @@ export default function DockerPage() {
   const [containerPanelTab, setContainerPanelTab] = useState<ContainerPanelTab>("details");
   const [logsTail, setLogsTail] = useState(100);
   const [copied, setCopied] = useState<string | null>(null);
+
+  // Container filters
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [searchFilter, setSearchFilter] = useState("");
+
+  // Image multi-selection
+  const [selectedImageIds, setSelectedImageIds] = useState<Set<string>>(new Set());
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
+  const [bulkDeleteProgress, setBulkDeleteProgress] = useState<{
+    total: number;
+    completed: number;
+    failed: string[];
+  } | null>(null);
+
+  // Image modals
+  const [showPullModal, setShowPullModal] = useState(false);
+  const [pullImageRef, setPullImageRef] = useState("");
+  const [pullError, setPullError] = useState<string | null>(null);
+  const [showScanModal, setShowScanModal] = useState(false);
+  const [scanImages, setScanImages] = useState<ScanImage[]>([]);
+
+  // Deploy dialog
+  const [showDeployWizard, setShowDeployWizard] = useState(false);
+  const [deployImageInfo, setDeployImageInfo] = useState<{ repository: string; tag: string } | null>(null);
+
+  // Volume create modal
+  const [showCreateVolumeModal, setShowCreateVolumeModal] = useState(false);
+  const [newVolumeName, setNewVolumeName] = useState("");
+  const [newVolumeDriver, setNewVolumeDriver] = useState("local");
+  const [createVolumeError, setCreateVolumeError] = useState<string | null>(null);
 
   // Delete modals
   const [showDeleteContainerModal, setShowDeleteContainerModal] = useState(false);
@@ -124,6 +168,11 @@ export default function DockerPage() {
       setSelectedAgent(activeAgents[0].id);
     }
   }, [activeAgents, selectedAgent]);
+
+  // Clear image selection when agent changes
+  useEffect(() => {
+    setSelectedImageIds(new Set());
+  }, [selectedAgent]);
 
   // Fetch containers
   const { data: containers, isLoading: loadingContainers } = useQuery({
@@ -204,6 +253,17 @@ export default function DockerPage() {
   });
 
   // Image mutations
+  const pullMutation = useMutation({
+    mutationFn: () => api.pullDockerImage(selectedAgent, pullImageRef),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["docker-images", selectedAgent] });
+      setShowPullModal(false);
+      setPullImageRef("");
+      setPullError(null);
+    },
+    onError: (error: Error) => setPullError(error.message),
+  });
+
   const deleteImageMutation = useMutation({
     mutationFn: () => api.deleteDockerImage(selectedAgent, selectedImage!.id, forceDelete),
     onSuccess: () => {
@@ -217,6 +277,19 @@ export default function DockerPage() {
   });
 
   // Volume mutations
+  const createVolumeMutation = useMutation({
+    mutationFn: () =>
+      api.createDockerVolume(selectedAgent, { name: newVolumeName, driver: newVolumeDriver }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["docker-volumes", selectedAgent] });
+      setShowCreateVolumeModal(false);
+      setNewVolumeName("");
+      setNewVolumeDriver("local");
+      setCreateVolumeError(null);
+    },
+    onError: (error: Error) => setCreateVolumeError(error.message),
+  });
+
   const deleteVolumeMutation = useMutation({
     mutationFn: () => api.deleteDockerVolume(selectedAgent, selectedVolume!.name, forceDelete),
     onSuccess: () => {
@@ -249,6 +322,121 @@ export default function DockerPage() {
     }
   }, [containers, selectedContainer]);
 
+  // Filter containers
+  const filteredContainers = containers?.filter((container) => {
+    const matchesStatus = statusFilter === "all" || container.status === statusFilter;
+    const matchesSearch = !searchFilter ||
+      container.name.toLowerCase().includes(searchFilter.toLowerCase()) ||
+      container.image.toLowerCase().includes(searchFilter.toLowerCase());
+    return matchesStatus && matchesSearch;
+  }) || [];
+
+  // Image selection helpers
+  const toggleImageSelection = (id: string) => {
+    setSelectedImageIds((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  };
+
+  const selectAllImages = () => {
+    if (images) {
+      setSelectedImageIds(new Set(images.map((img) => img.id)));
+    }
+  };
+
+  const selectNoImages = () => {
+    setSelectedImageIds(new Set());
+  };
+
+  const selectUnusedImages = () => {
+    if (images) {
+      setSelectedImageIds(new Set(images.filter((img) => img.used_by.length === 0).map((img) => img.id)));
+    }
+  };
+
+  const selectDanglingImages = () => {
+    if (images) {
+      setSelectedImageIds(new Set(images.filter((img) => img.tags.length === 0).map((img) => img.id)));
+    }
+  };
+
+  const isAllImagesSelected = images && images.length > 0 && selectedImageIds.size === images.length;
+  const isSomeImagesSelected = selectedImageIds.size > 0 && !isAllImagesSelected;
+  const selectedImagesData = images?.filter((img) => selectedImageIds.has(img.id)) || [];
+  const selectedImagesSize = selectedImagesData.reduce((sum, img) => sum + img.size, 0);
+  const unusedImagesCount = images?.filter((img) => img.used_by.length === 0).length || 0;
+  const danglingImagesCount = images?.filter((img) => img.tags.length === 0).length || 0;
+
+  // Scan helpers
+  const getImageReference = (image: DockerImage): string => {
+    if (image.tags.length > 0) return image.tags[0];
+    if (image.repo_digests.length > 0) return image.repo_digests[0];
+    return image.id;
+  };
+
+  const handleScanSelected = () => {
+    const imagesToScan: ScanImage[] = selectedImagesData.map((img) => ({
+      reference: getImageReference(img),
+      digest: img.repo_digests[0]?.split("@")[1],
+      tag: img.tags[0]?.split(":")[1],
+    }));
+    setScanImages(imagesToScan);
+    setShowScanModal(true);
+  };
+
+  const handleScanSingle = (image: DockerImage) => {
+    setScanImages([{
+      reference: getImageReference(image),
+      digest: image.repo_digests[0]?.split("@")[1],
+      tag: image.tags[0]?.split(":")[1],
+    }]);
+    setShowScanModal(true);
+  };
+
+  const handleDeploy = (image: DockerImage) => {
+    const tag = image.tags[0] || "";
+    const parts = tag.split(":");
+    const repository = parts.slice(0, -1).join(":") || parts[0] || image.id;
+    const tagName = parts.length > 1 ? parts[parts.length - 1] : "latest";
+    setDeployImageInfo({ repository, tag: tagName });
+    setShowDeployWizard(true);
+  };
+
+  // Bulk delete
+  const handleBulkDeleteImages = async () => {
+    if (!selectedAgent || selectedImageIds.size === 0) return;
+
+    const imagesToDelete = Array.from(selectedImageIds);
+    setBulkDeleteProgress({ total: imagesToDelete.length, completed: 0, failed: [] });
+
+    const failed: string[] = [];
+
+    for (let i = 0; i < imagesToDelete.length; i++) {
+      try {
+        await api.deleteDockerImage(selectedAgent, imagesToDelete[i], forceDelete);
+      } catch (error) {
+        const img = images?.find((img) => img.id === imagesToDelete[i]);
+        failed.push(img?.tags[0] || imagesToDelete[i].slice(0, 12));
+      }
+      setBulkDeleteProgress({ total: imagesToDelete.length, completed: i + 1, failed });
+    }
+
+    queryClient.invalidateQueries({ queryKey: ["docker-images", selectedAgent] });
+
+    if (failed.length === 0) {
+      setShowBulkDeleteModal(false);
+      setSelectedImageIds(new Set());
+      setBulkDeleteProgress(null);
+      setForceDelete(false);
+    }
+  };
+
   // Metrics
   const containerMetrics = {
     total: containers?.length || 0,
@@ -259,6 +447,7 @@ export default function DockerPage() {
   const imageMetrics = {
     total: images?.length || 0,
     totalSize: images?.reduce((sum, img) => sum + img.size, 0) || 0,
+    inUse: images?.filter(img => img.used_by && img.used_by.length > 0).length || 0,
   };
 
   const volumeMetrics = {
@@ -290,66 +479,172 @@ export default function DockerPage() {
     setTimeout(() => setCopied(null), 2000);
   };
 
-  // Table columns
+  const getImageName = (image: DockerImage) => {
+    if (image.tags.length > 0) return image.tags[0].split(":")[0];
+    return `<none>`;
+  };
+
+  const getImageTag = (image: DockerImage) => {
+    if (image.tags.length > 0) {
+      const parts = image.tags[0].split(":");
+      return parts.length > 1 ? parts[1] : "latest";
+    }
+    return image.id.slice(0, 12);
+  };
+
+  // Table columns - Containers (with filters)
   const containerColumns = [
     {
       key: "status",
       header: "Status",
-      width: "100px",
+      width: "120px",
       render: (value: string) => (
         <StatusIndicator status={getStatusLevel(value)} label={value} size="sm" />
       ),
     },
     {
       key: "name",
-      header: "Name",
+      header: "Container Name",
       render: (value: string, row: Container) => (
         <div>
           <div className="font-medium text-gray-900 dark:text-white">{value}</div>
-          <div className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[200px]">{row.image}</div>
+          <div className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-xs">{row.image}</div>
         </div>
+      ),
+    },
+    {
+      key: "stack_name",
+      header: "Stack",
+      render: (value: string) => value ? (
+        <Badge size="sm">
+          <Layers className="h-3 w-3" />
+          {value}
+        </Badge>
+      ) : (
+        <span className="text-gray-400 text-sm">Standalone</span>
       ),
     },
     {
       key: "cpu_percent",
       header: "CPU",
       align: "right" as const,
-      render: (value: number) => <span className="text-sm">{value?.toFixed(1) || 0}%</span>,
+      render: (value: number) => (
+        <div className="flex items-center gap-1 justify-end text-sm">
+          <Cpu className="h-3 w-3 text-gray-400" />
+          <span>{value?.toFixed(1) || 0}%</span>
+        </div>
+      ),
     },
     {
       key: "memory_mb",
       header: "Memory",
       align: "right" as const,
-      render: (value: number) => <span className="text-sm">{value || 0} MB</span>,
+      render: (value: number, row: Container) => (
+        <div className="flex items-center gap-1 justify-end text-sm">
+          <MemoryStick className="h-3 w-3 text-gray-400" />
+          <span>
+            {value || 0} MB
+            {row.memory_limit_mb && row.memory_limit_mb > 0 && (
+              <span className="text-gray-400"> / {row.memory_limit_mb} MB</span>
+            )}
+          </span>
+        </div>
+      ),
+    },
+    {
+      key: "actions",
+      header: "",
+      width: "100px",
+      render: (_: unknown, row: Container) => (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            router.push(`/docker/containers/${selectedAgent}/${row.container_id}`);
+          }}
+          className="flex items-center gap-1 text-xs text-primary-600 dark:text-primary-400 hover:underline"
+        >
+          <ExternalLink className="h-3 w-3" />
+          Details
+        </button>
+      ),
     },
   ];
 
+  // Table columns - Images (with checkbox)
   const imageColumns = [
     {
-      key: "image_name",
-      header: "Name",
-      render: (_: unknown, row: DockerImage) => {
-        const name = row.tags.length > 0 ? row.tags[0].split(":")[0] : "<none>";
-        return (
-          <div className="flex items-center gap-2">
-            <ImageIcon className="h-4 w-4 text-gray-400" />
-            <div>
-              <div className="font-medium text-gray-900 dark:text-white">{name}</div>
-              <div className="text-xs text-gray-500 font-mono">{row.id.slice(0, 12)}</div>
-            </div>
-          </div>
-        );
-      },
+      key: "checkbox",
+      header: (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (isAllImagesSelected) {
+              selectNoImages();
+            } else {
+              selectAllImages();
+            }
+          }}
+          className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
+        >
+          {isAllImagesSelected ? (
+            <CheckSquare className="h-4 w-4 text-primary-600" />
+          ) : isSomeImagesSelected ? (
+            <MinusSquare className="h-4 w-4 text-primary-600" />
+          ) : (
+            <Square className="h-4 w-4 text-gray-400" />
+          )}
+        </button>
+      ),
+      width: "40px",
+      render: (_: unknown, row: DockerImage) => (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleImageSelection(row.id);
+          }}
+          className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
+        >
+          {selectedImageIds.has(row.id) ? (
+            <CheckSquare className="h-4 w-4 text-primary-600" />
+          ) : (
+            <Square className="h-4 w-4 text-gray-400" />
+          )}
+        </button>
+      ),
     },
     {
-      key: "image_tag",
-      header: "Tag",
-      render: (_: unknown, row: DockerImage) => {
-        if (row.tags.length === 0) return <span className="text-gray-400">-</span>;
-        const tag = row.tags[0].includes(":") ? row.tags[0].split(":")[1] : "latest";
+      key: "name",
+      header: "Image Name",
+      sortable: true,
+      render: (_: unknown, row: DockerImage) => (
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-gray-100 dark:bg-gray-800">
+            <ImageIcon className="h-5 w-5 text-gray-500" />
+          </div>
+          <div>
+            <p className="font-medium text-gray-900 dark:text-white">{getImageName(row)}</p>
+            <p className="text-xs text-gray-500 font-mono">{row.id.slice(0, 12)}</p>
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "tags",
+      header: "Tags",
+      render: (value: string[]) => {
+        if (value.length === 0) {
+          return (
+            <Badge className="px-2 py-1 text-xs bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 rounded border-0">
+              No tags
+            </Badge>
+          );
+        }
+        const tag = getImageTag({ tags: value } as DockerImage);
         return (
-          <Badge className="px-2 py-0.5 text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 rounded border-0">
+          <Badge className="px-2 py-1 text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 rounded border-0">
+            <Tag className="h-3 w-3 mr-1" />
             {tag}
+            {value.length > 1 && ` +${value.length - 1}`}
           </Badge>
         );
       },
@@ -357,23 +652,16 @@ export default function DockerPage() {
     {
       key: "size",
       header: "Size",
+      sortable: true,
       align: "right" as const,
       render: (value: number) => <span className="text-sm">{formatSize(value)}</span>,
     },
-  ];
-
-  const volumeColumns = [
     {
-      key: "name",
-      header: "Name",
-      render: (value: string, row: DockerVolume) => (
-        <div className="flex items-center gap-2">
-          <HardDrive className="h-4 w-4 text-gray-400" />
-          <div>
-            <div className="font-medium text-gray-900 dark:text-white truncate max-w-[200px]">{value}</div>
-            <div className="text-xs text-gray-500">{row.driver} driver</div>
-          </div>
-        </div>
+      key: "created",
+      header: "Created",
+      sortable: true,
+      render: (value: string) => (
+        <span className="text-sm text-gray-500">{new Date(value).toLocaleDateString()}</span>
       ),
     },
     {
@@ -382,16 +670,65 @@ export default function DockerPage() {
       align: "center" as const,
       render: (value: string[]) => {
         return value.length > 0 ? (
-          <Badge className="px-2 py-0.5 text-xs bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 rounded border-0">
+          <Badge className="px-2 py-1 text-xs bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 rounded border-0">
+            {value.length} container{value.length !== 1 ? "s" : ""}
+          </Badge>
+        ) : null;
+      },
+    },
+  ];
+
+  // Table columns - Volumes
+  const volumeColumns = [
+    {
+      key: "name",
+      header: "Volume Name",
+      sortable: true,
+      render: (value: string, row: DockerVolume) => (
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-gray-100 dark:bg-gray-800">
+            <HardDrive className="h-5 w-5 text-gray-500" />
+          </div>
+          <div>
+            <p className="font-medium text-gray-900 dark:text-white truncate max-w-[200px]">{value}</p>
+            <p className="text-xs text-gray-500">{row.driver} driver</p>
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "mountpoint",
+      header: "Mount Point",
+      render: (value: string) => (
+        <Badge className="px-2 py-1 text-xs bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 rounded font-mono border-0">
+          {value.length > 40 ? `...${value.slice(-37)}` : value}
+        </Badge>
+      ),
+    },
+    {
+      key: "scope",
+      header: "Scope",
+      sortable: true,
+    },
+    {
+      key: "used_by",
+      header: "In Use",
+      align: "center" as const,
+      render: (value: string[]) => {
+        return value.length > 0 ? (
+          <Badge className="px-2 py-1 text-xs bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 rounded border-0">
             {value.length} container{value.length !== 1 ? "s" : ""}
           </Badge>
         ) : (
-          <span className="text-gray-400 text-xs">Unused</span>
+          <Badge className="px-2 py-1 text-xs bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 rounded border-0">
+            Unused
+          </Badge>
         );
       },
     },
   ];
 
+  // Table columns - Networks
   const networkColumns = [
     {
       key: "name",
@@ -416,6 +753,11 @@ export default function DockerPage() {
       ),
     },
     {
+      key: "scope",
+      header: "Scope",
+      sortable: true,
+    },
+    {
       key: "containers",
       header: "Containers",
       align: "center" as const,
@@ -434,17 +776,31 @@ export default function DockerPage() {
         description="Manage containers, images, volumes, and networks"
         action={
           activeAgents.length > 0 && (
-            <select
-              value={selectedAgent}
-              onChange={(e) => setSelectedAgent(e.target.value)}
-              className="px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm"
-            >
-              {activeAgents.map((agent) => (
-                <option key={agent.id} value={agent.id}>
-                  {agent.name} ({agent.hostname || "unknown host"})
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center gap-3">
+              <select
+                value={selectedAgent}
+                onChange={(e) => setSelectedAgent(e.target.value)}
+                className="px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm"
+              >
+                {activeAgents.map((agent) => (
+                  <option key={agent.id} value={agent.id}>
+                    {agent.name} ({agent.hostname || "unknown host"})
+                  </option>
+                ))}
+              </select>
+              {activeTab === "images" && (
+                <Button variant="primary" size="sm" onClick={() => setShowPullModal(true)}>
+                  <Download className="h-4 w-4 mr-1" />
+                  Pull Image
+                </Button>
+              )}
+              {activeTab === "volumes" && (
+                <Button variant="primary" size="sm" onClick={() => setShowCreateVolumeModal(true)}>
+                  <Plus className="h-4 w-4 mr-1" />
+                  Create Volume
+                </Button>
+              )}
+            </div>
           )
         }
       />
@@ -475,7 +831,7 @@ export default function DockerPage() {
                   {loadingContainers ? (
                     <div className="flex items-center justify-center h-32"><Spinner size="md" /></div>
                   ) : containers && containers.length > 0 ? (
-                    <Table data={containers.slice(0, 5)} columns={containerColumns} keyExtractor={(row) => row.container_id} onRowClick={(row) => { setSelectedContainer(row); setContainerPanelTab("details"); }} hoverable />
+                    <Table data={containers.slice(0, 5)} columns={containerColumns.slice(0, -1)} keyExtractor={(row) => row.container_id} onRowClick={(row) => { setSelectedContainer(row); setContainerPanelTab("details"); }} hoverable />
                   ) : (
                     <EmptyState icon={ContainerIcon} title="No containers" description="No containers are running on this agent" />
                   )}
@@ -490,7 +846,7 @@ export default function DockerPage() {
                   {loadingImages ? (
                     <div className="flex items-center justify-center h-32"><Spinner size="md" /></div>
                   ) : images && images.length > 0 ? (
-                    <Table data={images.slice(0, 5)} columns={imageColumns} keyExtractor={(row) => row.id} onRowClick={(row) => setSelectedImage(row)} hoverable />
+                    <Table data={images.slice(0, 5)} columns={imageColumns.slice(1, -1)} keyExtractor={(row) => row.id} onRowClick={(row) => setSelectedImage(row)} hoverable />
                   ) : (
                     <EmptyState icon={ImageIcon} title="No images" description="No images are available on this agent" />
                   )}
@@ -505,7 +861,7 @@ export default function DockerPage() {
                   {loadingVolumes ? (
                     <div className="flex items-center justify-center h-32"><Spinner size="md" /></div>
                   ) : volumes && volumes.length > 0 ? (
-                    <Table data={volumes.slice(0, 5)} columns={volumeColumns} keyExtractor={(row) => row.name} onRowClick={(row) => setSelectedVolume(row)} hoverable />
+                    <Table data={volumes.slice(0, 5)} columns={volumeColumns.slice(0, 2)} keyExtractor={(row) => row.name} onRowClick={(row) => setSelectedVolume(row)} hoverable />
                   ) : (
                     <EmptyState icon={HardDrive} title="No volumes" description="No volumes are configured on this agent" />
                   )}
@@ -520,7 +876,7 @@ export default function DockerPage() {
                   {loadingNetworks ? (
                     <div className="flex items-center justify-center h-32"><Spinner size="md" /></div>
                   ) : networks && networks.length > 0 ? (
-                    <Table data={networks.slice(0, 5)} columns={networkColumns} keyExtractor={(row) => row.id} onRowClick={(row) => setSelectedNetwork(row)} hoverable />
+                    <Table data={networks.slice(0, 5)} columns={networkColumns.slice(0, 3)} keyExtractor={(row) => row.id} onRowClick={(row) => setSelectedNetwork(row)} hoverable />
                   ) : (
                     <EmptyState icon={Network} title="No networks" description="No networks are configured on this agent" />
                   )}
@@ -539,35 +895,144 @@ export default function DockerPage() {
                 <StatCard label="CPU Usage" value={`${(containers?.reduce((sum, c) => sum + (c.cpu_percent || 0), 0) || 0).toFixed(1)}%`} icon={Cpu} iconColor="text-purple-600 dark:text-purple-400" />
               </MetricsGrid>
 
-              {loadingContainers ? (
-                <div className="flex items-center justify-center h-64"><Spinner size="lg" /></div>
-              ) : containers && containers.length > 0 ? (
-                <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
-                  <Table data={containers} columns={containerColumns} keyExtractor={(row) => row.container_id} onRowClick={(row) => { setSelectedContainer(row); setContainerPanelTab("details"); }} hoverable />
+              <div className="flex gap-6">
+                {/* Filters Sidebar */}
+                <div className="w-64 flex-shrink-0">
+                  <FilterPanel
+                    filters={[
+                      {
+                        id: "status",
+                        label: "Status",
+                        type: "radio",
+                        options: [
+                          { label: "All", value: "all", count: containerMetrics.total },
+                          { label: "Running", value: "running", count: containerMetrics.running },
+                          { label: "Stopped", value: "exited", count: containerMetrics.stopped },
+                        ],
+                        value: statusFilter,
+                        onChange: (value) => setStatusFilter(value as StatusFilter),
+                      },
+                      {
+                        id: "search",
+                        label: "Search",
+                        type: "search",
+                        value: searchFilter,
+                        onChange: (value) => setSearchFilter(value as string),
+                      },
+                    ]}
+                    onReset={() => {
+                      setStatusFilter("all");
+                      setSearchFilter("");
+                    }}
+                  />
                 </div>
-              ) : (
-                <EmptyState icon={ContainerIcon} title="No containers" description="No containers are running on this agent" />
-              )}
+
+                {/* Containers Table */}
+                <div className="flex-1 min-w-0">
+                  {loadingContainers ? (
+                    <div className="flex items-center justify-center h-64"><Spinner size="lg" /></div>
+                  ) : filteredContainers.length > 0 ? (
+                    <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
+                      <Table
+                        data={filteredContainers}
+                        columns={containerColumns}
+                        keyExtractor={(row) => row.container_id}
+                        onRowClick={(row) => { setSelectedContainer(row); setContainerPanelTab("details"); }}
+                        selectedRows={selectedContainer ? new Set([selectedContainer.container_id]) : undefined}
+                        hoverable
+                      />
+                    </div>
+                  ) : (
+                    <EmptyState
+                      icon={ContainerIcon}
+                      title="No containers found"
+                      description={containers?.length === 0 ? "Make sure Docker is running and containers are deployed" : "No containers match the current filters"}
+                    />
+                  )}
+                </div>
+              </div>
             </div>
           )}
 
           {/* Images Tab */}
           {activeTab === "images" && (
             <div className="space-y-4">
-              <MetricsGrid columns={3}>
+              <MetricsGrid columns={4}>
                 <StatCard label="Total Images" value={imageMetrics.total} icon={ImageIcon} iconColor="text-purple-600 dark:text-purple-400" />
-                <StatCard label="Total Size" value={formatSize(imageMetrics.totalSize)} icon={HardDrive} iconColor="text-blue-600 dark:text-blue-400" />
-                <StatCard label="In Use" value={images?.filter(img => img.used_by && img.used_by.length > 0).length || 0} icon={Layers} iconColor="text-green-600 dark:text-green-400" />
+                <StatCard label="Total Size" value={formatSize(imageMetrics.totalSize)} icon={Layers} iconColor="text-blue-600 dark:text-blue-400" />
+                <StatCard label="In Use" value={imageMetrics.inUse} icon={Tag} iconColor="text-green-600 dark:text-green-400" />
+                <StatCard label="Vulnerabilities" value={0} icon={Shield} iconColor="text-orange-600 dark:text-orange-400" />
               </MetricsGrid>
+
+              {/* Selection Action Bar */}
+              {images && images.length > 0 && (
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-500 dark:text-gray-400">Quick select:</span>
+                    <button onClick={selectAllImages} className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors">
+                      All ({images.length})
+                    </button>
+                    <button onClick={selectUnusedImages} disabled={unusedImagesCount === 0} className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                      Unused ({unusedImagesCount})
+                    </button>
+                    <button onClick={selectDanglingImages} disabled={danglingImagesCount === 0} className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                      Dangling ({danglingImagesCount})
+                    </button>
+                    {selectedImageIds.size > 0 && (
+                      <button onClick={selectNoImages} className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors">
+                        Clear
+                      </button>
+                    )}
+                  </div>
+
+                  {selectedImageIds.size > 0 && (
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm text-gray-700 dark:text-gray-300">
+                        <strong>{selectedImageIds.size}</strong> selected ({formatSize(selectedImagesSize)})
+                      </span>
+                      <Button variant="secondary" size="sm" onClick={handleScanSelected}>
+                        <Shield className="h-4 w-4 mr-1" />
+                        Scan Selected
+                      </Button>
+                      <Button variant="danger" size="sm" onClick={() => setShowBulkDeleteModal(true)}>
+                        <Trash2 className="h-4 w-4 mr-1" />
+                        Delete Selected
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {loadingImages ? (
                 <div className="flex items-center justify-center h-64"><Spinner size="lg" /></div>
               ) : images && images.length > 0 ? (
                 <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
-                  <Table data={images} columns={imageColumns} keyExtractor={(row) => row.id} onRowClick={(row) => setSelectedImage(row)} hoverable />
+                  <Table
+                    data={images}
+                    columns={imageColumns}
+                    keyExtractor={(row) => row.id}
+                    onRowClick={(row) => setSelectedImage(row)}
+                    hoverable
+                    rowClassName={(row) =>
+                      cn(
+                        selectedImage?.id === row.id && "bg-primary-50 dark:bg-primary-900/20",
+                        selectedImageIds.has(row.id) && "bg-blue-50 dark:bg-blue-900/10"
+                      )
+                    }
+                  />
                 </div>
               ) : (
-                <EmptyState icon={ImageIcon} title="No images" description="No images are available on this agent" />
+                <EmptyState
+                  icon={ImageIcon}
+                  title="No images found"
+                  description="Pull a Docker image to get started"
+                  action={
+                    <Button variant="primary" onClick={() => setShowPullModal(true)}>
+                      <Download className="h-4 w-4 mr-1" />
+                      Pull Image
+                    </Button>
+                  }
+                />
               )}
             </div>
           )}
@@ -575,20 +1040,38 @@ export default function DockerPage() {
           {/* Volumes Tab */}
           {activeTab === "volumes" && (
             <div className="space-y-4">
-              <MetricsGrid columns={3}>
-                <StatCard label="Total Volumes" value={volumeMetrics.total} icon={HardDrive} iconColor="text-green-600 dark:text-green-400" />
-                <StatCard label="In Use" value={volumeMetrics.inUse} icon={Layers} iconColor="text-blue-600 dark:text-blue-400" />
-                <StatCard label="Unused" value={volumeMetrics.total - volumeMetrics.inUse} icon={Box} iconColor="text-gray-600 dark:text-gray-400" />
+              <MetricsGrid columns={4}>
+                <StatCard label="Total Volumes" value={volumeMetrics.total} icon={HardDrive} iconColor="text-blue-600 dark:text-blue-400" />
+                <StatCard label="In Use" value={volumeMetrics.inUse} icon={Database} iconColor="text-green-600 dark:text-green-400" />
+                <StatCard label="Total Size" value="N/A" icon={FolderOpen} iconColor="text-purple-600 dark:text-purple-400" />
+                <StatCard label="Orphaned" value={volumeMetrics.total - volumeMetrics.inUse} icon={AlertTriangle} iconColor="text-orange-600 dark:text-orange-400" />
               </MetricsGrid>
 
               {loadingVolumes ? (
                 <div className="flex items-center justify-center h-64"><Spinner size="lg" /></div>
               ) : volumes && volumes.length > 0 ? (
                 <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
-                  <Table data={volumes} columns={volumeColumns} keyExtractor={(row) => row.name} onRowClick={(row) => setSelectedVolume(row)} hoverable />
+                  <Table
+                    data={volumes}
+                    columns={volumeColumns}
+                    keyExtractor={(row) => row.name}
+                    onRowClick={(row) => setSelectedVolume(row)}
+                    hoverable
+                    rowClassName={(row) => selectedVolume?.name === row.name ? "bg-primary-50 dark:bg-primary-900/20" : ""}
+                  />
                 </div>
               ) : (
-                <EmptyState icon={HardDrive} title="No volumes" description="No volumes are configured on this agent" />
+                <EmptyState
+                  icon={HardDrive}
+                  title="No volumes found"
+                  description="Create a Docker volume to persist data"
+                  action={
+                    <Button variant="primary" onClick={() => setShowCreateVolumeModal(true)}>
+                      <Plus className="h-4 w-4 mr-1" />
+                      Create Volume
+                    </Button>
+                  }
+                />
               )}
             </div>
           )}
@@ -707,6 +1190,18 @@ export default function DockerPage() {
                       </div>
                     </div>
                   </div>
+
+                  {/* Networks */}
+                  {selectedContainer.networks && selectedContainer.networks.length > 0 && (
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Networks</h3>
+                      <div className="flex flex-wrap gap-2">
+                        {selectedContainer.networks.map((network) => (
+                          <Badge key={network} size="sm">{network}</Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -762,32 +1257,22 @@ export default function DockerPage() {
           <>
             <SlideOver.Header onClose={() => setSelectedImage(null)}>
               <div>
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                  {selectedImage.tags.length > 0 ? selectedImage.tags[0].split(":")[0] : "<none>"}
-                </h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400 font-mono mt-1">{selectedImage.id.slice(0, 12)}</p>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{getImageName(selectedImage)}</h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400">{formatSize(selectedImage.size)}</p>
               </div>
             </SlideOver.Header>
             <SlideOver.Body>
               <div className="space-y-6">
-                {/* Actions */}
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Actions</h3>
-                  <button onClick={() => { setDeleteError(null); setForceDelete(false); setShowDeleteImageModal(true); }} className="px-3 py-1.5 text-sm bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/50">
-                    <Trash2 className="h-4 w-4 inline mr-1" />Delete Image
-                  </button>
-                </div>
-
                 {/* Image Info */}
                 <div>
                   <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Image Info</h3>
                   <div className="space-y-3">
-                    <div className="flex justify-between">
+                    <div className="flex justify-between items-center">
                       <span className="text-sm text-gray-500 dark:text-gray-400">ID</span>
-                      <div className="flex items-center gap-1">
-                        <code className="text-sm">{selectedImage.id.slice(0, 12)}</code>
-                        <button onClick={() => handleCopy(selectedImage.id, "image-id")} className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded">
-                          {copied === "image-id" ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3 text-gray-400" />}
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-mono text-gray-900 dark:text-white">{selectedImage.id.slice(0, 12)}</span>
+                        <button onClick={() => handleCopy(selectedImage.id, "image-id")} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                          {copied === "image-id" ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
                         </button>
                       </div>
                     </div>
@@ -807,26 +1292,64 @@ export default function DockerPage() {
                   <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Tags</h3>
                   {selectedImage.tags.length > 0 ? (
                     <div className="flex flex-wrap gap-2">
-                      {selectedImage.tags.map((tag, idx) => (
-                        <Badge key={idx} className="px-2 py-1 text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 rounded border-0">{tag}</Badge>
+                      {selectedImage.tags.map((tag) => (
+                        <Badge key={tag} className="px-2 py-1 text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 rounded border-0">
+                          <Tag className="h-3 w-3 mr-1" />{tag}
+                        </Badge>
                       ))}
                     </div>
                   ) : (
-                    <span className="text-sm text-gray-400">No tags</span>
+                    <p className="text-sm text-gray-500">No tags</p>
                   )}
                 </div>
 
-                {/* In Use By */}
-                {selectedImage.used_by && selectedImage.used_by.length > 0 && (
-                  <div>
-                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Used by Containers</h3>
+                {/* Used By */}
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Used By</h3>
+                  {selectedImage.used_by.length > 0 ? (
                     <div className="space-y-2">
-                      {selectedImage.used_by.map((containerName: string, idx: number) => (
-                        <div key={idx} className="text-sm text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 px-3 py-2 rounded">{containerName}</div>
+                      {selectedImage.used_by.map((container) => (
+                        <div key={container} className="flex items-center gap-2 p-2 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                          <Server className="h-4 w-4 text-gray-400" />
+                          <span className="text-sm text-gray-900 dark:text-white">{container}</span>
+                        </div>
                       ))}
                     </div>
+                  ) : (
+                    <p className="text-sm text-gray-500">Not used by any containers</p>
+                  )}
+                </div>
+
+                {/* Security Scan */}
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Security Scan</h3>
+                  <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg space-y-3">
+                    <div className="flex items-center gap-2 text-gray-500">
+                      <Shield className="h-4 w-4" />
+                      <span className="text-sm">Scan for vulnerabilities</span>
+                    </div>
+                    <Button variant="secondary" size="sm" onClick={() => handleScanSingle(selectedImage)}>
+                      <Shield className="h-4 w-4 mr-1" />
+                      Scan Image
+                    </Button>
                   </div>
-                )}
+                </div>
+
+                {/* Actions */}
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Actions</h3>
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="primary" size="sm" onClick={() => handleDeploy(selectedImage)}>
+                      <Rocket className="h-4 w-4 mr-1" />Deploy
+                    </Button>
+                    <Button variant="danger" size="sm" onClick={() => { setDeleteError(null); setForceDelete(false); setShowDeleteImageModal(true); }}>
+                      <Trash2 className="h-4 w-4 mr-1" />Delete Image
+                    </Button>
+                  </div>
+                  {selectedImage.used_by.length > 0 && (
+                    <p className="text-xs text-yellow-600 dark:text-yellow-400 mt-2">Warning: Image is in use. Deletion may require force.</p>
+                  )}
+                </div>
               </div>
             </SlideOver.Body>
           </>
@@ -845,15 +1368,6 @@ export default function DockerPage() {
             </SlideOver.Header>
             <SlideOver.Body>
               <div className="space-y-6">
-                {/* Actions */}
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Actions</h3>
-                  <button onClick={() => { setDeleteError(null); setForceDelete(false); setShowDeleteVolumeModal(true); }} disabled={selectedVolume.used_by.length > 0} className="px-3 py-1.5 text-sm bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/50 disabled:opacity-50">
-                    <Trash2 className="h-4 w-4 inline mr-1" />Delete Volume
-                  </button>
-                  {selectedVolume.used_by.length > 0 && <p className="text-xs text-gray-500 mt-2">Cannot delete volume that is in use</p>}
-                </div>
-
                 {/* Volume Info */}
                 <div>
                   <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Volume Info</h3>
@@ -866,9 +1380,14 @@ export default function DockerPage() {
                       <span className="text-sm text-gray-500 dark:text-gray-400">Driver</span>
                       <span className="text-sm text-gray-900 dark:text-white">{selectedVolume.driver}</span>
                     </div>
-                    <div className="flex justify-between">
+                    <div className="flex flex-col gap-1">
                       <span className="text-sm text-gray-500 dark:text-gray-400">Mountpoint</span>
-                      <span className="text-sm text-gray-900 dark:text-white font-mono truncate max-w-[200px]">{selectedVolume.mountpoint}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-mono text-gray-900 dark:text-white break-all">{selectedVolume.mountpoint}</span>
+                        <button onClick={() => handleCopy(selectedVolume.mountpoint, "volume-mountpoint")} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 flex-shrink-0">
+                          {copied === "volume-mountpoint" ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                        </button>
+                      </div>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-sm text-gray-500 dark:text-gray-400">Scope</span>
@@ -890,6 +1409,15 @@ export default function DockerPage() {
                     <span className="text-sm text-gray-400">Not in use</span>
                   )}
                 </div>
+
+                {/* Actions */}
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Actions</h3>
+                  <Button variant="danger" size="sm" onClick={() => { setDeleteError(null); setForceDelete(false); setShowDeleteVolumeModal(true); }}>
+                    <Trash2 className="h-4 w-4 mr-1" />Delete Volume
+                  </Button>
+                  {selectedVolume.used_by.length > 0 && <p className="text-xs text-yellow-600 dark:text-yellow-400 mt-2">Warning: Volume is in use. Deletion may require force.</p>}
+                </div>
               </div>
             </SlideOver.Body>
           </>
@@ -908,15 +1436,6 @@ export default function DockerPage() {
             </SlideOver.Header>
             <SlideOver.Body>
               <div className="space-y-6">
-                {/* Actions */}
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Actions</h3>
-                  <button onClick={() => { setDeleteError(null); setShowDeleteNetworkModal(true); }} disabled={Object.keys(selectedNetwork.containers || {}).length > 0} className="px-3 py-1.5 text-sm bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/50 disabled:opacity-50">
-                    <Trash2 className="h-4 w-4 inline mr-1" />Delete Network
-                  </button>
-                  {Object.keys(selectedNetwork.containers || {}).length > 0 && <p className="text-xs text-gray-500 mt-2">Cannot delete network with connected containers</p>}
-                </div>
-
                 {/* Network Info */}
                 <div>
                   <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Network Info</h3>
@@ -968,11 +1487,175 @@ export default function DockerPage() {
                     <span className="text-sm text-gray-400">No containers connected</span>
                   )}
                 </div>
+
+                {/* Actions */}
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Actions</h3>
+                  <Button variant="danger" size="sm" onClick={() => { setDeleteError(null); setShowDeleteNetworkModal(true); }} disabled={Object.keys(selectedNetwork.containers || {}).length > 0}>
+                    <Trash2 className="h-4 w-4 mr-1" />Delete Network
+                  </Button>
+                  {Object.keys(selectedNetwork.containers || {}).length > 0 && <p className="text-xs text-gray-500 mt-2">Cannot delete network with connected containers</p>}
+                </div>
               </div>
             </SlideOver.Body>
           </>
         )}
       </SlideOver>
+
+      {/* Pull Image Modal */}
+      {showPullModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setShowPullModal(false)} />
+          <div className="relative bg-white dark:bg-gray-900 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">Pull Image</h3>
+              <button onClick={() => setShowPullModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <Input
+                label="Image Reference"
+                value={pullImageRef}
+                onChange={(e) => setPullImageRef(e.target.value)}
+                placeholder="nginx:latest or ubuntu:22.04"
+              />
+              <p className="text-xs text-gray-500">Enter the image name and tag (e.g., nginx:latest, postgres:15)</p>
+              {pullError && (
+                <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                  <p className="text-sm text-red-600 dark:text-red-400">{pullError}</p>
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <Button variant="secondary" onClick={() => setShowPullModal(false)}>Cancel</Button>
+              <Button variant="primary" onClick={() => pullMutation.mutate()} disabled={!pullImageRef || pullMutation.isPending}>
+                {pullMutation.isPending ? "Pulling..." : "Pull Image"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create Volume Modal */}
+      {showCreateVolumeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setShowCreateVolumeModal(false)} />
+          <div className="relative bg-white dark:bg-gray-900 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">Create Volume</h3>
+              <button onClick={() => setShowCreateVolumeModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <Input
+                label="Volume Name"
+                value={newVolumeName}
+                onChange={(e) => setNewVolumeName(e.target.value)}
+                placeholder="my-volume"
+              />
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Driver</label>
+                <select
+                  value={newVolumeDriver}
+                  onChange={(e) => setNewVolumeDriver(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900"
+                >
+                  <option value="local">local</option>
+                </select>
+              </div>
+              {createVolumeError && (
+                <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                  <p className="text-sm text-red-600 dark:text-red-400">{createVolumeError}</p>
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <Button variant="secondary" onClick={() => setShowCreateVolumeModal(false)}>Cancel</Button>
+              <Button variant="primary" onClick={() => createVolumeMutation.mutate()} disabled={!newVolumeName || createVolumeMutation.isPending}>
+                {createVolumeMutation.isPending ? "Creating..." : "Create Volume"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Delete Images Modal */}
+      {showBulkDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => !bulkDeleteProgress && setShowBulkDeleteModal(false)} />
+          <div className="relative bg-white dark:bg-gray-900 rounded-lg shadow-xl max-w-lg w-full mx-4 p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-full">
+                <Trash2 className="h-5 w-5 text-red-600 dark:text-red-400" />
+              </div>
+              <h3 className="text-lg font-semibold">Delete {selectedImageIds.size} Images</h3>
+            </div>
+
+            {!bulkDeleteProgress ? (
+              <>
+                <p className="text-gray-600 dark:text-gray-400 mb-4">
+                  Are you sure you want to delete <strong>{selectedImageIds.size}</strong> selected images?
+                  This will free up <strong>{formatSize(selectedImagesSize)}</strong> of disk space.
+                </p>
+                <div className="max-h-48 overflow-y-auto mb-4 space-y-1">
+                  {selectedImagesData.map((img) => (
+                    <div key={img.id} className={cn("flex items-center justify-between p-2 rounded text-sm", img.used_by.length > 0 ? "bg-yellow-50 dark:bg-yellow-900/20" : "bg-gray-50 dark:bg-gray-800")}>
+                      <span className="font-mono truncate">{img.tags[0] || img.id.slice(0, 12)}</span>
+                      <span className="text-gray-500 text-xs">
+                        {formatSize(img.size)}
+                        {img.used_by.length > 0 && <span className="ml-2 text-yellow-600 dark:text-yellow-400">(in use)</span>}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                {selectedImagesData.some((img) => img.used_by.length > 0) && (
+                  <div className="mb-4">
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" checked={forceDelete} onChange={(e) => setForceDelete(e.target.checked)} className="rounded border-gray-300" />
+                      <span className="text-sm text-yellow-600 dark:text-yellow-400">Force delete images in use ({selectedImagesData.filter((img) => img.used_by.length > 0).length} images)</span>
+                    </label>
+                  </div>
+                )}
+                <div className="flex justify-end gap-3">
+                  <Button variant="secondary" onClick={() => { setShowBulkDeleteModal(false); setForceDelete(false); }}>Cancel</Button>
+                  <Button variant="danger" onClick={handleBulkDeleteImages} disabled={selectedImagesData.some((img) => img.used_by.length > 0) && !forceDelete}>
+                    Delete {selectedImageIds.size} Images
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <div className="space-y-4">
+                <div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span>Deleting images...</span>
+                    <span>{bulkDeleteProgress.completed} / {bulkDeleteProgress.total}</span>
+                  </div>
+                  <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                    <div className="bg-red-600 h-2 rounded-full transition-all duration-300" style={{ width: `${(bulkDeleteProgress.completed / bulkDeleteProgress.total) * 100}%` }} />
+                  </div>
+                </div>
+                {bulkDeleteProgress.failed.length > 0 && (
+                  <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                    <p className="text-sm font-medium text-red-600 dark:text-red-400 mb-2">Failed to delete {bulkDeleteProgress.failed.length} images:</p>
+                    <ul className="text-xs text-red-600 dark:text-red-400 space-y-1">
+                      {bulkDeleteProgress.failed.map((name, idx) => <li key={idx}>• {name}</li>)}
+                    </ul>
+                  </div>
+                )}
+                {bulkDeleteProgress.completed === bulkDeleteProgress.total && (
+                  <div className="flex justify-end">
+                    <Button variant="secondary" onClick={() => { setShowBulkDeleteModal(false); setSelectedImageIds(new Set()); setBulkDeleteProgress(null); setForceDelete(false); }}>
+                      {bulkDeleteProgress.failed.length > 0 ? "Close" : "Done"}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Confirmation Dialogs */}
       <ConfirmDialog isOpen={showStopModal && !!selectedContainer} onClose={() => setShowStopModal(false)} onConfirm={() => stopMutation.mutate({ containerId: selectedContainer!.container_id })} title="Stop Container" message={`Are you sure you want to stop ${selectedContainer?.name}?`} confirmText="Stop Container" variant="warning" icon="stop" isLoading={stopMutation.isPending} />
@@ -1003,6 +1686,30 @@ export default function DockerPage() {
       </ConfirmDialog>
 
       <ConfirmDialog isOpen={showDeleteNetworkModal && !!selectedNetwork} onClose={() => { setShowDeleteNetworkModal(false); setDeleteError(null); }} onConfirm={() => deleteNetworkMutation.mutate()} title="Delete Network" message={`Are you sure you want to delete network "${selectedNetwork?.name}"?`} confirmText="Delete Network" variant="danger" icon="delete" isLoading={deleteNetworkMutation.isPending} error={deleteError} />
+
+      {/* Scan Modal */}
+      <ScanModal
+        isOpen={showScanModal}
+        onClose={() => {
+          setShowScanModal(false);
+          setScanImages([]);
+        }}
+        images={scanImages}
+        mode="both"
+      />
+
+      {/* Deploy Wizard */}
+      {deployImageInfo && (
+        <DeployWizard
+          isOpen={showDeployWizard}
+          onClose={() => {
+            setShowDeployWizard(false);
+            setDeployImageInfo(null);
+          }}
+          imageRepository={deployImageInfo.repository}
+          imageTag={deployImageInfo.tag}
+        />
+      )}
     </div>
   );
 }
