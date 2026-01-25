@@ -1560,6 +1560,133 @@ func (c *Client) RecreateContainerWithSecrets(ctx context.Context, containerID s
 	}, nil
 }
 
+// RecreateContainerWithEnvVars recreates a container with additional environment variables
+func (c *Client) RecreateContainerWithEnvVars(ctx context.Context, containerID string, addEnvVars map[string]string) (*SecretMigrationResult, error) {
+	// Step 1: Inspect the original container to get its config
+	originalInfo, err := c.cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect original container: %w", err)
+	}
+
+	// Step 2: Build new container config from original
+	newConfig := &container.Config{
+		Image:        originalInfo.Config.Image,
+		Cmd:          originalInfo.Config.Cmd,
+		Entrypoint:   originalInfo.Config.Entrypoint,
+		WorkingDir:   originalInfo.Config.WorkingDir,
+		ExposedPorts: originalInfo.Config.ExposedPorts,
+		Labels:       originalInfo.Config.Labels,
+		User:         originalInfo.Config.User,
+		Volumes:      originalInfo.Config.Volumes,
+		StopSignal:   originalInfo.Config.StopSignal,
+		Healthcheck:  originalInfo.Config.Healthcheck,
+	}
+
+	// Build env vars: start with original, then add/override with new ones
+	envMap := make(map[string]string)
+	for _, env := range originalInfo.Config.Env {
+		parts := strings.SplitN(env, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		} else if len(parts) == 1 {
+			envMap[parts[0]] = ""
+		}
+	}
+
+	// Add/override with new env vars
+	for k, v := range addEnvVars {
+		envMap[k] = v
+	}
+
+	// Convert back to slice
+	newEnv := make([]string, 0, len(envMap))
+	for k, v := range envMap {
+		newEnv = append(newEnv, fmt.Sprintf("%s=%s", k, v))
+	}
+	newConfig.Env = newEnv
+
+	// Step 3: Build new host config
+	newHostConfig := &container.HostConfig{
+		Binds:           originalInfo.HostConfig.Binds,
+		NetworkMode:     originalInfo.HostConfig.NetworkMode,
+		PortBindings:    originalInfo.HostConfig.PortBindings,
+		RestartPolicy:   originalInfo.HostConfig.RestartPolicy,
+		CapAdd:          originalInfo.HostConfig.CapAdd,
+		CapDrop:         originalInfo.HostConfig.CapDrop,
+		Privileged:      originalInfo.HostConfig.Privileged,
+		PublishAllPorts: originalInfo.HostConfig.PublishAllPorts,
+		DNS:             originalInfo.HostConfig.DNS,
+		DNSOptions:      originalInfo.HostConfig.DNSOptions,
+		DNSSearch:       originalInfo.HostConfig.DNSSearch,
+		ExtraHosts:      originalInfo.HostConfig.ExtraHosts,
+		Links:           originalInfo.HostConfig.Links,
+		LogConfig:       originalInfo.HostConfig.LogConfig,
+		SecurityOpt:     originalInfo.HostConfig.SecurityOpt,
+		StorageOpt:      originalInfo.HostConfig.StorageOpt,
+		Tmpfs:           originalInfo.HostConfig.Tmpfs,
+		UTSMode:         originalInfo.HostConfig.UTSMode,
+		UsernsMode:      originalInfo.HostConfig.UsernsMode,
+		ShmSize:         originalInfo.HostConfig.ShmSize,
+		Sysctls:         originalInfo.HostConfig.Sysctls,
+		Runtime:         originalInfo.HostConfig.Runtime,
+		Resources:       originalInfo.HostConfig.Resources,
+		Mounts:          originalInfo.HostConfig.Mounts,
+		VolumesFrom:     originalInfo.HostConfig.VolumesFrom,
+	}
+
+	// Step 4: Build network config from original
+	var newNetworkConfig *network.NetworkingConfig
+	if originalInfo.NetworkSettings != nil && len(originalInfo.NetworkSettings.Networks) > 0 {
+		endpointsConfig := make(map[string]*network.EndpointSettings)
+		for netName, netSettings := range originalInfo.NetworkSettings.Networks {
+			endpointsConfig[netName] = &network.EndpointSettings{
+				Aliases: netSettings.Aliases,
+			}
+		}
+		newNetworkConfig = &network.NetworkingConfig{
+			EndpointsConfig: endpointsConfig,
+		}
+	}
+
+	// Step 5: Stop the original container
+	timeout := 30
+	if err := c.cli.ContainerStop(ctx, containerID, container.StopOptions{Timeout: &timeout}); err != nil {
+		return nil, fmt.Errorf("failed to stop original container: %w", err)
+	}
+
+	// Step 6: Get the original container name for reuse
+	originalName := strings.TrimPrefix(originalInfo.Name, "/")
+
+	// Step 7: Remove the original container
+	if err := c.cli.ContainerRemove(ctx, containerID, container.RemoveOptions{}); err != nil {
+		// Try to restart original container
+		c.cli.ContainerStart(ctx, containerID, container.StartOptions{})
+		return nil, fmt.Errorf("failed to remove original container: %w", err)
+	}
+
+	// Step 8: Create the new container with the same name
+	newResp, err := c.cli.ContainerCreate(ctx, newConfig, newHostConfig, newNetworkConfig, nil, originalName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create new container: %w", err)
+	}
+
+	// Step 9: Start the new container
+	if err := c.cli.ContainerStart(ctx, newResp.ID, container.StartOptions{}); err != nil {
+		// Remove the failed container
+		c.cli.ContainerRemove(ctx, newResp.ID, container.RemoveOptions{Force: true})
+		return nil, fmt.Errorf("failed to start new container: %w", err)
+	}
+
+	newContainerID := newResp.ID
+	if len(newContainerID) > 12 {
+		newContainerID = newContainerID[:12]
+	}
+
+	return &SecretMigrationResult{
+		NewContainerID: newContainerID,
+	}, nil
+}
+
 // VerifySecretsMigration verifies that a migrated container has the expected secrets
 func (c *Client) VerifySecretsMigration(ctx context.Context, containerID string, expectedSecrets []string) (*SecretVerificationResult, error) {
 	result := &SecretVerificationResult{

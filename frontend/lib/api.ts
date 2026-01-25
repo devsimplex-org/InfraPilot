@@ -5115,6 +5115,18 @@ export const api = {
       method: "POST",
     }),
 
+  // Import secrets to container
+  importSecrets: (agentId: string, data: {
+    container_id: string;
+    container_name: string;
+    method: "env_vars" | "docker_secrets";
+    secrets: { name: string; value: string }[];
+  }) =>
+    fetchAPI<{ success: boolean; error?: string; new_container_id?: string }>(`/agents/${agentId}/secrets/import`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
   // Epic 17: Background Jobs & Workers
   listJobs: (params?: {
     status?: string;
