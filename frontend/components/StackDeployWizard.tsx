@@ -286,8 +286,14 @@ export function StackDeployWizard({
     switch (currentStep) {
       case "yaml":
         return composeYaml.trim() !== "" && stackName.trim() !== "" && parsedCompose !== null;
-      case "variables":
-        return true;
+      case "variables": {
+        // Check that all required variables (no default) have values
+        if (!parsedCompose?.variables) return true;
+        const missingRequired = parsedCompose.variables.filter(
+          (v) => v.required && !v.default && !variables[v.name]
+        );
+        return missingRequired.length === 0;
+      }
       case "services":
         return Object.values(serviceConfigs).some((c) => c.enabled);
       case "resources":
@@ -563,14 +569,22 @@ export function StackDeployWizard({
 
                 {parsedCompose?.variables && parsedCompose.variables.length > 0 ? (
                   <div className="space-y-3 max-h-64 overflow-y-auto pr-2">
-                    {parsedCompose.variables.map((v) => (
+                    {parsedCompose.variables
+                      .sort((a, b) => (a.required === b.required ? 0 : a.required ? -1 : 1))
+                      .map((v) => (
                       <div key={v.name} className="flex items-center gap-3">
                         <div className="w-48 flex-shrink-0">
-                          <span className="text-sm font-mono text-zinc-300">{v.name}</span>
+                          <span className="text-sm font-mono text-zinc-300">
+                            {v.name}
+                            {v.required && <span className="text-red-400 ml-1">*</span>}
+                          </span>
                           {v.default && (
                             <span className="text-xs text-zinc-500 block truncate">
                               default: {v.default}
                             </span>
+                          )}
+                          {v.required && !v.default && (
+                            <span className="text-xs text-red-400 block">required</span>
                           )}
                         </div>
                         <Input
@@ -578,8 +592,8 @@ export function StackDeployWizard({
                           onChange={(e) =>
                             setVariables((prev) => ({ ...prev, [v.name]: e.target.value }))
                           }
-                          placeholder={v.default || "Enter value..."}
-                          className="flex-1"
+                          placeholder={v.default || (v.required ? "Required" : "Enter value...")}
+                          className={`flex-1 ${v.required && !variables[v.name] && !v.default ? "border-red-500/50" : ""}`}
                         />
                       </div>
                     ))}

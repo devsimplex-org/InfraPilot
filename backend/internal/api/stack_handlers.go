@@ -78,17 +78,18 @@ type ParsedCompose struct {
 }
 
 type ComposeService struct {
-	Name        string            `json:"name"`
-	Image       string            `json:"image"`
-	DependsOn   []string          `json:"depends_on,omitempty"`
-	Ports       []string          `json:"ports,omitempty"`
-	Environment map[string]string `json:"environment,omitempty"`
-	Volumes     []string          `json:"volumes,omitempty"`
-	Networks    []string          `json:"networks,omitempty"`
-	Command     []string          `json:"command,omitempty"`
-	Labels      map[string]string `json:"labels,omitempty"`
-	Restart     string            `json:"restart,omitempty"`
-	Order       int               `json:"order"`
+	Name          string            `json:"name"`
+	ContainerName string            `json:"container_name,omitempty"`
+	Image         string            `json:"image"`
+	DependsOn     []string          `json:"depends_on,omitempty"`
+	Ports         []string          `json:"ports,omitempty"`
+	Environment   map[string]string `json:"environment,omitempty"`
+	Volumes       []string          `json:"volumes,omitempty"`
+	Networks      []string          `json:"networks,omitempty"`
+	Command       []string          `json:"command,omitempty"`
+	Labels        map[string]string `json:"labels,omitempty"`
+	Restart       string            `json:"restart,omitempty"`
+	Order         int               `json:"order"`
 }
 
 type ComposeNetwork struct {
@@ -104,9 +105,10 @@ type ComposeVolume struct {
 }
 
 type ComposeVariable struct {
-	Name    string  `json:"name"`
-	Default *string `json:"default,omitempty"`
-	Used    bool    `json:"used"`
+	Name     string  `json:"name"`
+	Default  *string `json:"default,omitempty"`
+	Used     bool    `json:"used"`
+	Required bool    `json:"required"`
 }
 
 type StackProgress struct {
@@ -150,6 +152,7 @@ func (h *Handler) parseComposeYAML(c *gin.Context) {
 func parseCompose(yamlContent string, variables map[string]string) (*ParsedCompose, error) {
 	// First, extract and collect variables
 	foundVars := extractVariables(yamlContent)
+	requiredVars := extractRequiredVariables(yamlContent)
 
 	// Perform variable substitution
 	substituted := substituteVariables(yamlContent, variables)
@@ -157,15 +160,16 @@ func parseCompose(yamlContent string, variables map[string]string) (*ParsedCompo
 	// Parse YAML
 	var compose struct {
 		Services map[string]struct {
-			Image       string                 `yaml:"image"`
-			DependsOn   interface{}            `yaml:"depends_on"`
-			Ports       []string               `yaml:"ports"`
-			Environment interface{}            `yaml:"environment"`
-			Volumes     []string               `yaml:"volumes"`
-			Networks    interface{}            `yaml:"networks"`
-			Command     interface{}            `yaml:"command"`
-			Labels      interface{}            `yaml:"labels"`
-			Restart     string                 `yaml:"restart"`
+			Image         string                 `yaml:"image"`
+			ContainerName string                 `yaml:"container_name"`
+			DependsOn     interface{}            `yaml:"depends_on"`
+			Ports         []string               `yaml:"ports"`
+			Environment   interface{}            `yaml:"environment"`
+			Volumes       []string               `yaml:"volumes"`
+			Networks      interface{}            `yaml:"networks"`
+			Command       interface{}            `yaml:"command"`
+			Labels        interface{}            `yaml:"labels"`
+			Restart       string                 `yaml:"restart"`
 		} `yaml:"services"`
 		Networks map[string]struct {
 			Driver   string `yaml:"driver"`
@@ -192,11 +196,12 @@ func parseCompose(yamlContent string, variables map[string]string) (*ParsedCompo
 		}
 
 		cs := ComposeService{
-			Name:      name,
-			Image:     svc.Image,
-			Ports:     svc.Ports,
-			Volumes:   svc.Volumes,
-			Restart:   svc.Restart,
+			Name:          name,
+			ContainerName: svc.ContainerName,
+			Image:         svc.Image,
+			Ports:         svc.Ports,
+			Volumes:       svc.Volumes,
+			Restart:       svc.Restart,
 		}
 
 		// Parse depends_on (can be list or map)
@@ -253,6 +258,9 @@ func parseCompose(yamlContent string, variables map[string]string) (*ParsedCompo
 		if defaultVal != "" {
 			cv.Default = &defaultVal
 		}
+		if _, isRequired := requiredVars[name]; isRequired {
+			cv.Required = true
+		}
 		varList = append(varList, cv)
 	}
 
@@ -265,20 +273,31 @@ func parseCompose(yamlContent string, variables map[string]string) (*ParsedCompo
 	}, nil
 }
 
-// extractVariables finds all ${VAR} or ${VAR:-default} patterns
+// extractVariables finds all ${VAR}, ${VAR:-default}, ${VAR:?error} patterns
 func extractVariables(content string) map[string]string {
 	vars := make(map[string]string)
 
-	// Match ${VAR}, ${VAR:-default}, ${VAR-default}
-	re := regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:-?)([^}]*))?\}`)
+	// Match ${VAR}, ${VAR:-default}, ${VAR-default}, ${VAR:?error}, ${VAR?error}
+	re := regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:?[-?])([^}]*))?\}`)
 	matches := re.FindAllStringSubmatch(content, -1)
 
 	for _, match := range matches {
 		varName := match[1]
-		defaultVal := ""
-		if len(match) > 3 {
-			defaultVal = match[3]
+		operator := ""
+		operand := ""
+		if len(match) > 2 {
+			operator = match[2]
 		}
+		if len(match) > 3 {
+			operand = match[3]
+		}
+
+		defaultVal := ""
+		if operator == ":-" || operator == "-" {
+			defaultVal = operand
+		}
+		// For :? and ? (required), default is empty — variable must be provided
+
 		// Only store if not already present (first default wins)
 		if _, exists := vars[varName]; !exists {
 			vars[varName] = defaultVal
@@ -288,24 +307,55 @@ func extractVariables(content string) map[string]string {
 	return vars
 }
 
+// extractRequiredVariables returns variable names that use the :? or ? syntax (required)
+func extractRequiredVariables(content string) map[string]string {
+	required := make(map[string]string)
+
+	re := regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)(:?\?)([^}]*)\}`)
+	matches := re.FindAllStringSubmatch(content, -1)
+
+	for _, match := range matches {
+		varName := match[1]
+		errorMsg := match[3]
+		if errorMsg == "" {
+			errorMsg = varName + " is required"
+		}
+		required[varName] = errorMsg
+	}
+
+	return required
+}
+
 // substituteVariables replaces ${VAR} patterns with values
 func substituteVariables(content string, variables map[string]string) string {
 	result := content
 
-	// Match ${VAR:-default} or ${VAR-default} first (with defaults)
-	reWithDefault := regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)(:-?)([^}]*)\}`)
-	result = reWithDefault.ReplaceAllStringFunc(result, func(match string) string {
-		parts := reWithDefault.FindStringSubmatch(match)
+	// Match all ${VAR...} patterns: ${VAR:-default}, ${VAR-default}, ${VAR:?error}, ${VAR?error}
+	reWithOperator := regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)(:?[-?])([^}]*)\}`)
+	result = reWithOperator.ReplaceAllStringFunc(result, func(match string) string {
+		parts := reWithOperator.FindStringSubmatch(match)
 		varName := parts[1]
-		defaultVal := parts[3]
+		operator := parts[2]
+		operand := parts[3]
 
 		if val, ok := variables[varName]; ok && val != "" {
 			return val
 		}
-		return defaultVal
+
+		switch operator {
+		case ":-", "-":
+			// Default value
+			return operand
+		case ":?", "?":
+			// Required — if we get here, the variable was not provided
+			// Return empty string; validation should catch this earlier
+			return ""
+		default:
+			return match
+		}
 	})
 
-	// Match ${VAR} without defaults
+	// Match ${VAR} without any operator
 	reSimple := regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 	result = reSimple.ReplaceAllStringFunc(result, func(match string) string {
 		parts := reSimple.FindStringSubmatch(match)
@@ -651,7 +701,8 @@ func (h *Handler) createStack(c *gin.Context) {
 
 		// Build container config with compose labels
 		containerConfig := &DeploymentContainerConfig{
-			EnvVars: envVars,
+			ContainerName: svc.ContainerName,
+			EnvVars:       envVars,
 			Labels: map[string]string{
 				"com.docker.compose.project": req.Name,
 				"com.docker.compose.service": svc.Name,

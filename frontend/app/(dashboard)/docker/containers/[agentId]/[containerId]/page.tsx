@@ -732,7 +732,7 @@ export default function ContainerDetailPage() {
 
           {/* Actions */}
           <div className="flex items-center gap-2">
-            {container.status === "running" ? (
+            {container.status === "running" || container.status === "restarting" ? (
               <>
                 <button
                   onClick={() => setShowStopModal(true)}
@@ -766,7 +766,7 @@ export default function ContainerDetailPage() {
                 setShowDeleteModal(true);
                 setDeleteConfirmName("");
                 setDeleteError(null);
-                setForceDelete(container.status === "running");
+                setForceDelete(container.status === "running" || container.status === "restarting");
               }}
               className="flex items-center gap-2 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/50"
             >
@@ -848,7 +848,7 @@ export default function ContainerDetailPage() {
         error={deleteError}
         onInputChange={setDeleteConfirmName}
       >
-        {container?.status === "running" && (
+        {(container?.status === "running" || container?.status === "restarting") && (
           <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
             <input
               type="checkbox"
@@ -856,7 +856,7 @@ export default function ContainerDetailPage() {
               onChange={(e) => setForceDelete(e.target.checked)}
               className="rounded border-gray-300 dark:border-gray-700 text-red-600 focus:ring-red-500"
             />
-            Force stop running container before deleting
+            Force stop {container?.status === "restarting" ? "restarting" : "running"} container before deleting
           </label>
         )}
       </ConfirmDialog>

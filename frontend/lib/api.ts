@@ -3311,6 +3311,7 @@ export interface ComposeVariable {
   name: string;
   default?: string;
   used: boolean;
+  required: boolean;
 }
 
 export interface StackProgress {
