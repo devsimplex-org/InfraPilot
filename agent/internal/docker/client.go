@@ -1171,18 +1171,14 @@ type ContainerRunExtendedConfig struct {
 
 // RunContainer creates and starts a new container
 func (c *Client) RunContainer(ctx context.Context, cfg ContainerRunConfig) (*ContainerRunResult, error) {
-	// Step 1: Pull the image if it doesn't exist locally
-	_, _, err := c.cli.ImageInspectWithRaw(ctx, cfg.ImageRef)
+	// Step 1: Always pull the image to ensure we have the latest version
+	reader, err := c.cli.ImagePull(ctx, cfg.ImageRef, image.PullOptions{})
 	if err != nil {
-		// Image doesn't exist, pull it
-		reader, err := c.cli.ImagePull(ctx, cfg.ImageRef, image.PullOptions{})
-		if err != nil {
-			return nil, fmt.Errorf("failed to pull image %s: %w", cfg.ImageRef, err)
-		}
-		defer reader.Close()
-		// Consume the reader to complete the pull
-		io.Copy(io.Discard, reader)
+		return nil, fmt.Errorf("failed to pull image %s: %w", cfg.ImageRef, err)
 	}
+	defer reader.Close()
+	// Consume the reader to complete the pull
+	io.Copy(io.Discard, reader)
 
 	// Step 2: Build container configuration
 	envList := make([]string, 0, len(cfg.Env))
@@ -1238,7 +1234,22 @@ func (c *Client) RunContainer(ctx context.Context, cfg ContainerRunConfig) (*Con
 		}
 	}
 
-	// Step 5: Create the container
+	// Step 5: Check if container with same name exists and remove it (for redeploy)
+	if cfg.Name != "" {
+		containers, err := c.cli.ContainerList(ctx, container.ListOptions{
+			All:     true,
+			Filters: filters.NewArgs(filters.Arg("name", "^/"+cfg.Name+"$")),
+		})
+		if err == nil && len(containers) > 0 {
+			// Container exists, stop and remove it
+			existingID := containers[0].ID
+			timeout := 10 // 10 second graceful shutdown
+			_ = c.cli.ContainerStop(ctx, existingID, container.StopOptions{Timeout: &timeout})
+			_ = c.cli.ContainerRemove(ctx, existingID, container.RemoveOptions{Force: true})
+		}
+	}
+
+	// Step 6: Create the container
 	resp, err := c.cli.ContainerCreate(ctx, containerConfig, hostConfig, networkConfig, nil, cfg.Name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create container: %w", err)
@@ -1249,7 +1260,7 @@ func (c *Client) RunContainer(ctx context.Context, cfg ContainerRunConfig) (*Con
 		containerID = containerID[:12]
 	}
 
-	// Step 6: Start the container
+	// Step 7: Start the container
 	if err := c.cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
 		// Cleanup: remove the created container if start fails
 		c.cli.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true})
@@ -1266,16 +1277,13 @@ func (c *Client) RunContainer(ctx context.Context, cfg ContainerRunConfig) (*Con
 // RunContainerExtended creates and starts a container with extended configuration
 // including secrets, networks, and volumes
 func (c *Client) RunContainerExtended(ctx context.Context, cfg ContainerRunExtendedConfig) (*ContainerRunResult, error) {
-	// Step 1: Pull the image if it doesn't exist locally
-	_, _, err := c.cli.ImageInspectWithRaw(ctx, cfg.ImageRef)
+	// Step 1: Always pull the image to ensure we have the latest version
+	reader, err := c.cli.ImagePull(ctx, cfg.ImageRef, image.PullOptions{})
 	if err != nil {
-		reader, err := c.cli.ImagePull(ctx, cfg.ImageRef, image.PullOptions{})
-		if err != nil {
-			return nil, fmt.Errorf("failed to pull image %s: %w", cfg.ImageRef, err)
-		}
-		defer reader.Close()
-		io.Copy(io.Discard, reader)
+		return nil, fmt.Errorf("failed to pull image %s: %w", cfg.ImageRef, err)
 	}
+	defer reader.Close()
+	io.Copy(io.Discard, reader)
 
 	// Step 2: Create networks if needed
 	createdNetworkIDs := make(map[string]string) // name -> ID
@@ -1480,7 +1488,22 @@ func (c *Client) RunContainerExtended(ctx context.Context, cfg ContainerRunExten
 		}
 	}
 
-	// Step 9: Create the container
+	// Step 9: Check if container with same name exists and remove it (for redeploy)
+	if cfg.Name != "" {
+		containers, err := c.cli.ContainerList(ctx, container.ListOptions{
+			All:     true,
+			Filters: filters.NewArgs(filters.Arg("name", "^/"+cfg.Name+"$")),
+		})
+		if err == nil && len(containers) > 0 {
+			// Container exists, stop and remove it
+			existingID := containers[0].ID
+			timeout := 10 // 10 second graceful shutdown
+			_ = c.cli.ContainerStop(ctx, existingID, container.StopOptions{Timeout: &timeout})
+			_ = c.cli.ContainerRemove(ctx, existingID, container.RemoveOptions{Force: true})
+		}
+	}
+
+	// Step 10: Create the container
 	resp, err := c.cli.ContainerCreate(ctx, containerConfig, hostConfig, networkConfig, nil, cfg.Name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create container: %w", err)
@@ -1492,7 +1515,7 @@ func (c *Client) RunContainerExtended(ctx context.Context, cfg ContainerRunExten
 		shortID = shortID[:12]
 	}
 
-	// Step 10: Connect to additional networks
+	// Step 11: Connect to additional networks
 	for i, netCfg := range cfg.Networks {
 		if i == 0 {
 			continue // Skip the first one, already connected
@@ -1528,7 +1551,7 @@ func (c *Client) RunContainerExtended(ctx context.Context, cfg ContainerRunExten
 		}
 	}
 
-	// Step 11: Start the container
+	// Step 12: Start the container
 	if err := c.cli.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
 		// Cleanup
 		c.cli.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true})

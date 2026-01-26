@@ -4317,9 +4317,10 @@ export const api = {
       method: "POST",
     }),
 
-  redeployDeployment: (agentId: string, deploymentId: string) =>
+  redeployDeployment: (agentId: string, deploymentId: string, pullLatest: boolean = true) =>
     fetchAPI<{ id: string; status: string; message: string }>(`/agents/${agentId}/deployments/${deploymentId}/redeploy`, {
       method: "POST",
+      body: JSON.stringify({ pull_latest: pullLatest }),
     }),
 
   syncDeploymentStatus: (agentId: string) =>
