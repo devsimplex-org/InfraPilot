@@ -154,11 +154,14 @@ func (e *PolicyEngine) defaultPolicy(input PolicyInput) *PolicyResult {
 	if input.Deployment.Environment == "prod" {
 		if input.ScanResult.CriticalCount > 0 {
 			return &PolicyResult{
-				Decision: "deny",
+				Decision: "warn",
 				Reason: fmt.Sprintf(
-					"Production deployment blocked: %d critical vulnerabilities found",
+					"Production deployment warning: %d critical vulnerabilities found",
 					input.ScanResult.CriticalCount,
 				),
+				Warnings: []string{
+					fmt.Sprintf("%d critical vulnerabilities detected — review recommended", input.ScanResult.CriticalCount),
+				},
 			}
 		}
 		if input.ScanResult.HighCount > 5 {

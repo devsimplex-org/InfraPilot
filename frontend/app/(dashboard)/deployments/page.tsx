@@ -31,6 +31,7 @@ import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { FilterPanel, type FilterGroup } from "@/components/ui/FilterPanel";
 import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { RedeployWizard } from "@/components/RedeployWizard";
 import { cn } from "@/lib/utils";
 
 type PanelTab = "overview" | "scan" | "vulnerabilities" | "sbom";
@@ -48,16 +49,20 @@ export default function DeploymentsPage() {
   const [redeployingId, setRedeployingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null);
+  const [redeployWizardOpen, setRedeployWizardOpen] = useState(false);
+  const [redeployTarget, setRedeployTarget] = useState<Deployment | null>(null);
 
   // Redeploy mutation
   const redeployMutation = useMutation({
-    mutationFn: (deploymentId: string) => {
+    mutationFn: ({ deploymentId, pullLatest }: { deploymentId: string; pullLatest: boolean }) => {
       if (!selectedAgent) throw new Error("No agent selected");
-      return api.redeployDeployment(selectedAgent, deploymentId);
+      return api.redeployDeployment(selectedAgent, deploymentId, pullLatest);
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["deployments", selectedAgent] });
       setRedeployingId(null);
+      setRedeployWizardOpen(false);
+      setRedeployTarget(null);
       // Optionally select the new deployment
       if (data.id) {
         // The new deployment will appear in the list after refetch
@@ -65,6 +70,7 @@ export default function DeploymentsPage() {
     },
     onError: () => {
       setRedeployingId(null);
+      setRedeployWizardOpen(false);
     },
   });
 
@@ -424,7 +430,8 @@ export default function DeploymentsPage() {
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                setConfirmAction({ type: "redeploy", deployment: row });
+                setRedeployTarget(row);
+                setRedeployWizardOpen(true);
               }}
               disabled={isRedeploying}
               className="p-1.5 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 rounded disabled:opacity-50"
@@ -670,7 +677,10 @@ export default function DeploymentsPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => setConfirmAction({ type: "redeploy", deployment: selectedDeployment })}
+                    onClick={() => {
+                      setRedeployTarget(selectedDeployment);
+                      setRedeployWizardOpen(true);
+                    }}
                     disabled={redeployingId === selectedDeployment.id}
                     className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50"
                   >

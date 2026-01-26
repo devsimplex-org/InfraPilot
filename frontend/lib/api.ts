@@ -1049,7 +1049,7 @@ export interface ContainerConfigVolume {
   read_only?: boolean;
 }
 
-export interface ContainerConfig {
+export interface DeploymentContainerConfig {
   env_vars?: Record<string, string>;
   secrets?: ContainerConfigSecret[];
   secret_method?: "env_vars" | "docker_secrets";
@@ -1069,7 +1069,7 @@ export interface CreateDeploymentRequest {
   ci_provider?: string;
   ci_pipeline_id?: string;
   ci_build_url?: string;
-  container_config?: ContainerConfig;
+  container_config?: DeploymentContainerConfig;
 }
 
 // Type aliases for backward compatibility in DeployWizard
@@ -3230,6 +3230,108 @@ export interface UpdateTelemetrySettingsRequest {
   export_format?: string;
 }
 
+// Managed Stacks (multi-service docker-compose deployments)
+export type ManagedStackStatus = "pending" | "deploying" | "running" | "partial" | "failed" | "stopped";
+
+export interface ManagedStack {
+  id: string;
+  org_id: string;
+  agent_id: string;
+  name: string;
+  environment: string;
+  compose_yaml: string;
+  variables: Record<string, string>;
+  service_count: number;
+  running_count: number;
+  failed_count: number;
+  status: ManagedStackStatus;
+  status_message?: string;
+  deployed_by?: string;
+  deployed_at?: string;
+  created_at: string;
+  updated_at: string;
+  deployments?: Deployment[];
+}
+
+export interface CreateStackRequest {
+  name: string;
+  environment: string;
+  compose_yaml: string;
+  variables?: Record<string, string>;
+  overrides?: ServiceOverride[];
+  skip_scanning?: boolean;
+}
+
+export interface ServiceOverride {
+  service_name: string;
+  tag_override?: string;
+  env_overrides?: Record<string, string>;
+  enabled: boolean;
+}
+
+export interface ParseComposeRequest {
+  compose_yaml: string;
+  variables?: Record<string, string>;
+}
+
+export interface ParsedCompose {
+  services: ComposeService[];
+  networks: ComposeNetwork[];
+  volumes: ComposeVolume[];
+  variables: ComposeVariable[];
+  errors?: string[];
+}
+
+export interface ComposeService {
+  name: string;
+  image: string;
+  depends_on?: string[];
+  ports?: string[];
+  environment?: Record<string, string>;
+  volumes?: string[];
+  networks?: string[];
+  command?: string[];
+  labels?: Record<string, string>;
+  restart?: string;
+  env_files?: string[];
+  order: number;
+}
+
+export interface ComposeNetwork {
+  name: string;
+  driver?: string;
+  external: boolean;
+}
+
+export interface ComposeVolume {
+  name: string;
+  driver?: string;
+  external: boolean;
+}
+
+export interface ComposeVariable {
+  name: string;
+  default?: string;
+  used: boolean;
+  required: boolean;
+}
+
+export interface StackProgress {
+  stack_id: string;
+  status: ManagedStackStatus;
+  service_count: number;
+  running_count: number;
+  failed_count: number;
+  services: ServiceProgress[];
+}
+
+export interface ServiceProgress {
+  name: string;
+  status: string;
+  message?: string;
+  order: number;
+}
+
 // API methods
 export const api = {
   // Setup (first-run)
@@ -3641,13 +3743,6 @@ export const api = {
       `/agents/${agentId}/docker/images/${encodeURIComponent(imageId)}${force ? "?force=true" : ""}`,
       { method: "DELETE" }
     ),
-
-  // Aliases for DeployWizard compatibility
-  getNetworks: (agentId: string) =>
-    fetchAPI<DockerNetwork[]>(`/agents/${agentId}/docker/networks`),
-
-  getVolumes: (agentId: string) =>
-    fetchAPI<DockerVolume[]>(`/agents/${agentId}/docker/volumes`),
 
   // Logs
   getUnifiedLogs: (
@@ -4222,9 +4317,10 @@ export const api = {
       method: "POST",
     }),
 
-  redeployDeployment: (agentId: string, deploymentId: string) =>
+  redeployDeployment: (agentId: string, deploymentId: string, pullLatest: boolean = true) =>
     fetchAPI<{ id: string; status: string; message: string }>(`/agents/${agentId}/deployments/${deploymentId}/redeploy`, {
       method: "POST",
+      body: JSON.stringify({ pull_latest: pullLatest }),
     }),
 
   syncDeploymentStatus: (agentId: string) =>
@@ -4234,6 +4330,33 @@ export const api = {
 
   deleteDeployment: (agentId: string, deploymentId: string) =>
     fetchAPI<{ message: string }>(`/agents/${agentId}/deployments/${deploymentId}`, {
+      method: "DELETE",
+    }),
+
+  // Managed Stacks (multi-service docker-compose deployments)
+  parseComposeYAML: (agentId: string, request: ParseComposeRequest) =>
+    fetchAPI<ParsedCompose>(`/agents/${agentId}/stacks/parse`, {
+      method: "POST",
+      body: JSON.stringify(request),
+    }),
+
+  createStack: (agentId: string, request: CreateStackRequest) =>
+    fetchAPI<{ id: string; status: string; service_count: number; message: string }>(`/agents/${agentId}/managed-stacks`, {
+      method: "POST",
+      body: JSON.stringify(request),
+    }),
+
+  listManagedStacks: (agentId: string) =>
+    fetchAPI<ManagedStack[]>(`/agents/${agentId}/managed-stacks`),
+
+  getManagedStack: (agentId: string, stackId: string) =>
+    fetchAPI<ManagedStack>(`/agents/${agentId}/managed-stacks/${stackId}`),
+
+  getStackProgress: (agentId: string, stackId: string) =>
+    fetchAPI<StackProgress>(`/agents/${agentId}/managed-stacks/${stackId}/progress`),
+
+  deleteStack: (agentId: string, stackId: string) =>
+    fetchAPI<{ message: string; containers_stopped: number }>(`/agents/${agentId}/managed-stacks/${stackId}`, {
       method: "DELETE",
     }),
 
