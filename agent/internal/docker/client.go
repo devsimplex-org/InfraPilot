@@ -1167,6 +1167,7 @@ type ContainerRunExtendedConfig struct {
 	Networks      []NetworkConfig
 	Volumes       []VolumeConfig
 	Command       []string
+	PullLatest    bool // Whether to pull latest image before deployment (default: true)
 }
 
 // RunContainer creates and starts a new container
@@ -1277,13 +1278,28 @@ func (c *Client) RunContainer(ctx context.Context, cfg ContainerRunConfig) (*Con
 // RunContainerExtended creates and starts a container with extended configuration
 // including secrets, networks, and volumes
 func (c *Client) RunContainerExtended(ctx context.Context, cfg ContainerRunExtendedConfig) (*ContainerRunResult, error) {
-	// Step 1: Always pull the image to ensure we have the latest version
-	reader, err := c.cli.ImagePull(ctx, cfg.ImageRef, image.PullOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to pull image %s: %w", cfg.ImageRef, err)
+	// Step 1: Pull the image if PullLatest is true (default behavior)
+	if cfg.PullLatest {
+		reader, err := c.cli.ImagePull(ctx, cfg.ImageRef, image.PullOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("failed to pull image %s: %w", cfg.ImageRef, err)
+		}
+		defer reader.Close()
+		io.Copy(io.Discard, reader)
+	} else {
+		// Check if image exists locally
+		_, _, err := c.cli.ImageInspectWithRaw(ctx, cfg.ImageRef)
+		if err != nil {
+			// Image doesn't exist, pull it anyway
+			reader, err := c.cli.ImagePull(ctx, cfg.ImageRef, image.PullOptions{})
+			if err != nil {
+				return nil, fmt.Errorf("failed to pull image %s: %w", cfg.ImageRef, err)
+			}
+			defer reader.Close()
+			io.Copy(io.Discard, reader)
+		}
+		// Image exists locally, proceed without pulling
 	}
-	defer reader.Close()
-	io.Copy(io.Discard, reader)
 
 	// Step 2: Create networks if needed
 	createdNetworkIDs := make(map[string]string) // name -> ID
