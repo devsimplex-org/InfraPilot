@@ -97,12 +97,13 @@ type ContainerConfigVolume struct {
 
 // DeploymentContainerConfig contains the extended container configuration for deployments
 type DeploymentContainerConfig struct {
-	EnvVars      map[string]string        `json:"env_vars,omitempty"`
-	Secrets      []ContainerConfigSecret  `json:"secrets,omitempty"`
-	SecretMethod string                   `json:"secret_method,omitempty"` // "env_vars" or "docker_secrets"
-	Networks     []ContainerConfigNetwork `json:"networks,omitempty"`
-	Volumes      []ContainerConfigVolume  `json:"volumes,omitempty"`
-	Labels       map[string]string        `json:"labels,omitempty"`
+	ContainerName string                   `json:"container_name,omitempty"`
+	EnvVars       map[string]string        `json:"env_vars,omitempty"`
+	Secrets       []ContainerConfigSecret  `json:"secrets,omitempty"`
+	SecretMethod  string                   `json:"secret_method,omitempty"` // "env_vars" or "docker_secrets"
+	Networks      []ContainerConfigNetwork `json:"networks,omitempty"`
+	Volumes       []ContainerConfigVolume  `json:"volumes,omitempty"`
+	Labels        map[string]string        `json:"labels,omitempty"`
 }
 
 type CreateDeploymentRequest struct {
@@ -608,8 +609,13 @@ func (h *Handler) runDeploymentPipeline(ctx context.Context, orgID, deploymentID
 
 // deployContainerToAgent sends a command to the agent to run a container
 func (h *Handler) deployContainerToAgent(ctx context.Context, deploymentID, agentID uuid.UUID, imageRef, serviceName, environment string, containerConfig *DeploymentContainerConfig) (*agentgrpc.ContainerRunResult, error) {
-	// Generate container name
-	containerName := fmt.Sprintf("%s-%s-%s", serviceName, environment, deploymentID.String()[:8])
+	// Use container_name from compose if provided, otherwise generate one
+	containerName := ""
+	if containerConfig != nil && containerConfig.ContainerName != "" {
+		containerName = containerConfig.ContainerName
+	} else {
+		containerName = fmt.Sprintf("%s-%s-%s", serviceName, environment, deploymentID.String()[:8])
+	}
 
 	// Build the run command options
 	labels := map[string]interface{}{
