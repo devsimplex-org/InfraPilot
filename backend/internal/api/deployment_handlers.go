@@ -80,10 +80,11 @@ type ContainerConfigSecret struct {
 
 // ContainerConfigNetwork represents a network configuration
 type ContainerConfigNetwork struct {
-	NetworkID       *string `json:"network_id,omitempty"`
-	NetworkName     *string `json:"network_name,omitempty"`
-	CreateIfMissing bool    `json:"create_if_missing,omitempty"`
-	Driver          string  `json:"driver,omitempty"`
+	NetworkID       *string  `json:"network_id,omitempty"`
+	NetworkName     *string  `json:"network_name,omitempty"`
+	CreateIfMissing bool     `json:"create_if_missing,omitempty"`
+	Driver          string   `json:"driver,omitempty"`
+	Aliases         []string `json:"aliases,omitempty"`
 }
 
 // ContainerConfigVolume represents a volume configuration
@@ -674,6 +675,9 @@ func (h *Handler) deployContainerToAgent(ctx context.Context, deploymentID, agen
 				}
 				if n.Driver != "" {
 					netOpt["driver"] = n.Driver
+				}
+				if len(n.Aliases) > 0 {
+					netOpt["aliases"] = n.Aliases
 				}
 				networksOpts[i] = netOpt
 			}

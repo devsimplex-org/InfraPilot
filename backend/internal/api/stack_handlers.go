@@ -709,13 +709,14 @@ func (h *Handler) createStack(c *gin.Context) {
 			},
 		}
 
-		// Add networks
+		// Add networks with service name as alias (like Docker Compose does)
 		if len(svc.Networks) > 0 {
 			for _, netName := range svc.Networks {
 				containerConfig.Networks = append(containerConfig.Networks, ContainerConfigNetwork{
 					NetworkName:     &netName,
 					CreateIfMissing: true,
 					Driver:          "bridge",
+					Aliases:         []string{svc.Name},
 				})
 			}
 		}
