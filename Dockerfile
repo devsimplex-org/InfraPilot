@@ -125,9 +125,30 @@ RUN apk add --no-cache \
     postgresql16-contrib \
     redis \
     curl \
+    wget \
+    bash \
     su-exec \
     apache2-utils \
     && rm -rf /var/cache/apk/*
+
+# Install Trivy for vulnerability scanning
+RUN wget -q -O /tmp/install-trivy.sh https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh && \
+    chmod +x /tmp/install-trivy.sh && \
+    (/tmp/install-trivy.sh -b /usr/local/bin || (sleep 5 && /tmp/install-trivy.sh -b /usr/local/bin)) && \
+    rm /tmp/install-trivy.sh && \
+    trivy --version
+
+# Install Syft for SBOM generation
+RUN wget -q -O /tmp/install-syft.sh https://raw.githubusercontent.com/anchore/syft/main/install.sh && \
+    chmod +x /tmp/install-syft.sh && \
+    (/tmp/install-syft.sh -b /usr/local/bin || (sleep 5 && /tmp/install-syft.sh -b /usr/local/bin)) && \
+    rm /tmp/install-syft.sh && \
+    syft version
+
+# Install OPA (Open Policy Agent) for policy evaluation
+RUN wget -q -O /usr/local/bin/opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64_static && \
+    chmod +x /usr/local/bin/opa && \
+    opa version
 
 # Create directories
 RUN mkdir -p \

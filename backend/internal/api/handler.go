@@ -208,6 +208,14 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				agents.DELETE("/:id/deployments/:did", h.RequireModifyContainers(), h.deleteDeployment)
 				agents.POST("/:id/deployments/sync", h.syncDeploymentStatus)
 
+				// Managed Stacks (multi-service docker-compose deployments)
+				agents.POST("/:id/stacks/parse", h.RequireModifyContainers(), h.parseComposeYAML)
+				agents.POST("/:id/managed-stacks", h.RequireModifyContainers(), h.createStack)
+				agents.GET("/:id/managed-stacks", h.listManagedStacks)
+				agents.GET("/:id/managed-stacks/:sid", h.getManagedStack)
+				agents.GET("/:id/managed-stacks/:sid/progress", h.getStackProgress)
+				agents.DELETE("/:id/managed-stacks/:sid", h.RequireModifyContainers(), h.deleteManagedStack)
+
 				// Webhooks (Epic 4: Dev Integration)
 				agents.GET("/:id/webhooks", h.listWebhooks)
 				agents.POST("/:id/webhooks", h.RequireModifyContainers(), h.createWebhook)

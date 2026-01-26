@@ -39,34 +39,36 @@ const (
 )
 
 type Deployment struct {
-	ID               uuid.UUID       `json:"id"`
-	OrgID            uuid.UUID       `json:"org_id"`
-	AgentID          uuid.UUID       `json:"agent_id"`
-	ServiceName      string          `json:"service_name"`
-	Environment      string          `json:"environment"`
-	ImageRegistry    *string         `json:"image_registry,omitempty"`
-	ImageRepository  string          `json:"image_repository"`
-	ImageTag         *string         `json:"image_tag,omitempty"`
-	ImageDigest      *string         `json:"image_digest,omitempty"`
-	GitRepo          *string         `json:"git_repo,omitempty"`
-	GitBranch        *string         `json:"git_branch,omitempty"`
-	GitCommit        *string         `json:"git_commit,omitempty"`
-	CIProvider       *string         `json:"ci_provider,omitempty"`
-	CIPipelineID     *string         `json:"ci_pipeline_id,omitempty"`
-	CIBuildURL       *string         `json:"ci_build_url,omitempty"`
-	ScanResultID     *uuid.UUID      `json:"scan_result_id,omitempty"`
-	SBOMID           *uuid.UUID      `json:"sbom_id,omitempty"`
-	PolicyDecision   PolicyDecision  `json:"policy_decision"`
-	PolicyReason     *string         `json:"policy_reason,omitempty"`
+	ID               uuid.UUID        `json:"id"`
+	OrgID            uuid.UUID        `json:"org_id"`
+	AgentID          uuid.UUID        `json:"agent_id"`
+	ServiceName      string           `json:"service_name"`
+	Environment      string           `json:"environment"`
+	ImageRegistry    *string          `json:"image_registry,omitempty"`
+	ImageRepository  string           `json:"image_repository"`
+	ImageTag         *string          `json:"image_tag,omitempty"`
+	ImageDigest      *string          `json:"image_digest,omitempty"`
+	GitRepo          *string          `json:"git_repo,omitempty"`
+	GitBranch        *string          `json:"git_branch,omitempty"`
+	GitCommit        *string          `json:"git_commit,omitempty"`
+	CIProvider       *string          `json:"ci_provider,omitempty"`
+	CIPipelineID     *string          `json:"ci_pipeline_id,omitempty"`
+	CIBuildURL       *string          `json:"ci_build_url,omitempty"`
+	ScanResultID     *uuid.UUID       `json:"scan_result_id,omitempty"`
+	SBOMID           *uuid.UUID       `json:"sbom_id,omitempty"`
+	PolicyDecision   PolicyDecision   `json:"policy_decision"`
+	PolicyReason     *string          `json:"policy_reason,omitempty"`
 	Status           DeploymentStatus `json:"status"`
-	StatusMessage    *string         `json:"status_message,omitempty"`
-	ContainerID      *string         `json:"container_id,omitempty"`
-	ContainerName    *string         `json:"container_name,omitempty"`
-	ProxyHostID      *uuid.UUID      `json:"proxy_host_id,omitempty"`
-	DeployedBy       *uuid.UUID      `json:"deployed_by,omitempty"`
-	DeployedAt       *time.Time      `json:"deployed_at,omitempty"`
-	CreatedAt        time.Time       `json:"created_at"`
-	UpdatedAt        time.Time       `json:"updated_at"`
+	StatusMessage    *string          `json:"status_message,omitempty"`
+	ContainerID      *string          `json:"container_id,omitempty"`
+	ContainerName    *string          `json:"container_name,omitempty"`
+	ProxyHostID      *uuid.UUID       `json:"proxy_host_id,omitempty"`
+	StackID          *uuid.UUID       `json:"stack_id,omitempty"`
+	ServiceOrder     int              `json:"service_order,omitempty"`
+	DeployedBy       *uuid.UUID       `json:"deployed_by,omitempty"`
+	DeployedAt       *time.Time       `json:"deployed_at,omitempty"`
+	CreatedAt        time.Time        `json:"created_at"`
+	UpdatedAt        time.Time        `json:"updated_at"`
 }
 
 // ContainerConfigSecret represents a secret to be mounted in the container
@@ -78,10 +80,11 @@ type ContainerConfigSecret struct {
 
 // ContainerConfigNetwork represents a network configuration
 type ContainerConfigNetwork struct {
-	NetworkID       *string `json:"network_id,omitempty"`
-	NetworkName     *string `json:"network_name,omitempty"`
-	CreateIfMissing bool    `json:"create_if_missing,omitempty"`
-	Driver          string  `json:"driver,omitempty"`
+	NetworkID       *string  `json:"network_id,omitempty"`
+	NetworkName     *string  `json:"network_name,omitempty"`
+	CreateIfMissing bool     `json:"create_if_missing,omitempty"`
+	Driver          string   `json:"driver,omitempty"`
+	Aliases         []string `json:"aliases,omitempty"`
 }
 
 // ContainerConfigVolume represents a volume configuration
@@ -95,11 +98,14 @@ type ContainerConfigVolume struct {
 
 // DeploymentContainerConfig contains the extended container configuration for deployments
 type DeploymentContainerConfig struct {
-	EnvVars      map[string]string        `json:"env_vars,omitempty"`
-	Secrets      []ContainerConfigSecret  `json:"secrets,omitempty"`
-	SecretMethod string                   `json:"secret_method,omitempty"` // "env_vars" or "docker_secrets"
-	Networks     []ContainerConfigNetwork `json:"networks,omitempty"`
-	Volumes      []ContainerConfigVolume  `json:"volumes,omitempty"`
+	ContainerName string                   `json:"container_name,omitempty"`
+	EnvVars       map[string]string        `json:"env_vars,omitempty"`
+	Secrets       []ContainerConfigSecret  `json:"secrets,omitempty"`
+	SecretMethod  string                   `json:"secret_method,omitempty"` // "env_vars" or "docker_secrets"
+	Networks      []ContainerConfigNetwork `json:"networks,omitempty"`
+	Volumes       []ContainerConfigVolume  `json:"volumes,omitempty"`
+	Labels        map[string]string        `json:"labels,omitempty"`
+	Command       []string                 `json:"command,omitempty"`
 }
 
 type CreateDeploymentRequest struct {
@@ -138,6 +144,7 @@ func (h *Handler) listDeployments(c *gin.Context) {
 		       policy_decision, policy_reason,
 		       status, status_message,
 		       container_id, container_name, proxy_host_id,
+		       stack_id, service_order,
 		       deployed_by, deployed_at, created_at, updated_at
 		FROM deployments
 		WHERE org_id = $1 AND agent_id = $2
@@ -183,6 +190,7 @@ func (h *Handler) listDeployments(c *gin.Context) {
 			&d.PolicyDecision, &d.PolicyReason,
 			&d.Status, &d.StatusMessage,
 			&d.ContainerID, &d.ContainerName, &d.ProxyHostID,
+			&d.StackID, &d.ServiceOrder,
 			&d.DeployedBy, &d.DeployedAt, &d.CreatedAt, &d.UpdatedAt,
 		); err != nil {
 			h.logger.Warn("Failed to scan deployment", zap.Error(err))
@@ -211,6 +219,7 @@ func (h *Handler) getDeployment(c *gin.Context) {
 		       policy_decision, policy_reason,
 		       status, status_message,
 		       container_id, container_name, proxy_host_id,
+		       stack_id, service_order,
 		       deployed_by, deployed_at, created_at, updated_at
 		FROM deployments
 		WHERE id = $1 AND org_id = $2 AND agent_id = $3
@@ -223,6 +232,7 @@ func (h *Handler) getDeployment(c *gin.Context) {
 		&d.PolicyDecision, &d.PolicyReason,
 		&d.Status, &d.StatusMessage,
 		&d.ContainerID, &d.ContainerName, &d.ProxyHostID,
+		&d.StackID, &d.ServiceOrder,
 		&d.DeployedBy, &d.DeployedAt, &d.CreatedAt, &d.UpdatedAt,
 	)
 
@@ -310,7 +320,7 @@ func (h *Handler) createDeployment(c *gin.Context) {
 		imageDigest = *req.ImageDigest
 	}
 	// Use background context for async pipeline (request context will be canceled)
-	go h.runDeploymentPipeline(context.Background(), orgID, deploymentID, req.ImageRepository, imageTag, imageDigest, req.ContainerConfig)
+	go h.runDeploymentPipeline(context.Background(), orgID, deploymentID, req.ImageRepository, imageTag, imageDigest, req.ContainerConfig, false)
 
 	c.JSON(http.StatusCreated, gin.H{
 		"id":      deploymentID,
@@ -321,10 +331,11 @@ func (h *Handler) createDeployment(c *gin.Context) {
 
 // ==================== Deployment Pipeline ====================
 
-func (h *Handler) runDeploymentPipeline(ctx context.Context, orgID, deploymentID uuid.UUID, imageRepo, imageTag, imageDigest string, containerConfig *DeploymentContainerConfig) {
+func (h *Handler) runDeploymentPipeline(ctx context.Context, orgID, deploymentID uuid.UUID, imageRepo, imageTag, imageDigest string, containerConfig *DeploymentContainerConfig, skipScanning bool) {
 	logger := h.logger.With(
 		zap.String("deployment_id", deploymentID.String()),
 		zap.String("org_id", orgID.String()),
+		zap.Bool("skip_scanning", skipScanning),
 	)
 
 	// Build full image reference
@@ -337,13 +348,53 @@ func (h *Handler) runDeploymentPipeline(ctx context.Context, orgID, deploymentID
 
 	logger.Info("Starting deployment pipeline", zap.String("image", imageRef))
 
-	// Step 1: Update status to scanning
-	if err := h.updateDeploymentStatus(ctx, deploymentID.String(), "scanning", "Scanning image for vulnerabilities"); err != nil {
-		logger.Error("Failed to update deployment status", zap.Error(err))
-		return
+	// Declare variables that will be used in both branches
+	var policyDecision string
+	var policyReason string
+	var deployment struct {
+		ServiceName  string
+		Environment  string
+		ImageRepo    string
+		ImageTag     string
+		ImageDigest  string
+		GitBranch    string
+		GitCommit    string
 	}
 
-	// Step 2: Scan image with Trivy
+	if skipScanning {
+		// Skip scanning - go directly to deployment
+		logger.Info("Skipping security scanning (skip_scanning=true)")
+
+		// Fetch deployment details (needed for container deployment)
+		err := h.db.QueryRow(ctx, `
+			SELECT service_name, environment, image_repository,
+			       COALESCE(image_tag, ''), COALESCE(image_digest, ''),
+			       COALESCE(git_branch, ''), COALESCE(git_commit, '')
+			FROM deployments WHERE id = $1
+		`, deploymentID).Scan(
+			&deployment.ServiceName, &deployment.Environment, &deployment.ImageRepo,
+			&deployment.ImageTag, &deployment.ImageDigest,
+			&deployment.GitBranch, &deployment.GitCommit,
+		)
+		if err != nil {
+			logger.Error("Failed to fetch deployment details", zap.Error(err))
+			h.updateDeploymentStatus(ctx, deploymentID.String(), "failed", "Failed to fetch deployment details")
+			return
+		}
+
+		if err := h.updateDeploymentStatus(ctx, deploymentID.String(), "deploying", "Deploying container (scanning skipped)"); err != nil {
+			logger.Error("Failed to update deployment status", zap.Error(err))
+			return
+		}
+		policyDecision = "allow"
+	} else {
+		// Step 1: Update status to scanning
+		if err := h.updateDeploymentStatus(ctx, deploymentID.String(), "scanning", "Scanning image for vulnerabilities"); err != nil {
+			logger.Error("Failed to update deployment status", zap.Error(err))
+			return
+		}
+
+		// Step 2: Scan image with Trivy
 	logger.Info("Scanning image for vulnerabilities")
 	scanResult, err := h.scanner.ScanImage(ctx, imageRef)
 	if err != nil {
@@ -459,15 +510,6 @@ func (h *Handler) runDeploymentPipeline(ctx context.Context, orgID, deploymentID
 	logger.Info("Evaluating deployment policy")
 
 	// Fetch deployment details for policy evaluation
-	var deployment struct {
-		ServiceName  string
-		Environment  string
-		ImageRepo    string
-		ImageTag     string
-		ImageDigest  string
-		GitBranch    string
-		GitCommit    string
-	}
 	err = h.db.QueryRow(ctx, `
 		SELECT service_name, environment, image_repository,
 		       COALESCE(image_tag, ''), COALESCE(image_digest, ''),
@@ -517,8 +559,8 @@ func (h *Handler) runDeploymentPipeline(ctx context.Context, orgID, deploymentID
 		}
 	}
 
-	policyDecision := policyResult.Decision
-	policyReason := policyResult.Reason
+	policyDecision = policyResult.Decision
+	policyReason = policyResult.Reason
 
 	logger.Info("Policy evaluation completed",
 		zap.String("decision", policyDecision),
@@ -538,27 +580,27 @@ func (h *Handler) runDeploymentPipeline(ctx context.Context, orgID, deploymentID
 		return
 	}
 
-	logger.Info("Deployment pipeline completed",
-		zap.String("policy_decision", policyDecision),
-		zap.Int("total_vulns", scanResult.TotalCount),
-	)
+		logger.Info("Deployment pipeline completed with scanning",
+			zap.String("policy_decision", policyDecision),
+		)
 
-	// Epic 8: Generate developer feedback for policy violations
-	if h.feedbackIntegration != nil {
-		if err := h.feedbackIntegration.GenerateFeedbackForDeployment(ctx, deploymentID); err != nil {
-			logger.Warn("Failed to generate developer feedback",
-				zap.Error(err),
-				zap.String("deployment_id", deploymentID.String()),
-			)
-			// Don't fail deployment on feedback generation errors
+		// Epic 8: Generate developer feedback for policy violations
+		if h.feedbackIntegration != nil {
+			if err := h.feedbackIntegration.GenerateFeedbackForDeployment(ctx, deploymentID); err != nil {
+				logger.Warn("Failed to generate developer feedback",
+					zap.Error(err),
+					zap.String("deployment_id", deploymentID.String()),
+				)
+				// Don't fail deployment on feedback generation errors
+			}
 		}
-	}
+	} // end of !skipScanning block
 
 	// Phase 4: Deploy container to agent
 	if policyDecision != "deny" {
 		// Get the agent ID for this deployment
 		var agentID uuid.UUID
-		err = h.db.QueryRow(ctx, `SELECT agent_id FROM deployments WHERE id = $1`, deploymentID).Scan(&agentID)
+		err := h.db.QueryRow(ctx, `SELECT agent_id FROM deployments WHERE id = $1`, deploymentID).Scan(&agentID)
 		if err != nil {
 			logger.Error("Failed to get agent ID for deployment", zap.Error(err))
 			h.updateDeploymentStatus(ctx, deploymentID.String(), "failed", "Failed to get agent ID")
@@ -601,19 +643,33 @@ func (h *Handler) runDeploymentPipeline(ctx context.Context, orgID, deploymentID
 
 // deployContainerToAgent sends a command to the agent to run a container
 func (h *Handler) deployContainerToAgent(ctx context.Context, deploymentID, agentID uuid.UUID, imageRef, serviceName, environment string, containerConfig *DeploymentContainerConfig) (*agentgrpc.ContainerRunResult, error) {
-	// Generate container name
-	containerName := fmt.Sprintf("%s-%s-%s", serviceName, environment, deploymentID.String()[:8])
+	// Use container_name from compose if provided, otherwise generate one
+	containerName := ""
+	if containerConfig != nil && containerConfig.ContainerName != "" {
+		containerName = containerConfig.ContainerName
+	} else {
+		containerName = fmt.Sprintf("%s-%s-%s", serviceName, environment, deploymentID.String()[:8])
+	}
 
 	// Build the run command options
+	labels := map[string]interface{}{
+		"infrapilot.deployment_id": deploymentID.String(),
+		"infrapilot.service":       serviceName,
+		"infrapilot.environment":   environment,
+	}
+
+	// Merge custom labels from container config (e.g., compose project labels)
+	if containerConfig != nil && len(containerConfig.Labels) > 0 {
+		for k, v := range containerConfig.Labels {
+			labels[k] = v
+		}
+	}
+
 	options := map[string]interface{}{
 		"image_ref":      imageRef,
 		"name":           containerName,
 		"restart_policy": "unless-stopped",
-		"labels": map[string]interface{}{
-			"infrapilot.deployment_id": deploymentID.String(),
-			"infrapilot.service":       serviceName,
-			"infrapilot.environment":   environment,
-		},
+		"labels":         labels,
 	}
 
 	// Add container configuration if provided
@@ -653,6 +709,9 @@ func (h *Handler) deployContainerToAgent(ctx context.Context, deploymentID, agen
 				if n.Driver != "" {
 					netOpt["driver"] = n.Driver
 				}
+				if len(n.Aliases) > 0 {
+					netOpt["aliases"] = n.Aliases
+				}
 				networksOpts[i] = netOpt
 			}
 			options["networks"] = networksOpts
@@ -676,6 +735,11 @@ func (h *Handler) deployContainerToAgent(ctx context.Context, deploymentID, agen
 				volumesOpts[i] = volOpt
 			}
 			options["volumes"] = volumesOpts
+		}
+
+		// Add command
+		if len(containerConfig.Command) > 0 {
+			options["command"] = containerConfig.Command
 		}
 	}
 
@@ -895,7 +959,7 @@ func (h *Handler) redeployDeployment(c *gin.Context) {
 
 	// Trigger deployment pipeline asynchronously
 	go h.runDeploymentPipeline(context.Background(), orgID, newID,
-		original.ImageRepository, imageTag, imageDigest, containerConfig)
+		original.ImageRepository, imageTag, imageDigest, containerConfig, false)
 
 	c.JSON(http.StatusOK, gin.H{
 		"id":      newID.String(),

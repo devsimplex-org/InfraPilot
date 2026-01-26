@@ -129,6 +129,33 @@ type ResourceLimits struct {
 	PidsLimit   int64  `json:"pids_limit"`
 }
 
+// isManagementContainer checks if the given container is the InfraPilot management container itself
+// This prevents users from accidentally stopping/deleting the container that runs this application
+func isManagementContainer(ctx context.Context, cli *client.Client, containerID string) (bool, string) {
+	info, err := cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return false, ""
+	}
+
+	// Check container name (remove leading slash)
+	name := strings.TrimPrefix(info.Name, "/")
+
+	// Protected container names
+	protectedNames := []string{"infrapilot", "infrapilot-ee", "infrapilot_ee"}
+	for _, protected := range protectedNames {
+		if name == protected {
+			return true, name
+		}
+	}
+
+	// Also check if image is the infrapilot image
+	if strings.Contains(info.Config.Image, "infrapilot") {
+		return true, name
+	}
+
+	return false, name
+}
+
 // listContainersReal fetches containers from Docker daemon with real-time stats
 // NOTE: This is for local development only. In production, this should
 // query the database which is populated by the agent via gRPC.
@@ -344,6 +371,15 @@ func (h *Handler) stopContainerReal(c *gin.Context) {
 	}
 	defer cli.Close()
 
+	// Prevent stopping the management container
+	if isManagement, name := isManagementContainer(ctx, cli, containerID); isManagement {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":   "Cannot stop management container",
+			"message": "Stopping the InfraPilot container (" + name + ") would lock you out of the system",
+		})
+		return
+	}
+
 	timeout := 10 // seconds
 	if err := cli.ContainerStop(ctx, containerID, container.StopOptions{Timeout: &timeout}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to stop container: " + err.Error()})
@@ -430,6 +466,26 @@ func (h *Handler) deleteContainerReal(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":         "container name does not match",
 			"expected_name": containerName,
+		})
+		return
+	}
+
+	// Prevent deleting the management container
+	protectedNames := []string{"infrapilot", "infrapilot-ee", "infrapilot_ee"}
+	for _, protected := range protectedNames {
+		if containerName == protected {
+			c.JSON(http.StatusForbidden, gin.H{
+				"error":   "Cannot delete management container",
+				"message": "Deleting the InfraPilot container (" + containerName + ") would lock you out of the system",
+			})
+			return
+		}
+	}
+	// Also check if image is the infrapilot image
+	if strings.Contains(info.Config.Image, "infrapilot") {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":   "Cannot delete management container",
+			"message": "Deleting the InfraPilot container (" + containerName + ") would lock you out of the system",
 		})
 		return
 	}
