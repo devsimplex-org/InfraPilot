@@ -90,6 +90,7 @@ export function StackDeployWizard({
 
   // Step 3: Services
   const [serviceConfigs, setServiceConfigs] = useState<Record<string, ServiceConfig>>({});
+  const [serviceEnvFiles, setServiceEnvFiles] = useState<Record<string, string>>({});
 
   // Progress tracking
   const [progress, setProgress] = useState<StackProgress | null>(null);
@@ -200,6 +201,7 @@ export function StackDeployWizard({
       setEnvFileContent("");
       setEnvParseWarning(null);
       setServiceConfigs({});
+      setServiceEnvFiles({});
       setStackId(null);
       setErrorMessage(null);
       setProgress(null);
@@ -279,6 +281,60 @@ export function StackDeployWizard({
       };
       reader.readAsText(file);
     }
+  };
+
+  // Parse per-service .env file content
+  const parseServiceEnvFile = (serviceName: string, content: string) => {
+    const parsed: Record<string, string> = {};
+    for (const line of content.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+      if (match) {
+        let value = match[2].trim();
+        if ((value.startsWith('"') && value.endsWith('"')) ||
+            (value.startsWith("'") && value.endsWith("'"))) {
+          value = value.slice(1, -1);
+        }
+        parsed[match[1]] = value;
+      }
+    }
+    setServiceConfigs(prev => ({
+      ...prev,
+      [serviceName]: {
+        ...prev[serviceName],
+        envOverrides: { ...prev[serviceName]?.envOverrides, ...parsed },
+      },
+    }));
+  };
+
+  // Handle per-service .env file upload
+  const handleServiceEnvFileUpload = (serviceName: string, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const content = event.target?.result as string;
+        setServiceEnvFiles(prev => ({ ...prev, [serviceName]: content }));
+        parseServiceEnvFile(serviceName, content);
+      };
+      reader.readAsText(file);
+    }
+  };
+
+  // Remove a per-service env var
+  const removeServiceEnvVar = (serviceName: string, key: string) => {
+    setServiceConfigs(prev => {
+      const newOverrides = { ...prev[serviceName].envOverrides };
+      delete newOverrides[key];
+      return {
+        ...prev,
+        [serviceName]: {
+          ...prev[serviceName],
+          envOverrides: newOverrides,
+        },
+      };
+    });
   };
 
   // Navigation
@@ -659,7 +715,7 @@ export function StackDeployWizard({
                     </div>
 
                     {config.enabled && (
-                      <div className="mt-3 pt-3 border-t border-zinc-700 space-y-2">
+                      <div className="mt-3 pt-3 border-t border-zinc-700 space-y-3">
                         <div className="flex items-center gap-2">
                           <label className="text-xs text-zinc-400 w-20">Tag Override:</label>
                           <Input
@@ -674,6 +730,72 @@ export function StackDeployWizard({
                           <p className="text-xs text-zinc-500">
                             Depends on: {service.depends_on.join(", ")}
                           </p>
+                        )}
+
+                        {service.env_files && service.env_files.length > 0 && (
+                          <div className="pt-2 border-t border-zinc-700/50 space-y-2">
+                            <div className="flex items-center gap-2">
+                              <FileText className="h-3.5 w-3.5 text-zinc-400" />
+                              <span className="text-xs text-zinc-400">
+                                Environment File{service.env_files.length > 1 ? "s" : ""}:{" "}
+                                <span className="text-zinc-300 font-mono">
+                                  {service.env_files.join(", ")}
+                                </span>
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <label className="cursor-pointer flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-800 border border-zinc-700 rounded text-xs text-zinc-300 hover:bg-zinc-700 transition-colors">
+                                <Upload className="h-3.5 w-3.5" />
+                                Upload .env
+                                <input
+                                  type="file"
+                                  accept=".env,.env.*"
+                                  onChange={(e) => handleServiceEnvFileUpload(service.name, e)}
+                                  className="hidden"
+                                />
+                              </label>
+                              <span className="text-zinc-500 text-xs">or paste below</span>
+                            </div>
+
+                            <textarea
+                              value={serviceEnvFiles[service.name] || ""}
+                              onChange={(e) => {
+                                const content = e.target.value;
+                                setServiceEnvFiles(prev => ({ ...prev, [service.name]: content }));
+                                parseServiceEnvFile(service.name, content);
+                              }}
+                              placeholder="# Paste .env content here&#10;DB_HOST=localhost&#10;DB_PASSWORD=secret"
+                              className="w-full h-24 px-2.5 py-2 bg-zinc-900 border border-zinc-700 rounded text-white font-mono text-xs resize-none focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                            />
+
+                            {Object.keys(config.envOverrides).length > 0 && (
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-1.5 text-xs text-green-400">
+                                  <CheckCircle className="h-3.5 w-3.5" />
+                                  {Object.keys(config.envOverrides).length} variable{Object.keys(config.envOverrides).length !== 1 ? "s" : ""} loaded
+                                </div>
+                                <div className="space-y-1 max-h-32 overflow-y-auto">
+                                  {Object.entries(config.envOverrides).map(([key, value]) => (
+                                    <div key={key} className="flex items-center gap-2">
+                                      <span className="text-xs font-mono text-zinc-400 w-32 truncate flex-shrink-0">{key}</span>
+                                      <Input
+                                        value={value}
+                                        onChange={(e) => updateServiceEnv(service.name, key, e.target.value)}
+                                        className="flex-1 text-xs h-7"
+                                      />
+                                      <button
+                                        onClick={() => removeServiceEnvVar(service.name, key)}
+                                        className="p-1 text-zinc-500 hover:text-red-400 transition-colors"
+                                      >
+                                        <Trash2 className="h-3 w-3" />
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         )}
                       </div>
                     )}
@@ -778,19 +900,29 @@ export function StackDeployWizard({
 
             <div className="p-4 bg-zinc-800/50 rounded-lg border border-zinc-700">
               <h4 className="text-xs text-zinc-500 uppercase mb-2">Services to Deploy</h4>
-              <div className="space-y-1">
+              <div className="space-y-2">
                 {parsedCompose?.services
                   .filter((s) => serviceConfigs[s.name]?.enabled)
-                  .map((service) => (
-                    <div key={service.name} className="flex items-center justify-between text-sm">
-                      <span className="text-white">{service.name}</span>
-                      <span className="text-zinc-400 font-mono text-xs">
-                        {serviceConfigs[service.name]?.tagOverride
-                          ? `${service.image.split(":")[0]}:${serviceConfigs[service.name].tagOverride}`
-                          : service.image}
-                      </span>
-                    </div>
-                  ))}
+                  .map((service) => {
+                    const envCount = Object.keys(serviceConfigs[service.name]?.envOverrides || {}).length;
+                    return (
+                      <div key={service.name}>
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-white">{service.name}</span>
+                          <span className="text-zinc-400 font-mono text-xs">
+                            {serviceConfigs[service.name]?.tagOverride
+                              ? `${service.image.split(":")[0]}:${serviceConfigs[service.name].tagOverride}`
+                              : service.image}
+                          </span>
+                        </div>
+                        {envCount > 0 && (
+                          <p className="text-xs text-zinc-500 mt-0.5 ml-2">
+                            {envCount} env variable{envCount !== 1 ? "s" : ""} configured
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
               </div>
             </div>
 

@@ -89,6 +89,7 @@ type ComposeService struct {
 	Command       []string          `json:"command,omitempty"`
 	Labels        map[string]string `json:"labels,omitempty"`
 	Restart       string            `json:"restart,omitempty"`
+	EnvFiles      []string          `json:"env_files,omitempty"`
 	Order         int               `json:"order"`
 }
 
@@ -170,6 +171,7 @@ func parseCompose(yamlContent string, variables map[string]string) (*ParsedCompo
 			Command       interface{}            `yaml:"command"`
 			Labels        interface{}            `yaml:"labels"`
 			Restart       string                 `yaml:"restart"`
+			EnvFile       interface{}            `yaml:"env_file"`
 		} `yaml:"services"`
 		Networks map[string]struct {
 			Driver   string `yaml:"driver"`
@@ -218,6 +220,9 @@ func parseCompose(yamlContent string, variables map[string]string) (*ParsedCompo
 
 		// Parse labels (can be list or map)
 		cs.Labels = parseLabels(svc.Labels)
+
+		// Parse env_file (can be string or list)
+		cs.EnvFiles = parseEnvFile(svc.EnvFile)
 
 		services = append(services, cs)
 	}
@@ -533,6 +538,26 @@ func parseLabels(v interface{}) map[string]string {
 	}
 
 	return labels
+}
+
+// parseEnvFile handles both string and list formats for env_file
+func parseEnvFile(v interface{}) []string {
+	if v == nil {
+		return nil
+	}
+	switch val := v.(type) {
+	case string:
+		return []string{val}
+	case []interface{}:
+		files := make([]string, 0, len(val))
+		for _, f := range val {
+			if s, ok := f.(string); ok {
+				files = append(files, s)
+			}
+		}
+		return files
+	}
+	return nil
 }
 
 // topologicalSort orders services by dependencies using Kahn's algorithm

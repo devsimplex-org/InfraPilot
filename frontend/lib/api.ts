@@ -3292,6 +3292,7 @@ export interface ComposeService {
   command?: string[];
   labels?: Record<string, string>;
   restart?: string;
+  env_files?: string[];
   order: number;
 }
 
