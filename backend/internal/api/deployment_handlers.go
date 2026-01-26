@@ -106,6 +106,7 @@ type DeploymentContainerConfig struct {
 	Volumes       []ContainerConfigVolume  `json:"volumes,omitempty"`
 	Labels        map[string]string        `json:"labels,omitempty"`
 	Command       []string                 `json:"command,omitempty"`
+	PullLatest    bool                     `json:"pull_latest,omitempty"` // Whether to pull latest image before deployment
 }
 
 type CreateDeploymentRequest struct {
@@ -741,6 +742,9 @@ func (h *Handler) deployContainerToAgent(ctx context.Context, deploymentID, agen
 		if len(containerConfig.Command) > 0 {
 			options["command"] = containerConfig.Command
 		}
+
+		// Add pull_latest flag
+		options["pull_latest"] = containerConfig.PullLatest
 	}
 
 	optionsJSON, err := json.Marshal(options)
@@ -874,6 +878,17 @@ func (h *Handler) redeployDeployment(c *gin.Context) {
 		return
 	}
 
+	// Parse request body for redeploy options
+	var req struct {
+		PullLatest bool `json:"pull_latest"`
+	}
+	// Default to true if not specified
+	req.PullLatest = true
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// If there's no body, that's OK - use defaults
+		h.logger.Debug("No request body for redeploy, using defaults", zap.Error(err))
+	}
+
 	// Fetch original deployment with all fields needed for redeployment
 	var original struct {
 		ServiceName     string
@@ -946,6 +961,17 @@ func (h *Handler) redeployDeployment(c *gin.Context) {
 			h.logger.Warn("Failed to parse container config for redeploy", zap.Error(err))
 		}
 	}
+
+	// Set pull_latest flag from request (create config if nil)
+	if containerConfig == nil {
+		containerConfig = &DeploymentContainerConfig{}
+	}
+	containerConfig.PullLatest = req.PullLatest
+
+	h.logger.Info("Redeploy options",
+		zap.Bool("pull_latest", req.PullLatest),
+		zap.String("deployment_id", newID.String()),
+	)
 
 	// Prepare image tag and digest for pipeline
 	imageTag := ""
