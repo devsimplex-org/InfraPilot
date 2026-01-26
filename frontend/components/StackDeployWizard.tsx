@@ -24,6 +24,9 @@ import {
   Trash2,
   RefreshCw,
   ClipboardPaste,
+  Download,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button, Input } from "@/components/ui/page-layout";
@@ -91,6 +94,7 @@ export function StackDeployWizard({
   // Step 3: Services
   const [serviceConfigs, setServiceConfigs] = useState<Record<string, ServiceConfig>>({});
   const [serviceEnvFiles, setServiceEnvFiles] = useState<Record<string, string>>({});
+  const [expandedEnvSections, setExpandedEnvSections] = useState<Record<string, boolean>>({});
 
   // Progress tracking
   const [progress, setProgress] = useState<StackProgress | null>(null);
@@ -202,6 +206,7 @@ export function StackDeployWizard({
       setEnvParseWarning(null);
       setServiceConfigs({});
       setServiceEnvFiles({});
+      setExpandedEnvSections({});
       setStackId(null);
       setErrorMessage(null);
       setProgress(null);
@@ -320,6 +325,23 @@ export function StackDeployWizard({
       };
       reader.readAsText(file);
     }
+  };
+
+  // Import global variables into a service's env overrides
+  const importGlobalVarsToService = (serviceName: string) => {
+    const globalVars: Record<string, string> = {};
+    for (const [key, value] of Object.entries(variables)) {
+      if (value) {
+        globalVars[key] = value;
+      }
+    }
+    setServiceConfigs(prev => ({
+      ...prev,
+      [serviceName]: {
+        ...prev[serviceName],
+        envOverrides: { ...prev[serviceName]?.envOverrides, ...globalVars },
+      },
+    }));
   };
 
   // Remove a per-service env var
@@ -732,19 +754,62 @@ export function StackDeployWizard({
                           </p>
                         )}
 
+                        {/* Resolved environment variables from YAML */}
+                        {service.environment && Object.keys(service.environment).length > 0 && (
+                          <div className="pt-2 border-t border-zinc-700/50">
+                            <button
+                              onClick={() => setExpandedEnvSections(prev => ({
+                                ...prev,
+                                [`${service.name}-env`]: !prev[`${service.name}-env`],
+                              }))}
+                              className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-zinc-300 transition-colors w-full"
+                            >
+                              {expandedEnvSections[`${service.name}-env`] ? (
+                                <ChevronDown className="h-3.5 w-3.5" />
+                              ) : (
+                                <ChevronRight className="h-3.5 w-3.5" />
+                              )}
+                              <Variable className="h-3.5 w-3.5" />
+                              <span>{Object.keys(service.environment).length} environment variable{Object.keys(service.environment).length !== 1 ? "s" : ""} from YAML</span>
+                            </button>
+                            {expandedEnvSections[`${service.name}-env`] && (
+                              <div className="mt-2 space-y-1 max-h-40 overflow-y-auto pl-5">
+                                {Object.entries(service.environment).map(([key, value]) => (
+                                  <div key={key} className="flex items-center gap-2 text-xs">
+                                    <span className="font-mono text-zinc-400 w-40 truncate flex-shrink-0">{key}</span>
+                                    <span className="font-mono text-zinc-500 truncate">
+                                      {value || <span className="italic text-zinc-600">empty</span>}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Per-service env_file section */}
                         {service.env_files && service.env_files.length > 0 && (
                           <div className="pt-2 border-t border-zinc-700/50 space-y-2">
                             <div className="flex items-center gap-2">
                               <FileText className="h-3.5 w-3.5 text-zinc-400" />
                               <span className="text-xs text-zinc-400">
-                                Environment File{service.env_files.length > 1 ? "s" : ""}:{" "}
+                                env_file:{" "}
                                 <span className="text-zinc-300 font-mono">
                                   {service.env_files.join(", ")}
                                 </span>
                               </span>
                             </div>
 
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {Object.keys(variables).filter(k => variables[k]).length > 0 && (
+                                <button
+                                  onClick={() => importGlobalVarsToService(service.name)}
+                                  className="flex items-center gap-1.5 px-2.5 py-1.5 bg-indigo-500/10 border border-indigo-500/30 rounded text-xs text-indigo-400 hover:bg-indigo-500/20 transition-colors"
+                                >
+                                  <Download className="h-3.5 w-3.5" />
+                                  Import from Global Variables ({Object.keys(variables).filter(k => variables[k]).length})
+                                </button>
+                              )}
                               <label className="cursor-pointer flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-800 border border-zinc-700 rounded text-xs text-zinc-300 hover:bg-zinc-700 transition-colors">
                                 <Upload className="h-3.5 w-3.5" />
                                 Upload .env
