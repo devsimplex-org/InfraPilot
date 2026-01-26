@@ -461,7 +461,35 @@ func parseCommand(v interface{}) []string {
 
 	switch val := v.(type) {
 	case string:
-		return strings.Fields(val)
+		// Shell-like parsing that handles quoted strings
+		var args []string
+		current := ""
+		inQuote := false
+		quoteChar := byte(0)
+		for i := 0; i < len(val); i++ {
+			ch := val[i]
+			if inQuote {
+				if ch == quoteChar {
+					inQuote = false
+				} else {
+					current += string(ch)
+				}
+			} else if ch == '"' || ch == '\'' {
+				inQuote = true
+				quoteChar = ch
+			} else if ch == ' ' || ch == '\t' {
+				if current != "" {
+					args = append(args, current)
+					current = ""
+				}
+			} else {
+				current += string(ch)
+			}
+		}
+		if current != "" {
+			args = append(args, current)
+		}
+		return args
 	case []interface{}:
 		cmd := make([]string, 0, len(val))
 		for _, c := range val {
