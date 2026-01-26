@@ -703,6 +703,7 @@ func (h *Handler) createStack(c *gin.Context) {
 		containerConfig := &DeploymentContainerConfig{
 			ContainerName: svc.ContainerName,
 			EnvVars:       envVars,
+			Command:       svc.Command,
 			Labels: map[string]string{
 				"com.docker.compose.project": req.Name,
 				"com.docker.compose.service": svc.Name,

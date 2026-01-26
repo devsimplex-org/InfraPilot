@@ -1166,6 +1166,7 @@ type ContainerRunExtendedConfig struct {
 	SecretMethod  string // "env_vars" or "docker_secrets"
 	Networks      []NetworkConfig
 	Volumes       []VolumeConfig
+	Command       []string
 }
 
 // RunContainer creates and starts a new container
@@ -1412,6 +1413,9 @@ func (c *Client) RunContainerExtended(ctx context.Context, cfg ContainerRunExten
 		Image:  cfg.ImageRef,
 		Env:    envList,
 		Labels: cfg.Labels,
+	}
+	if len(cfg.Command) > 0 {
+		containerConfig.Cmd = cfg.Command
 	}
 
 	// Step 7: Build host configuration

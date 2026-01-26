@@ -105,6 +105,7 @@ type DeploymentContainerConfig struct {
 	Networks      []ContainerConfigNetwork `json:"networks,omitempty"`
 	Volumes       []ContainerConfigVolume  `json:"volumes,omitempty"`
 	Labels        map[string]string        `json:"labels,omitempty"`
+	Command       []string                 `json:"command,omitempty"`
 }
 
 type CreateDeploymentRequest struct {
@@ -702,6 +703,11 @@ func (h *Handler) deployContainerToAgent(ctx context.Context, deploymentID, agen
 				volumesOpts[i] = volOpt
 			}
 			options["volumes"] = volumesOpts
+		}
+
+		// Add command
+		if len(containerConfig.Command) > 0 {
+			options["command"] = containerConfig.Command
 		}
 	}
 
