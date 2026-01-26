@@ -1541,8 +1541,18 @@ func (h *CommandHandler) handleDockerCommand(ctx context.Context, cmd *agentgrpc
 			}
 		}
 
-		// Use extended run if we have secrets, networks, or volumes
-		if len(secrets) > 0 || len(networks) > 0 || len(volumes) > 0 {
+		// Parse command
+		var command []string
+		if cmdList, ok := dockerCmd.Options["command"].([]interface{}); ok {
+			for _, c := range cmdList {
+				if str, ok := c.(string); ok {
+					command = append(command, str)
+				}
+			}
+		}
+
+		// Use extended run if we have secrets, networks, volumes, or command
+		if len(secrets) > 0 || len(networks) > 0 || len(volumes) > 0 || len(command) > 0 {
 			result, err := h.docker.RunContainerExtended(ctx, docker.ContainerRunExtendedConfig{
 				ImageRef:      imageRef,
 				Name:          name,
@@ -1555,6 +1565,7 @@ func (h *CommandHandler) handleDockerCommand(ctx context.Context, cmd *agentgrpc
 				SecretMethod:  secretMethod,
 				Networks:      networks,
 				Volumes:       volumes,
+				Command:       command,
 			})
 			if err != nil {
 				return &agentgrpc.CommandResult{
