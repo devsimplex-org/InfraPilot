@@ -1137,10 +1137,11 @@ type SecretConfig struct {
 
 // NetworkConfig represents a network configuration for container deployment
 type NetworkConfig struct {
-	NetworkID       string `json:"network_id,omitempty"`
-	NetworkName     string `json:"network_name,omitempty"`
-	CreateIfMissing bool   `json:"create_if_missing,omitempty"`
-	Driver          string `json:"driver,omitempty"`
+	NetworkID       string   `json:"network_id,omitempty"`
+	NetworkName     string   `json:"network_name,omitempty"`
+	CreateIfMissing bool     `json:"create_if_missing,omitempty"`
+	Driver          string   `json:"driver,omitempty"`
+	Aliases         []string `json:"aliases,omitempty"`
 }
 
 // VolumeConfig represents a volume configuration for container deployment
@@ -1464,9 +1465,13 @@ func (c *Client) RunContainerExtended(ctx context.Context, cfg ContainerRunExten
 	}
 
 	if primaryNetworkID != "" {
+		endpointSettings := &network.EndpointSettings{}
+		if len(cfg.Networks) > 0 && len(cfg.Networks[0].Aliases) > 0 {
+			endpointSettings.Aliases = cfg.Networks[0].Aliases
+		}
 		networkConfig = &network.NetworkingConfig{
 			EndpointsConfig: map[string]*network.EndpointSettings{
-				primaryNetworkID: {},
+				primaryNetworkID: endpointSettings,
 			},
 		}
 	}
@@ -1508,7 +1513,11 @@ func (c *Client) RunContainerExtended(ctx context.Context, cfg ContainerRunExten
 		}
 
 		if networkID != "" {
-			if err := c.cli.NetworkConnect(ctx, networkID, containerID, nil); err != nil {
+			endpointSettings := &network.EndpointSettings{}
+			if len(netCfg.Aliases) > 0 {
+				endpointSettings.Aliases = netCfg.Aliases
+			}
+			if err := c.cli.NetworkConnect(ctx, networkID, containerID, endpointSettings); err != nil {
 				// Log but don't fail
 				fmt.Printf("Warning: failed to connect container to network %s: %v\n", netCfg.NetworkName, err)
 			}
