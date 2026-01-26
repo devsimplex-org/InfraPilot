@@ -25,7 +25,7 @@ InfraPilot runs as an "all-in-one" container that includes:
 │
 └── dx-core-ops/
     └── infra/
-        ├── docker-compose.infra.yml   # Production compose file
+        ├── docker-compose.infrapilot.yml   # Production compose file
         └── .env                       # Production environment
 ```
 
@@ -74,13 +74,11 @@ This builds and pushes to `ghcr.io/tybali/infrapilot:v1.0.0` and `ghcr.io/tybali
 cd /home/administrator/dx-core-ops/infra
 
 # Pull latest image
-docker compose --env-file .env -f docker-compose.infra.yml pull infrapilot
+docker compose --env-file .env -f docker-compose.infrapilot.yml pull infrapilot
 
 # Recreate container
-docker compose --env-file .env -f docker-compose.infra.yml up -d --no-deps --force-recreate infrapilot
+docker compose --env-file .env -f docker-compose.infrapilot.yml up -d --no-deps --force-recreate infrapilot
 
-# Connect to development network (if needed for cross-container access)
-docker network connect infrapilot-ee_infrapilot-dev infrapilot
 ```
 
 ### Production URLs
