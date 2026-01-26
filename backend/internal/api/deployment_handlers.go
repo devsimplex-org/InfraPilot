@@ -320,7 +320,7 @@ func (h *Handler) createDeployment(c *gin.Context) {
 		imageDigest = *req.ImageDigest
 	}
 	// Use background context for async pipeline (request context will be canceled)
-	go h.runDeploymentPipeline(context.Background(), orgID, deploymentID, req.ImageRepository, imageTag, imageDigest, req.ContainerConfig)
+	go h.runDeploymentPipeline(context.Background(), orgID, deploymentID, req.ImageRepository, imageTag, imageDigest, req.ContainerConfig, false)
 
 	c.JSON(http.StatusCreated, gin.H{
 		"id":      deploymentID,
@@ -331,10 +331,11 @@ func (h *Handler) createDeployment(c *gin.Context) {
 
 // ==================== Deployment Pipeline ====================
 
-func (h *Handler) runDeploymentPipeline(ctx context.Context, orgID, deploymentID uuid.UUID, imageRepo, imageTag, imageDigest string, containerConfig *DeploymentContainerConfig) {
+func (h *Handler) runDeploymentPipeline(ctx context.Context, orgID, deploymentID uuid.UUID, imageRepo, imageTag, imageDigest string, containerConfig *DeploymentContainerConfig, skipScanning bool) {
 	logger := h.logger.With(
 		zap.String("deployment_id", deploymentID.String()),
 		zap.String("org_id", orgID.String()),
+		zap.Bool("skip_scanning", skipScanning),
 	)
 
 	// Build full image reference
@@ -347,13 +348,53 @@ func (h *Handler) runDeploymentPipeline(ctx context.Context, orgID, deploymentID
 
 	logger.Info("Starting deployment pipeline", zap.String("image", imageRef))
 
-	// Step 1: Update status to scanning
-	if err := h.updateDeploymentStatus(ctx, deploymentID.String(), "scanning", "Scanning image for vulnerabilities"); err != nil {
-		logger.Error("Failed to update deployment status", zap.Error(err))
-		return
+	// Declare variables that will be used in both branches
+	var policyDecision string
+	var policyReason string
+	var deployment struct {
+		ServiceName  string
+		Environment  string
+		ImageRepo    string
+		ImageTag     string
+		ImageDigest  string
+		GitBranch    string
+		GitCommit    string
 	}
 
-	// Step 2: Scan image with Trivy
+	if skipScanning {
+		// Skip scanning - go directly to deployment
+		logger.Info("Skipping security scanning (skip_scanning=true)")
+
+		// Fetch deployment details (needed for container deployment)
+		err := h.db.QueryRow(ctx, `
+			SELECT service_name, environment, image_repository,
+			       COALESCE(image_tag, ''), COALESCE(image_digest, ''),
+			       COALESCE(git_branch, ''), COALESCE(git_commit, '')
+			FROM deployments WHERE id = $1
+		`, deploymentID).Scan(
+			&deployment.ServiceName, &deployment.Environment, &deployment.ImageRepo,
+			&deployment.ImageTag, &deployment.ImageDigest,
+			&deployment.GitBranch, &deployment.GitCommit,
+		)
+		if err != nil {
+			logger.Error("Failed to fetch deployment details", zap.Error(err))
+			h.updateDeploymentStatus(ctx, deploymentID.String(), "failed", "Failed to fetch deployment details")
+			return
+		}
+
+		if err := h.updateDeploymentStatus(ctx, deploymentID.String(), "deploying", "Deploying container (scanning skipped)"); err != nil {
+			logger.Error("Failed to update deployment status", zap.Error(err))
+			return
+		}
+		policyDecision = "allow"
+	} else {
+		// Step 1: Update status to scanning
+		if err := h.updateDeploymentStatus(ctx, deploymentID.String(), "scanning", "Scanning image for vulnerabilities"); err != nil {
+			logger.Error("Failed to update deployment status", zap.Error(err))
+			return
+		}
+
+		// Step 2: Scan image with Trivy
 	logger.Info("Scanning image for vulnerabilities")
 	scanResult, err := h.scanner.ScanImage(ctx, imageRef)
 	if err != nil {
@@ -469,15 +510,6 @@ func (h *Handler) runDeploymentPipeline(ctx context.Context, orgID, deploymentID
 	logger.Info("Evaluating deployment policy")
 
 	// Fetch deployment details for policy evaluation
-	var deployment struct {
-		ServiceName  string
-		Environment  string
-		ImageRepo    string
-		ImageTag     string
-		ImageDigest  string
-		GitBranch    string
-		GitCommit    string
-	}
 	err = h.db.QueryRow(ctx, `
 		SELECT service_name, environment, image_repository,
 		       COALESCE(image_tag, ''), COALESCE(image_digest, ''),
@@ -527,8 +559,8 @@ func (h *Handler) runDeploymentPipeline(ctx context.Context, orgID, deploymentID
 		}
 	}
 
-	policyDecision := policyResult.Decision
-	policyReason := policyResult.Reason
+	policyDecision = policyResult.Decision
+	policyReason = policyResult.Reason
 
 	logger.Info("Policy evaluation completed",
 		zap.String("decision", policyDecision),
@@ -548,27 +580,27 @@ func (h *Handler) runDeploymentPipeline(ctx context.Context, orgID, deploymentID
 		return
 	}
 
-	logger.Info("Deployment pipeline completed",
-		zap.String("policy_decision", policyDecision),
-		zap.Int("total_vulns", scanResult.TotalCount),
-	)
+		logger.Info("Deployment pipeline completed with scanning",
+			zap.String("policy_decision", policyDecision),
+		)
 
-	// Epic 8: Generate developer feedback for policy violations
-	if h.feedbackIntegration != nil {
-		if err := h.feedbackIntegration.GenerateFeedbackForDeployment(ctx, deploymentID); err != nil {
-			logger.Warn("Failed to generate developer feedback",
-				zap.Error(err),
-				zap.String("deployment_id", deploymentID.String()),
-			)
-			// Don't fail deployment on feedback generation errors
+		// Epic 8: Generate developer feedback for policy violations
+		if h.feedbackIntegration != nil {
+			if err := h.feedbackIntegration.GenerateFeedbackForDeployment(ctx, deploymentID); err != nil {
+				logger.Warn("Failed to generate developer feedback",
+					zap.Error(err),
+					zap.String("deployment_id", deploymentID.String()),
+				)
+				// Don't fail deployment on feedback generation errors
+			}
 		}
-	}
+	} // end of !skipScanning block
 
 	// Phase 4: Deploy container to agent
 	if policyDecision != "deny" {
 		// Get the agent ID for this deployment
 		var agentID uuid.UUID
-		err = h.db.QueryRow(ctx, `SELECT agent_id FROM deployments WHERE id = $1`, deploymentID).Scan(&agentID)
+		err := h.db.QueryRow(ctx, `SELECT agent_id FROM deployments WHERE id = $1`, deploymentID).Scan(&agentID)
 		if err != nil {
 			logger.Error("Failed to get agent ID for deployment", zap.Error(err))
 			h.updateDeploymentStatus(ctx, deploymentID.String(), "failed", "Failed to get agent ID")
@@ -927,7 +959,7 @@ func (h *Handler) redeployDeployment(c *gin.Context) {
 
 	// Trigger deployment pipeline asynchronously
 	go h.runDeploymentPipeline(context.Background(), orgID, newID,
-		original.ImageRepository, imageTag, imageDigest, containerConfig)
+		original.ImageRepository, imageTag, imageDigest, containerConfig, false)
 
 	c.JSON(http.StatusOK, gin.H{
 		"id":      newID.String(),

@@ -50,11 +50,12 @@ type Stack struct {
 }
 
 type CreateStackRequest struct {
-	Name        string            `json:"name" binding:"required"`
-	Environment string            `json:"environment" binding:"required,oneof=dev staging prod"`
-	ComposeYAML string            `json:"compose_yaml" binding:"required"`
-	Variables   map[string]string `json:"variables,omitempty"`
-	Overrides   []ServiceOverride `json:"overrides,omitempty"`
+	Name         string            `json:"name" binding:"required"`
+	Environment  string            `json:"environment" binding:"required,oneof=dev staging prod"`
+	ComposeYAML  string            `json:"compose_yaml" binding:"required"`
+	Variables    map[string]string `json:"variables,omitempty"`
+	Overrides    []ServiceOverride `json:"overrides,omitempty"`
+	SkipScanning bool              `json:"skip_scanning,omitempty"`
 }
 
 type ServiceOverride struct {
@@ -703,12 +704,12 @@ func (h *Handler) createStack(c *gin.Context) {
 		INSERT INTO stacks (
 			org_id, agent_id, name, environment,
 			compose_yaml, variables, service_count,
-			status, deployed_by
+			status, deployed_by, skip_scanning
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9)
 		RETURNING id
 	`, orgID, agentID, req.Name, req.Environment,
-		req.ComposeYAML, variablesJSON, enabledCount, userID,
+		req.ComposeYAML, variablesJSON, enabledCount, userID, req.SkipScanning,
 	).Scan(&stackID)
 
 	if err != nil {
@@ -877,6 +878,14 @@ func (h *Handler) runStackDeploymentPipeline(ctx context.Context, orgID, stackID
 
 	logger.Info("Starting stack deployment pipeline")
 
+	// Get skip_scanning setting from stack
+	var skipScanning bool
+	err := h.db.QueryRow(ctx, `SELECT skip_scanning FROM stacks WHERE id = $1`, stackID).Scan(&skipScanning)
+	if err != nil {
+		logger.Warn("Failed to get skip_scanning setting, defaulting to false", zap.Error(err))
+		skipScanning = false
+	}
+
 	// Update stack status to deploying
 	if err := h.updateStackStatus(ctx, stackID, StackStatusDeploying, "Deploying services"); err != nil {
 		logger.Error("Failed to update stack status", zap.Error(err))
@@ -946,7 +955,7 @@ func (h *Handler) runStackDeploymentPipeline(ctx context.Context, orgID, stackID
 		}
 
 		// Run the deployment pipeline for this service
-		h.runDeploymentPipeline(ctx, orgID, d.ID, d.ImageRepository, imageTag, "", containerConfig)
+		h.runDeploymentPipeline(ctx, orgID, d.ID, d.ImageRepository, imageTag, "", containerConfig, skipScanning)
 
 		// Check deployment status
 		var status string
