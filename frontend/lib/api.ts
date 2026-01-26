@@ -3259,6 +3259,7 @@ export interface CreateStackRequest {
   compose_yaml: string;
   variables?: Record<string, string>;
   overrides?: ServiceOverride[];
+  skip_scanning?: boolean;
 }
 
 export interface ServiceOverride {

@@ -96,6 +96,9 @@ export function StackDeployWizard({
   const [serviceEnvFiles, setServiceEnvFiles] = useState<Record<string, string>>({});
   const [expandedEnvSections, setExpandedEnvSections] = useState<Record<string, boolean>>({});
 
+  // Step 5: Review
+  const [skipScanning, setSkipScanning] = useState(false);
+
   // Progress tracking
   const [progress, setProgress] = useState<StackProgress | null>(null);
 
@@ -207,6 +210,7 @@ export function StackDeployWizard({
       setServiceConfigs({});
       setServiceEnvFiles({});
       setExpandedEnvSections({});
+      setSkipScanning(false);
       setStackId(null);
       setErrorMessage(null);
       setProgress(null);
@@ -386,6 +390,12 @@ export function StackDeployWizard({
   const handleNext = () => {
     const steps = WIZARD_STEPS.map((s) => s.id);
     const currentIndex = steps.indexOf(currentStep);
+
+    // Re-parse compose with variables when moving from Variables -> Services
+    if (currentStep === "variables" && steps[currentIndex + 1] === "services") {
+      parseMutation.mutate();
+    }
+
     if (currentIndex < steps.length - 1) {
       setCurrentStep(steps[currentIndex + 1]);
     }
@@ -417,6 +427,7 @@ export function StackDeployWizard({
       compose_yaml: composeYaml,
       variables: Object.keys(variables).length > 0 ? variables : undefined,
       overrides: overrides.length > 0 ? overrides : undefined,
+      skip_scanning: skipScanning,
     });
   };
 
@@ -1007,11 +1018,47 @@ export function StackDeployWizard({
               </div>
             )}
 
+            <div className="p-4 bg-zinc-800/50 rounded-lg border border-zinc-700">
+              <h4 className="text-xs text-zinc-500 uppercase mb-3">Security Options</h4>
+              <label className="flex items-start gap-3 cursor-pointer group">
+                <div className="relative flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={!skipScanning}
+                    onChange={(e) => setSkipScanning(!e.target.checked)}
+                    className="w-5 h-5 rounded border-zinc-600 bg-zinc-800 text-indigo-500 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-0 cursor-pointer"
+                  />
+                </div>
+                <div className="flex-1">
+                  <div className="text-sm font-medium text-white group-hover:text-indigo-300 transition-colors">
+                    Security Scanning
+                    {environment === "prod" && (
+                      <span className="ml-2 text-xs font-normal text-amber-400">(Recommended for Production)</span>
+                    )}
+                  </div>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    Scan images for vulnerabilities and generate SBOMs before deployment.
+                    {skipScanning ? (
+                      <>
+                        <span className="text-amber-400 block mt-1">⚠ Scanning disabled - images will deploy immediately</span>
+                        {environment === "prod" && (
+                          <span className="text-red-400 block mt-1 font-medium">
+                            🚨 WARNING: Deploying to production without security scanning is not recommended
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-zinc-500 block mt-1">Adds ~2-3 minutes per service</span>
+                    )}
+                  </p>
+                </div>
+              </label>
+            </div>
+
             <div className="p-4 bg-indigo-500/10 border border-indigo-500/30 rounded-lg">
               <p className="text-sm text-indigo-300">
                 <strong>{enabledServiceCount}</strong> services will be deployed in order based on
-                their dependencies. Each service will be scanned for vulnerabilities before
-                deployment.
+                their dependencies.{!skipScanning && " Each service will be scanned for vulnerabilities before deployment."}
               </p>
             </div>
           </div>
