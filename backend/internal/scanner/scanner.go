@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -48,6 +49,7 @@ type Vulnerability struct {
 type Scanner struct {
 	trivyPath string
 	logger    *zap.Logger
+	mu        sync.Mutex // Mutex to serialize Trivy scans (prevents cache conflicts)
 }
 
 // NewScanner creates a new vulnerability scanner
@@ -60,6 +62,12 @@ func NewScanner(logger *zap.Logger) *Scanner {
 
 // ScanImage scans a container image for vulnerabilities using Trivy
 func (s *Scanner) ScanImage(ctx context.Context, imageRef string) (*ScanResult, error) {
+	// Serialize scans to prevent Trivy cache conflicts
+	// If another scan is in progress, this will wait
+	s.logger.Debug("Acquiring scan lock", zap.String("image", imageRef))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	start := time.Now()
 
 	s.logger.Info("Starting vulnerability scan",

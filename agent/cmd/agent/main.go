@@ -1551,6 +1551,14 @@ func (h *CommandHandler) handleDockerCommand(ctx context.Context, cmd *agentgrpc
 			}
 		}
 
+		// Parse pull_latest flag (default to true if not specified)
+		pullLatest := true
+		if pullLatestVal, ok := dockerCmd.Options["pull_latest"]; ok {
+			if pullLatestBool, ok := pullLatestVal.(bool); ok {
+				pullLatest = pullLatestBool
+			}
+		}
+
 		// Use extended run if we have secrets, networks, volumes, or command
 		if len(secrets) > 0 || len(networks) > 0 || len(volumes) > 0 || len(command) > 0 {
 			result, err := h.docker.RunContainerExtended(ctx, docker.ContainerRunExtendedConfig{
@@ -1566,6 +1574,7 @@ func (h *CommandHandler) handleDockerCommand(ctx context.Context, cmd *agentgrpc
 				Networks:      networks,
 				Volumes:       volumes,
 				Command:       command,
+				PullLatest:    pullLatest,
 			})
 			if err != nil {
 				return &agentgrpc.CommandResult{
