@@ -1284,38 +1284,37 @@ export default function DeploymentsPage() {
         )}
       </SlideOver>
 
-      {/* Confirmation Dialog */}
+      {/* Redeploy Wizard */}
+      <RedeployWizard
+        isOpen={redeployWizardOpen}
+        deployment={redeployTarget}
+        onClose={() => {
+          setRedeployWizardOpen(false);
+          setRedeployTarget(null);
+        }}
+        onConfirm={(pullLatest) => {
+          if (!redeployTarget) return;
+          setRedeployingId(redeployTarget.id);
+          redeployMutation.mutate({ deploymentId: redeployTarget.id, pullLatest });
+        }}
+        isLoading={redeployMutation.isPending}
+      />
+
+      {/* Confirmation Dialog (Delete only) */}
       <ConfirmDialog
-        isOpen={!!confirmAction}
+        isOpen={!!confirmAction && confirmAction.type === "delete"}
         onClose={() => setConfirmAction(null)}
         onConfirm={() => {
-          if (!confirmAction) return;
-          if (confirmAction.type === "redeploy") {
-            setRedeployingId(confirmAction.deployment.id);
-            redeployMutation.mutate(confirmAction.deployment.id);
-          } else if (confirmAction.type === "delete") {
-            setDeletingId(confirmAction.deployment.id);
-            deleteMutation.mutate(confirmAction.deployment.id);
-          }
+          if (!confirmAction || confirmAction.type !== "delete") return;
+          setDeletingId(confirmAction.deployment.id);
+          deleteMutation.mutate(confirmAction.deployment.id);
           setConfirmAction(null);
         }}
-        title={
-          confirmAction?.type === "redeploy"
-            ? `Redeploy ${confirmAction.deployment.service_name}?`
-            : confirmAction?.type === "delete"
-            ? `Delete ${confirmAction?.deployment.service_name}?`
-            : ""
-        }
-        message={
-          confirmAction?.type === "redeploy"
-            ? "This will create a new deployment with the same configuration and run the full pipeline (security scan, policy check, deploy)."
-            : confirmAction?.type === "delete"
-            ? "This will permanently remove the deployment record. The container will not be affected."
-            : ""
-        }
-        confirmText={confirmAction?.type === "redeploy" ? "Redeploy" : "Delete"}
-        variant={confirmAction?.type === "delete" ? "danger" : "default"}
-        icon={confirmAction?.type === "delete" ? "delete" : "redeploy"}
+        title={confirmAction?.type === "delete" ? `Delete ${confirmAction?.deployment.service_name}?` : ""}
+        message="This will permanently remove the deployment record. The container will not be affected."
+        confirmText="Delete"
+        variant="danger"
+        icon="delete"
       />
     </>
   );
