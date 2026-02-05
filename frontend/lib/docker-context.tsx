@@ -15,6 +15,11 @@ interface DockerContextType {
   // Common state
   forceDelete: boolean;
   setForceDelete: (force: boolean) => void;
+
+  // Global container panel
+  containerPanelId: string | null;
+  openContainerPanel: (containerId: string) => void;
+  closeContainerPanel: () => void;
 }
 
 const DockerContext = createContext<DockerContextType | undefined>(undefined);
@@ -22,6 +27,7 @@ const DockerContext = createContext<DockerContextType | undefined>(undefined);
 export function DockerProvider({ children }: { children: ReactNode }) {
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
   const [forceDelete, setForceDelete] = useState(false);
+  const [containerPanelId, setContainerPanelId] = useState<string | null>(null);
 
   // Fetch agents
   const { data: agents, isLoading: isLoadingAgents } = useQuery({
@@ -39,6 +45,9 @@ export function DockerProvider({ children }: { children: ReactNode }) {
     }
   }, [activeAgents, selectedAgent]);
 
+  const openContainerPanel = (containerId: string) => setContainerPanelId(containerId);
+  const closeContainerPanel = () => setContainerPanelId(null);
+
   return (
     <DockerContext.Provider
       value={{
@@ -49,6 +58,9 @@ export function DockerProvider({ children }: { children: ReactNode }) {
         isLoadingAgents,
         forceDelete,
         setForceDelete,
+        containerPanelId,
+        openContainerPanel,
+        closeContainerPanel,
       }}
     >
       {children}
