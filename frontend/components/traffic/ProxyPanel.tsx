@@ -933,16 +933,23 @@ export function ProxyPanel() {
     }
   };
 
+  // Prevent closing SlideOver when SSLWizard is open
+  const handleSlideOverClose = () => {
+    if (!showSSLWizard) {
+      closeProxyPanel();
+    }
+  };
+
   return (
     <>
-      <SlideOver isOpen={!!proxyPanelId} onClose={closeProxyPanel} size="lg">
+      <SlideOver isOpen={!!proxyPanelId} onClose={handleSlideOverClose} size="lg">
         {proxyLoading ? (
           <div className="flex items-center justify-center h-64">
             <Spinner.Logo size="lg" />
           </div>
         ) : proxy ? (
           <>
-            <SlideOver.Header onClose={closeProxyPanel}>
+            <SlideOver.Header onClose={handleSlideOverClose}>
               <div>
                 <div className="flex items-center gap-2">
                   <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{proxy.domain}</h2>
