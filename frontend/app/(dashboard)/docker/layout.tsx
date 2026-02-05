@@ -19,6 +19,7 @@ const tabs = [
   { id: "images", label: "Images", href: "/docker/images" },
   { id: "volumes", label: "Volumes", href: "/docker/volumes" },
   { id: "networks", label: "Networks", href: "/docker/networks" },
+  { id: "stacks", label: "Stacks", href: "/docker/stacks" },
   { id: "logs", label: "Logs", href: "/docker/logs" },
   { id: "registries", label: "Registries", href: "/docker/registries" },
 ];
@@ -45,7 +46,7 @@ function DockerLayoutContent({ children }: { children: ReactNode }) {
   // Get action button based on active tab
   const getActionButton = () => {
     switch (activeTab) {
-      case "overview":
+      case "stacks":
         return (
           <button
             onClick={() => setShowStackDeployWizard(true)}
