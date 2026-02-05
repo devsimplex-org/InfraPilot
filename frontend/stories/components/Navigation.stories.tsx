@@ -112,7 +112,7 @@ export const DevSecOpsLifecycle: Story = {
         items: [
           { name: 'Platform Security', href: '/platform-security', icon: Lock },
           { name: 'Networks', href: '/networks', icon: Network },
-          { name: 'Proxies', href: '/proxies', icon: Server },
+          { name: 'Proxies', href: '/traffic/proxies', icon: Server },
           { name: 'Health', href: '/health', icon: Heart },
           { name: 'Settings', href: '/settings', icon: Settings },
         ],

@@ -320,9 +320,9 @@ const defaultNavigationItems: CommandItem[] = [
     label: "Proxies",
     description: "Proxy configuration",
     icon: Globe,
-    href: "/proxies",
-    section: "Platform",
-    keywords: ["proxy", "reverse proxy", "nginx"],
+    href: "/traffic/proxies",
+    section: "Traffic",
+    keywords: ["proxy", "reverse proxy", "nginx", "traffic"],
   },
   {
     id: "networks",

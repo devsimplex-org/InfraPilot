@@ -203,7 +203,7 @@ export default function DashboardPage() {
           subValue={totalProxies > 0 ? `${proxies?.filter((p: { ssl_enabled: boolean }) => p.ssl_enabled).length || 0} with SSL` : "No proxies configured"}
           icon={Globe}
           color="bg-purple-600"
-          href="/proxies"
+          href="/traffic/proxies"
         />
         <StatCard
           title="Agents"
@@ -299,7 +299,7 @@ export default function DashboardPage() {
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
               Proxy Hosts
             </h2>
-            <Link href="/proxies" className="text-sm text-primary-600 hover:text-primary-500">
+            <Link href="/traffic/proxies" className="text-sm text-primary-600 hover:text-primary-500">
               View all
             </Link>
           </div>
