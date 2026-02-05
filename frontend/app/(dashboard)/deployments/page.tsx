@@ -17,6 +17,9 @@ import {
   Container,
   Clock,
   Activity,
+  ChevronDown,
+  ChevronRight,
+  Layers,
 } from "lucide-react";
 import { api, Deployment, ScanResult, Vulnerability, SBOM } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -51,6 +54,19 @@ export default function DeploymentsPage() {
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null);
   const [redeployWizardOpen, setRedeployWizardOpen] = useState(false);
   const [redeployTarget, setRedeployTarget] = useState<Deployment | null>(null);
+
+  // Multi-select state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDeleteProgress, setBulkDeleteProgress] = useState<{
+    total: number;
+    completed: number;
+    failed: string[];
+  } | null>(null);
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
+
+  // Stack grouping state
+  const [viewMode, setViewMode] = useState<"flat" | "grouped">("flat");
+  const [expandedStacks, setExpandedStacks] = useState<Set<string>>(new Set());
 
   // Redeploy mutation
   const redeployMutation = useMutation({
@@ -90,6 +106,30 @@ export default function DeploymentsPage() {
     },
     onError: () => {
       setDeletingId(null);
+    },
+  });
+
+  // Bulk delete mutation
+  const bulkDeleteMutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const results = { completed: 0, failed: [] as string[] };
+      for (const id of ids) {
+        try {
+          await api.deleteDeployment(selectedAgent!, id);
+          results.completed++;
+          setBulkDeleteProgress(prev => prev ? { ...prev, completed: prev.completed + 1 } : null);
+        } catch {
+          results.failed.push(id);
+          setBulkDeleteProgress(prev => prev ? { ...prev, failed: [...prev.failed, id] } : null);
+        }
+      }
+      return results;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["deployments", selectedAgent] });
+      setSelectedIds(new Set());
+      setBulkDeleteProgress(null);
+      setShowBulkDeleteModal(false);
     },
   });
 
@@ -221,6 +261,43 @@ export default function DeploymentsPage() {
     if (!deployments) return [];
     return Array.from(new Set(deployments.map((d) => d.environment)));
   }, [deployments]);
+
+  // Group deployments by stack_id
+  const groupedDeployments = useMemo(() => {
+    if (!filteredDeployments) return new Map<string, { stackId: string | null; deployments: Deployment[] }>();
+
+    const groups = new Map<string, { stackId: string | null; deployments: Deployment[] }>();
+
+    for (const d of filteredDeployments) {
+      const key = d.stack_id || "standalone";
+      if (!groups.has(key)) {
+        groups.set(key, { stackId: d.stack_id || null, deployments: [] });
+      }
+      groups.get(key)!.deployments.push(d);
+    }
+
+    return groups;
+  }, [filteredDeployments]);
+
+  // Toggle stack expansion
+  const toggleStackExpanded = (key: string) => {
+    setExpandedStacks(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  // Handle row selection with type conversion
+  const handleRowSelect = (keys: Set<string | number>) => {
+    const stringKeys = new Set<string>();
+    keys.forEach(key => stringKeys.add(String(key)));
+    setSelectedIds(stringKeys);
+  };
 
   const getDeploymentStatus = (status: Deployment["status"]): "healthy" | "warning" | "degraded" | "critical" => {
     switch (status) {
@@ -506,6 +583,32 @@ export default function DeploymentsPage() {
           breadcrumbs={<Breadcrumb items={[{ label: "Deploy", href: "/deploy" }, { label: "Deployments" }]} />}
           action={
             <div className="flex items-center gap-3">
+              {/* View Mode Toggle */}
+              <div className="flex items-center gap-1 border border-gray-300 dark:border-gray-600 rounded-lg p-1 bg-white dark:bg-gray-800">
+                <button
+                  onClick={() => setViewMode("flat")}
+                  className={cn(
+                    "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
+                    viewMode === "flat"
+                      ? "bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white"
+                      : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+                  )}
+                >
+                  List
+                </button>
+                <button
+                  onClick={() => setViewMode("grouped")}
+                  className={cn(
+                    "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
+                    viewMode === "grouped"
+                      ? "bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white"
+                      : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+                  )}
+                >
+                  Stacks
+                </button>
+              </div>
+
               {activeAgents.length > 1 && (
                 <select
                   value={selectedAgent || ""}
@@ -629,6 +732,34 @@ export default function DeploymentsPage() {
 
           {/* Main Content */}
           <div className="flex-1 min-w-0">
+            {/* Bulk Actions Toolbar */}
+            {selectedIds.size > 0 && (
+              <div className="flex items-center justify-between p-3 bg-primary-50 dark:bg-primary-900/20 rounded-lg mb-4 border border-primary-200 dark:border-primary-800">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {selectedIds.size} deployment{selectedIds.size > 1 ? "s" : ""} selected
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setSelectedIds(new Set())}
+                    className="px-3 py-1.5 text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+                  >
+                    Clear
+                  </button>
+                  <button
+                    onClick={() => setShowBulkDeleteModal(true)}
+                    disabled={[...selectedIds].some(id =>
+                      filteredDeployments?.find(d => d.id === id)?.status === "running"
+                    )}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    title={[...selectedIds].some(id => filteredDeployments?.find(d => d.id === id)?.status === "running") ? "Cannot delete running deployments" : "Delete selected deployments"}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Delete Selected
+                  </button>
+                </div>
+              </div>
+            )}
+
             <Card>
               <Card.Body className="p-0">
                 {isLoading ? (
@@ -636,14 +767,68 @@ export default function DeploymentsPage() {
                     <Spinner.Page label="Loading deployments..." />
                   </div>
                 ) : filteredDeployments.length > 0 ? (
-                  <Table
-                    columns={columns}
-                    data={filteredDeployments}
-                    keyExtractor={(deployment) => deployment.id}
-                    onRowClick={(deployment) => setSelectedDeployment(deployment)}
-                    loading={isLoading}
-                    hoverable
-                  />
+                  viewMode === "flat" ? (
+                    <Table
+                      columns={columns}
+                      data={filteredDeployments}
+                      keyExtractor={(deployment) => deployment.id}
+                      onRowClick={(deployment) => setSelectedDeployment(deployment)}
+                      loading={isLoading}
+                      hoverable
+                      selectedRows={selectedIds}
+                      onRowSelect={handleRowSelect}
+                    />
+                  ) : (
+                    <div className="divide-y divide-gray-200 dark:divide-gray-700">
+                      {[...groupedDeployments.entries()].map(([key, group]) => (
+                        <div key={key}>
+                          {/* Stack header - expandable */}
+                          <button
+                            onClick={() => toggleStackExpanded(key)}
+                            className="w-full flex items-center justify-between p-4 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+                          >
+                            <div className="flex items-center gap-3">
+                              {expandedStacks.has(key) ? (
+                                <ChevronDown className="w-4 h-4 text-gray-500" />
+                              ) : (
+                                <ChevronRight className="w-4 h-4 text-gray-500" />
+                              )}
+                              <div className="p-2 rounded-lg bg-primary-100 dark:bg-primary-900/30">
+                                <Layers className="w-4 h-4 text-primary-600 dark:text-primary-400" />
+                              </div>
+                              <span className="font-medium text-gray-900 dark:text-white">
+                                {group.stackId ? `Stack ${group.stackId.substring(0, 8)}...` : "Standalone Deployments"}
+                              </span>
+                              <Badge variant="default" size="sm">
+                                {group.deployments.length}
+                              </Badge>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {/* Stack-level stats */}
+                              <span className="text-xs text-gray-500 dark:text-gray-400">
+                                {group.deployments.filter(d => d.status === "running").length} running
+                              </span>
+                            </div>
+                          </button>
+
+                          {/* Deployments table - collapsed by default */}
+                          {expandedStacks.has(key) && (
+                            <div className="border-t border-gray-100 dark:border-gray-800">
+                              <Table
+                                columns={columns}
+                                data={group.deployments}
+                                keyExtractor={(deployment) => deployment.id}
+                                onRowClick={(deployment) => setSelectedDeployment(deployment)}
+                                hoverable
+                                selectedRows={selectedIds}
+                                onRowSelect={handleRowSelect}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )
                 ) : (
                   <EmptyState
                     icon={Package}
@@ -1315,6 +1500,35 @@ export default function DeploymentsPage() {
         confirmText="Delete"
         variant="danger"
         icon="delete"
+      />
+
+      {/* Bulk Delete Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={showBulkDeleteModal}
+        onClose={() => {
+          if (!bulkDeleteMutation.isPending) {
+            setShowBulkDeleteModal(false);
+            setBulkDeleteProgress(null);
+          }
+        }}
+        onConfirm={() => {
+          const deletableIds = [...selectedIds].filter(id => {
+            const d = filteredDeployments?.find(dep => dep.id === id);
+            return d && d.status !== "running";
+          });
+          setBulkDeleteProgress({ total: deletableIds.length, completed: 0, failed: [] });
+          bulkDeleteMutation.mutate(deletableIds);
+        }}
+        title={`Delete ${selectedIds.size} deployment${selectedIds.size > 1 ? "s" : ""}?`}
+        message={
+          bulkDeleteProgress
+            ? `Deleting... ${bulkDeleteProgress.completed}/${bulkDeleteProgress.total} completed${bulkDeleteProgress.failed.length > 0 ? ` (${bulkDeleteProgress.failed.length} failed)` : ""}`
+            : "This will permanently remove the selected deployment records. Running containers will not be affected."
+        }
+        confirmText={bulkDeleteProgress ? "Deleting..." : "Delete All"}
+        variant="danger"
+        icon="delete"
+        isLoading={bulkDeleteMutation.isPending}
       />
     </>
   );

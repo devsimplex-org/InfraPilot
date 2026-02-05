@@ -974,6 +974,8 @@ export interface Deployment {
   deployed_at?: string;
   created_at: string;
   updated_at: string;
+  stack_id?: string;
+  service_order?: number;
 }
 
 export interface ScanResult {
