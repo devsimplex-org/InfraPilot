@@ -58,7 +58,11 @@ func (h *Handler) applyTrafficResource(c *gin.Context) {
 	c.ShouldBindJSON(&req)
 
 	ctx := c.Request.Context()
-	userID := getUserID(c)
+	var userID *uuid.UUID
+	if id, exists := c.Get("user_id"); exists {
+		uid := id.(uuid.UUID)
+		userID = &uid
+	}
 
 	// 1. Compile the traffic resource
 	compiled, err := h.compileTrafficResource(ctx, resourceID)
@@ -103,7 +107,7 @@ func (h *Handler) applyTrafficResource(c *gin.Context) {
 	}
 
 	// 5. Reload nginx
-	if err := h.reloadNginx(); err != nil {
+	if err := h.doNginxReload(); err != nil {
 		// Rollback - remove the config file
 		os.Remove(configPath)
 		h.logger.Error("Failed to reload nginx", zap.Error(err))
@@ -223,7 +227,11 @@ func (h *Handler) rollbackTrafficResource(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	userID := getUserID(c)
+	var userID *uuid.UUID
+	if id, exists := c.Get("user_id"); exists {
+		uid := id.(uuid.UUID)
+		userID = &uid
+	}
 
 	// 1. Get the previous successful apply from history
 	var historyID uuid.UUID
@@ -261,7 +269,7 @@ func (h *Handler) rollbackTrafficResource(c *gin.Context) {
 	}
 
 	// 4. Reload nginx
-	if err := h.reloadNginx(); err != nil {
+	if err := h.doNginxReload(); err != nil {
 		h.logger.Error("Failed to reload nginx", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Nginx reload failed: %v", err)})
 		return
@@ -316,7 +324,7 @@ func (h *Handler) removeTrafficConfig(resourceID uuid.UUID) error {
 	}
 
 	// Reload nginx
-	return h.reloadNginx()
+	return h.doNginxReload()
 }
 
 // ValidationResult represents the result of nginx config validation
@@ -379,8 +387,8 @@ func (h *Handler) validateNginxConfig(compiled *CompiledTrafficConfig) (*Validat
 	return result, nil
 }
 
-// reloadNginx reloads the nginx configuration
-func (h *Handler) reloadNginx() error {
+// doNginxReload reloads the nginx configuration
+func (h *Handler) doNginxReload() error {
 	// First test the configuration
 	testCmd := exec.Command("nginx", "-t")
 	if output, err := testCmd.CombinedOutput(); err != nil {

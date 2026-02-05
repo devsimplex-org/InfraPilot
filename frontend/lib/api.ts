@@ -5098,6 +5098,17 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  updateTrafficUpstream: (resourceId: string, upstreamId: string, data: Partial<CreateTrafficUpstreamRequest>) =>
+    fetchAPI<TrafficUpstream>(`/traffic/resources/${resourceId}/upstreams/${upstreamId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  deleteTrafficUpstream: (resourceId: string, upstreamId: string) =>
+    fetchAPI<{ message: string }>(`/traffic/resources/${resourceId}/upstreams/${upstreamId}`, {
+      method: "DELETE",
+    }),
+
   // Traffic Apply History
   getTrafficApplyHistory: (resourceId: string) =>
     fetchAPI<{ history: TrafficApplyHistory[] }>(`/traffic/resources/${resourceId}/history`),
@@ -5159,6 +5170,14 @@ export const api = {
     fetchAPI<TrafficPolicyAssignment>(`/traffic/policies/${policyId}/assign`, {
       method: "POST",
       body: JSON.stringify(data),
+    }),
+
+  listTrafficResourcePolicyAssignments: (resourceId: string) =>
+    fetchAPI<{ assignments: TrafficPolicyAssignment[] }>(`/traffic/resources/${resourceId}/policy-assignments`),
+
+  unassignTrafficPolicy: (assignmentId: string) =>
+    fetchAPI<{ message: string }>(`/traffic/policy-assignments/${assignmentId}`, {
+      method: "DELETE",
     }),
 
   // Epic 14: Database & Data Governance

@@ -25,7 +25,7 @@ const tabs = [
   { id: "overview", label: "Overview", href: "/traffic" },
   { id: "resources", label: "Resources", href: "/traffic/resources" },
   { id: "policies", label: "Policies", href: "/traffic/policies" },
-  { id: "proxies", label: "Proxies", href: "/proxies" },
+  { id: "proxies", label: "Proxies", href: "/traffic/proxies" },
   { id: "logs", label: "Nginx Logs", href: "/traffic/logs" },
 ];
 
@@ -46,14 +46,14 @@ export default function TrafficLayout({ children }: { children: ReactNode }) {
   const activeAgents = agents?.filter((a) => a.status === "active") || [];
   const effectiveAgent = selectedAgent || activeAgents[0]?.id;
 
-  // Check if we're on a detail page (e.g., /traffic/resources/[id])
+  // Check if we're on a detail or create page (e.g., /traffic/resources/[id] or /traffic/resources/create)
   const pathParts = pathname.split("/").filter(Boolean);
-  const isDetailPage = pathParts.length > 2 && pathParts[2] !== "resources" && pathParts[2] !== "policies" && pathParts[2] !== "proxies" && pathParts[2] !== "logs";
+  const isSubPage = pathParts.length > 2 && !["resources", "policies", "proxies", "logs"].includes(pathParts[2]);
 
   // Determine active tab from pathname
   const getActiveTab = () => {
     if (pathname === "/traffic") return "overview";
-    if (pathname === "/proxies" || pathname.startsWith("/proxies/")) return "proxies";
+    if (pathname === "/traffic/proxies" || pathname.startsWith("/traffic/proxies/")) return "proxies";
     const segment = pathname.split("/")[2];
     return segment || "overview";
   };
@@ -111,8 +111,8 @@ export default function TrafficLayout({ children }: { children: ReactNode }) {
     );
   }
 
-  // For detail pages, just render children without the layout wrapper
-  if (isDetailPage) {
+  // For detail/create pages, just render children without the layout wrapper
+  if (isSubPage) {
     return <>{children}</>;
   }
 
