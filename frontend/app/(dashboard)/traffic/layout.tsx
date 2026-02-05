@@ -22,6 +22,8 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Spinner } from "@/components/ui/Spinner";
 import { Badge } from "@/components/ui/Badge";
 import { cn } from "@/lib/utils";
+import { TrafficProvider } from "@/lib/traffic-context";
+import { ProxyPanel } from "@/components/traffic/ProxyPanel";
 
 // Tab groups for visual separation
 const tabGroups = [
@@ -142,10 +144,16 @@ export default function TrafficLayout({ children }: { children: ReactNode }) {
 
   // For detail/create pages, just render children without the layout wrapper
   if (isSubPage) {
-    return <>{children}</>;
+    return (
+      <TrafficProvider>
+        {children}
+        <ProxyPanel />
+      </TrafficProvider>
+    );
   }
 
   return (
+    <TrafficProvider>
     <div className="space-y-6">
       {/* Page Header */}
       <PageHeader
@@ -206,5 +214,9 @@ export default function TrafficLayout({ children }: { children: ReactNode }) {
       {/* Page Content */}
       {children}
     </div>
+
+    {/* Proxy Panel - SlideOver for proxy details */}
+    <ProxyPanel />
+    </TrafficProvider>
   );
 }
