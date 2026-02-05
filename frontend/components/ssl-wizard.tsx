@@ -425,11 +425,17 @@ export function SSLWizard({
   const currentStepIndex = steps.findIndex((s) => s.key === step);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center"
+      onClick={(e) => e.stopPropagation()}
+    >
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/50"
-        onClick={() => onOpenChange(false)}
+        onClick={(e) => {
+          e.stopPropagation();
+          onOpenChange(false);
+        }}
       />
 
       {/* Dialog */}
@@ -448,7 +454,10 @@ export function SSLWizard({
             </div>
           </div>
           <button
-            onClick={() => onOpenChange(false)}
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenChange(false);
+            }}
             className="p-2 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
           >
             <X className="h-5 w-5" />
@@ -593,7 +602,7 @@ export function SSLWizard({
 
                   {/* Actions */}
                   <div className="flex justify-between pt-4">
-                    <Button variant="secondary" onClick={() => onOpenChange(false)}>
+                    <Button variant="secondary" onClick={(e: React.MouseEvent) => { e.stopPropagation(); onOpenChange(false); }}>
                       Cancel
                     </Button>
                     <div className="flex gap-2">
@@ -1393,7 +1402,7 @@ export function SSLWizard({
                 </a>
               </p>
 
-              <Button variant="primary" onClick={() => onOpenChange(false)} className="mt-4">
+              <Button variant="primary" onClick={(e: React.MouseEvent) => { e.stopPropagation(); onOpenChange(false); }} className="mt-4">
                 Done
               </Button>
             </div>
