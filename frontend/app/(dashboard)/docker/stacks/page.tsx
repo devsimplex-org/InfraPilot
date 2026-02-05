@@ -167,7 +167,7 @@ export default function DockerStacksPage() {
     const config = statusConfig[status];
     const Icon = config.icon;
     return (
-      <Badge variant={config.color as "gray" | "green" | "yellow"}>
+      <Badge color={config.color as "gray" | "green" | "yellow"}>
         <Icon className="h-3 w-3 mr-1" />
         {config.label}
       </Badge>
@@ -181,7 +181,7 @@ export default function DockerStacksPage() {
       staging: "blue",
       prod: "red",
     };
-    return <Badge variant={colors[env] || "gray"}>{env}</Badge>;
+    return <Badge color={colors[env] || "gray"}>{env}</Badge>;
   };
 
   if (isLoading) {
@@ -196,27 +196,27 @@ export default function DockerStacksPage() {
           title="Total Stacks"
           value={metrics.total}
           icon={Layers}
-          color="indigo"
-          subtitle={`${metrics.managed} managed`}
+          iconColor="text-indigo-600"
+          description={`${metrics.managed} managed`}
         />
         <StatCard
           title="Running"
           value={metrics.running}
           icon={CheckCircle}
-          color="green"
-          subtitle={`${metrics.runningContainers} containers`}
+          iconColor="text-green-600"
+          description={`${metrics.runningContainers} containers`}
         />
         <StatCard
           title="Partial"
           value={metrics.partial}
           icon={AlertTriangle}
-          color="yellow"
+          iconColor="text-yellow-600"
         />
         <StatCard
           title="Stopped"
           value={metrics.stopped}
           icon={StopCircle}
-          color="gray"
+          iconColor="text-gray-600"
         />
       </MetricsGrid>
 
@@ -293,24 +293,13 @@ export default function DockerStacksPage() {
         }}
         title={`Delete Stack "${stackToDelete?.name}"?`}
         message={
-          <div className="space-y-2">
-            {stackToDelete?.isManaged ? (
-              <>
-                <p>This will stop and remove all containers in this stack and delete the managed stack record.</p>
-                <p className="text-sm text-gray-500">
-                  {stackToDelete?.running_count || 0} running container(s) will be stopped.
-                </p>
-              </>
-            ) : (
-              <p className="text-amber-600">
-                This stack is not managed by InfraPilot. To remove it, use <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">docker-compose down</code> on the host.
-              </p>
-            )}
-          </div>
+          stackToDelete?.isManaged
+            ? `This will stop and remove all containers in this stack. ${stackToDelete?.running_count || 0} running container(s) will be stopped.`
+            : "This stack is not managed by InfraPilot. To remove it, use docker-compose down on the host."
         }
-        confirmText={deleteMutation.isPending ? "Deleting..." : "Delete Stack"}
+        confirmText={stackToDelete?.isManaged ? "Delete Stack" : "Close"}
         variant="danger"
-        disabled={deleteMutation.isPending || !stackToDelete?.isManaged}
+        isLoading={deleteMutation.isPending}
       />
     </div>
   );
@@ -374,12 +363,12 @@ function StackCard({
               {managed?.environment && renderEnvBadge(managed.environment)}
               {renderStatusBadge(stack.status)}
               {stack.isManaged ? (
-                <Badge variant="indigo" className="text-xs">
+                <Badge color="purple" className="text-xs">
                   <Shield className="h-3 w-3 mr-1" />
                   Managed
                 </Badge>
               ) : (
-                <Badge variant="gray" className="text-xs">
+                <Badge color="gray" className="text-xs">
                   External
                 </Badge>
               )}
@@ -408,7 +397,6 @@ function StackCard({
               variant="secondary"
               size="sm"
               onClick={onDelete}
-              title="Delete managed stack"
             >
               <Trash2 className="h-4 w-4" />
             </Button>
@@ -519,7 +507,7 @@ function ContainerRow({ container, onOpenContainer }: ContainerRowProps) {
         </span>
       </td>
       <td className="px-4 py-3">
-        <Badge variant={getStatusColor(container.status) as "green" | "gray" | "yellow"}>
+        <Badge color={getStatusColor(container.status) as "green" | "gray" | "yellow"}>
           {container.status}
         </Badge>
       </td>
