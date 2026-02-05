@@ -44,6 +44,7 @@ import { AlertBar } from "@/components/ui/alert-bar";
 import { api } from "@/lib/api";
 import { Navigation, NavigationSection } from "@/components/ui/Navigation";
 import { CommandPalette } from "@/components/ui/CommandPalette";
+import { Spinner } from "@/components/ui/Spinner";
 
 // DevSecOps Lifecycle Navigation Structure
 // Streamlined: ~32 items → ~16 visible items (intent-centric, not tool-centric)
@@ -215,7 +216,7 @@ export default function DashboardLayout({
   if (isChecking) {
     return (
       <div className="flex h-screen items-center justify-center bg-gray-100 dark:bg-gray-950">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+        <Spinner.Logo size="xl" label="Loading InfraPilot..." />
       </div>
     );
   }
