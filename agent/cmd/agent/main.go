@@ -1559,8 +1559,18 @@ func (h *CommandHandler) handleDockerCommand(ctx context.Context, cmd *agentgrpc
 			}
 		}
 
-		// Use extended run if we have secrets, networks, volumes, or command
-		if len(secrets) > 0 || len(networks) > 0 || len(volumes) > 0 || len(command) > 0 {
+		// Parse auth config for private registries
+		var authConfig *docker.AuthConfig
+		if authMap, ok := dockerCmd.Options["auth"].(map[string]interface{}); ok {
+			authConfig = &docker.AuthConfig{
+				Username:      getStringFromMap(authMap, "username"),
+				Password:      getStringFromMap(authMap, "password"),
+				ServerAddress: getStringFromMap(authMap, "server_address"),
+			}
+		}
+
+		// Use extended run if we have secrets, networks, volumes, command, or auth
+		if len(secrets) > 0 || len(networks) > 0 || len(volumes) > 0 || len(command) > 0 || authConfig != nil {
 			result, err := h.docker.RunContainerExtended(ctx, docker.ContainerRunExtendedConfig{
 				ImageRef:      imageRef,
 				Name:          name,
@@ -1575,6 +1585,7 @@ func (h *CommandHandler) handleDockerCommand(ctx context.Context, cmd *agentgrpc
 				Volumes:       volumes,
 				Command:       command,
 				PullLatest:    pullLatest,
+				Auth:          authConfig,
 			})
 			if err != nil {
 				return &agentgrpc.CommandResult{

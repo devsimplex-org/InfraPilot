@@ -351,18 +351,27 @@ func (c *Client) ListNetworks(ctx context.Context) ([]NetworkInfo, error) {
 			continue
 		}
 
-		// Build container map
+		// NetworkList doesn't return container info - we need to inspect each network
+		// to get the connected containers
 		containers := make(map[string]string)
-		for id, ep := range net.Containers {
-			shortID := id
-			if len(id) > 12 {
-				shortID = id[:12]
+		inspected, err := c.cli.NetworkInspect(ctx, net.ID, network.InspectOptions{})
+		if err == nil {
+			for id, ep := range inspected.Containers {
+				shortID := id
+				if len(id) > 12 {
+					shortID = id[:12]
+				}
+				containers[shortID] = ep.Name
 			}
-			containers[shortID] = ep.Name
+		}
+
+		networkID := net.ID
+		if len(networkID) > 12 {
+			networkID = networkID[:12]
 		}
 
 		result = append(result, NetworkInfo{
-			ID:         net.ID[:12],
+			ID:         networkID,
 			Name:       net.Name,
 			Driver:     net.Driver,
 			Scope:      net.Scope,
@@ -1167,7 +1176,8 @@ type ContainerRunExtendedConfig struct {
 	Networks      []NetworkConfig
 	Volumes       []VolumeConfig
 	Command       []string
-	PullLatest    bool // Whether to pull latest image before deployment (default: true)
+	PullLatest    bool        // Whether to pull latest image before deployment (default: true)
+	Auth          *AuthConfig // Registry authentication credentials
 }
 
 // RunContainer creates and starts a new container
@@ -1278,9 +1288,24 @@ func (c *Client) RunContainer(ctx context.Context, cfg ContainerRunConfig) (*Con
 // RunContainerExtended creates and starts a container with extended configuration
 // including secrets, networks, and volumes
 func (c *Client) RunContainerExtended(ctx context.Context, cfg ContainerRunExtendedConfig) (*ContainerRunResult, error) {
+	// Build pull options with optional auth
+	pullOpts := image.PullOptions{}
+	if cfg.Auth != nil && (cfg.Auth.Username != "" || cfg.Auth.Password != "") {
+		authConfig := registry.AuthConfig{
+			Username:      cfg.Auth.Username,
+			Password:      cfg.Auth.Password,
+			ServerAddress: cfg.Auth.ServerAddress,
+		}
+		encodedAuth, err := registry.EncodeAuthConfig(authConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode auth config: %w", err)
+		}
+		pullOpts.RegistryAuth = encodedAuth
+	}
+
 	// Step 1: Pull the image if PullLatest is true (default behavior)
 	if cfg.PullLatest {
-		reader, err := c.cli.ImagePull(ctx, cfg.ImageRef, image.PullOptions{})
+		reader, err := c.cli.ImagePull(ctx, cfg.ImageRef, pullOpts)
 		if err != nil {
 			return nil, fmt.Errorf("failed to pull image %s: %w", cfg.ImageRef, err)
 		}
@@ -1291,7 +1316,7 @@ func (c *Client) RunContainerExtended(ctx context.Context, cfg ContainerRunExten
 		_, _, err := c.cli.ImageInspectWithRaw(ctx, cfg.ImageRef)
 		if err != nil {
 			// Image doesn't exist, pull it anyway
-			reader, err := c.cli.ImagePull(ctx, cfg.ImageRef, image.PullOptions{})
+			reader, err := c.cli.ImagePull(ctx, cfg.ImageRef, pullOpts)
 			if err != nil {
 				return nil, fmt.Errorf("failed to pull image %s: %w", cfg.ImageRef, err)
 			}

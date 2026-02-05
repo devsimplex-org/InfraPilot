@@ -378,6 +378,88 @@ func (s *Service) GetDecryptedCredentials(ctx context.Context, orgID, registryID
 	return s.decryptCredentials(registry)
 }
 
+// GetRegistryByProvider finds a registry by provider type for an organization
+func (s *Service) GetRegistryByProvider(ctx context.Context, orgID uuid.UUID, provider Provider) (*Registry, error) {
+	query := `
+		SELECT
+			id, org_id, name, provider, enabled,
+			auth_type, credentials_encrypted, namespace,
+			connection_status, connection_error, last_connected_at,
+			created_at, updated_at, created_by
+		FROM container_registries
+		WHERE org_id = $1 AND provider = $2 AND enabled = true
+		ORDER BY created_at DESC
+		LIMIT 1
+	`
+
+	var registry Registry
+	err := s.db.QueryRow(ctx, query, orgID, provider).Scan(
+		&registry.ID, &registry.OrgID, &registry.Name, &registry.Provider, &registry.Enabled,
+		&registry.AuthType, &registry.CredentialsEncrypted, &registry.Namespace,
+		&registry.ConnectionStatus, &registry.ConnectionError, &registry.LastConnectedAt,
+		&registry.CreatedAt, &registry.UpdatedAt, &registry.CreatedBy,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("registry not found for provider %s: %w", provider, err)
+	}
+
+	return &registry, nil
+}
+
+// GetRegistryByImageRef finds a registry by matching the image reference URL
+func (s *Service) GetRegistryByImageRef(ctx context.Context, orgID uuid.UUID, imageRef string) (*Registry, error) {
+	// Determine provider from image reference
+	var provider Provider
+	switch {
+	case len(imageRef) > 7 && imageRef[:7] == "ghcr.io":
+		provider = ProviderGHCR
+	case len(imageRef) > 6 && imageRef[:6] == "gcr.io":
+		provider = ProviderGCR
+	case len(imageRef) > 10 && imageRef[len(imageRef)-10:] == ".azurecr.io" ||
+		 (len(imageRef) > 10 && containsAzureCR(imageRef)):
+		provider = ProviderACR
+	case len(imageRef) > 14 && imageRef[len(imageRef)-14:] == ".amazonaws.com" ||
+		 (len(imageRef) > 4 && imageRef[:4] == "ecr."):
+		provider = ProviderECR
+	default:
+		// Check if it looks like Docker Hub (no registry prefix or docker.io)
+		if !containsSlashBeforeDot(imageRef) ||
+		   (len(imageRef) > 9 && imageRef[:9] == "docker.io") ||
+		   (len(imageRef) > 18 && imageRef[:18] == "index.docker.io") {
+			provider = ProviderDockerHub
+		} else {
+			return nil, fmt.Errorf("unable to determine registry provider from image: %s", imageRef)
+		}
+	}
+
+	return s.GetRegistryByProvider(ctx, orgID, provider)
+}
+
+// containsAzureCR checks if the string contains .azurecr.io
+func containsAzureCR(s string) bool {
+	for i := 0; i < len(s)-10; i++ {
+		if s[i:i+10] == ".azurecr.io" {
+			return true
+		}
+	}
+	return false
+}
+
+// containsSlashBeforeDot checks if there's a slash before the first dot
+func containsSlashBeforeDot(s string) bool {
+	slashIdx := -1
+	dotIdx := -1
+	for i, c := range s {
+		if c == '/' && slashIdx == -1 {
+			slashIdx = i
+		}
+		if c == '.' && dotIdx == -1 {
+			dotIdx = i
+		}
+	}
+	return dotIdx != -1 && (slashIdx == -1 || dotIdx < slashIdx)
+}
+
 // decryptCredentials decrypts the credentials for a registry
 func (s *Service) decryptCredentials(registry *Registry) (*Credentials, error) {
 	var creds Credentials

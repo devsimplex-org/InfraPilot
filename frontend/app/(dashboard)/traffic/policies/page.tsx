@@ -4,9 +4,6 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Shield,
-  Plus,
-  Trash2,
-  RefreshCw,
   Globe,
   Zap,
   Bot,
@@ -15,18 +12,18 @@ import {
   Settings,
   CheckCircle2,
   XCircle,
+  Search,
 } from "lucide-react";
+import Link from "next/link";
 import { api, TrafficPolicy, TrafficPolicyType } from "@/lib/api";
 
 // Component library imports
-import { PageHeader } from "@/components/ui/PageHeader";
-import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { Table } from "@/components/ui/Table";
 import { SlideOver } from "@/components/ui/SlideOver";
-import { FilterPanel } from "@/components/ui/FilterPanel";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Spinner } from "@/components/ui/Spinner";
+import { Input } from "@/components/ui/page-layout";
 import { cn } from "@/lib/utils";
 
 export default function TrafficPoliciesPage() {
@@ -204,107 +201,77 @@ export default function TrafficPoliciesPage() {
     },
   ];
 
-  // Filter configuration
-  const filterGroups = [
-    {
-      id: "type",
-      label: "Policy Type",
-      type: "radio" as const,
-      value: filters.type,
-      onChange: (value: string | string[]) =>
-        setFilters({ ...filters, type: value as TrafficPolicyType | "" }),
-      options: [
-        { label: "All Types", value: "" },
-        { label: "Rate Limit", value: "rate_limit" },
-        { label: "Bot Protection", value: "bot_protection" },
-        { label: "Geo Blocking", value: "geo_blocking" },
-        { label: "CAPTCHA", value: "captcha" },
-        { label: "IP Filtering", value: "ip_filtering" },
-        { label: "Header Transform", value: "header_transform" },
-        { label: "CORS", value: "cors" },
-        { label: "Authentication", value: "authentication" },
-      ],
-    },
+  // Filter options
+  const policyTypeFilters = [
+    { label: "All Types", value: "" },
+    { label: "Rate Limit", value: "rate_limit" },
+    { label: "Bot Protection", value: "bot_protection" },
+    { label: "Geo Blocking", value: "geo_blocking" },
+    { label: "IP Filtering", value: "ip_filtering" },
+    { label: "CORS", value: "cors" },
+    { label: "Authentication", value: "authentication" },
   ];
 
-  // Breadcrumbs
-  const breadcrumbs = (
-    <Breadcrumb
-      items={[
-        { label: "Traffic", href: "/traffic" },
-        { label: "Policies", current: true },
-      ]}
-    />
-  );
-
-  // Page Header Action
-  const headerAction = (
-    <div className="flex items-center gap-2">
-      <button
-        onClick={() => queryClient.invalidateQueries({ queryKey: ["traffic-policies"] })}
-        className="flex items-center gap-2 px-3 py-2 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
-      >
-        <RefreshCw className="h-4 w-4" />
-        Refresh
-      </button>
-      <button
-        className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
-      >
-        <Plus className="h-4 w-4" />
-        New Policy
-      </button>
-    </div>
-  );
+  if (isLoading) {
+    return <Spinner.LogoPage label="Loading policies..." />;
+  }
 
   return (
     <div className="space-y-6">
-      {/* Page Header */}
-      <PageHeader
-        title="Traffic Policies"
-        description="Configure rate limiting, bot protection, geo-blocking, and more"
-        breadcrumbs={breadcrumbs}
-        action={headerAction}
-      />
-
-      {/* Content */}
-      <div className="flex gap-6">
-        {/* Filters Sidebar */}
-        <div className="w-64 flex-shrink-0">
-          <FilterPanel
-            filters={filterGroups}
-            onReset={() => setFilters({ type: "" })}
+      {/* Filters */}
+      <div className="flex items-center gap-4 flex-wrap">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <Input
+            placeholder="Search policies..."
+            className="pl-10"
           />
         </div>
 
-        {/* Policies Table */}
-        <div className="flex-1 min-w-0 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
-          {isLoading ? (
-            <div className="flex items-center justify-center h-64">
-              <Spinner size="lg" label="Loading policies..." />
-            </div>
-          ) : policiesData?.policies && policiesData.policies.length > 0 ? (
-            <Table
-              columns={columns}
-              data={policiesData.policies}
-              keyExtractor={(row) => row.id}
-              onRowClick={(row) => setSelectedPolicy(row)}
-              hoverable
-            />
-          ) : (
-            <EmptyState
-              icon={Shield}
-              title="No traffic policies"
-              description="Create policies to control traffic flow, rate limiting, and security"
-              action={
-                <button className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-medium">
-                  Create Policy
-                </button>
-              }
-              size="sm"
-            />
-          )}
+        <div className="flex items-center gap-2 flex-wrap">
+          {policyTypeFilters.map((option) => (
+            <button
+              key={option.value}
+              onClick={() => setFilters({ ...filters, type: filters.type === option.value ? "" : option.value as TrafficPolicyType | "" })}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-sm font-medium transition-colors",
+                (option.value === "" && filters.type === "") || filters.type === option.value
+                  ? "bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300"
+                  : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"
+              )}
+            >
+              {option.label}
+            </button>
+          ))}
         </div>
       </div>
+
+      {/* Policies Table */}
+      {policiesData?.policies && policiesData.policies.length > 0 ? (
+        <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
+          <Table
+            columns={columns}
+            data={policiesData.policies}
+            keyExtractor={(row) => row.id}
+            onRowClick={(row) => setSelectedPolicy(row)}
+            hoverable
+          />
+        </div>
+      ) : (
+        <EmptyState
+          icon={Shield}
+          title="No traffic policies"
+          description="Create policies to control traffic flow, rate limiting, and security"
+          action={
+            <Link
+              href="/traffic/policies/create"
+              className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-medium"
+            >
+              Create Policy
+            </Link>
+          }
+        />
+      )}
 
       {/* Policy Detail SlideOver */}
       <SlideOver isOpen={!!selectedPolicy} onClose={() => setSelectedPolicy(null)} size="lg">

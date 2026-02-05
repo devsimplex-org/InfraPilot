@@ -148,14 +148,14 @@ func (m *Manager) GenerateServerBlock(domain, upstream string, sslEnabled, force
 
 	// HTTPS server
 	if sslEnabled {
-		listenSSL := "443 ssl"
+		http2Directive := ""
 		if http2 {
-			listenSSL = "443 ssl http2"
+			http2Directive = "\n    http2 on;"
 		}
 
 		sb.WriteString(fmt.Sprintf(`server {
-    listen %s;
-    listen [::]:%s;
+    listen 443 ssl;
+    listen [::]:443 ssl;%s
     server_name %s;
 
     ssl_certificate %s;
@@ -176,7 +176,7 @@ func (m *Manager) GenerateServerBlock(domain, upstream string, sslEnabled, force
         proxy_set_header Connection "upgrade";
     }
 }
-`, listenSSL, listenSSL, domain, sslCertPath, sslKeyPath, upstream))
+`, http2Directive, domain, sslCertPath, sslKeyPath, upstream))
 	}
 
 	return sb.String()

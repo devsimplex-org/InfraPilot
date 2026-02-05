@@ -151,6 +151,12 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				agents.POST("/:id/containers/:cid/start", h.RequireModifyContainers(), h.startContainerReal)
 				agents.POST("/:id/containers/:cid/stop", h.RequireModifyContainers(), h.stopContainerReal)
 				agents.POST("/:id/containers/:cid/restart", h.RequireModifyContainers(), h.restartContainerReal)
+				agents.POST("/:id/containers/:cid/pause", h.RequireModifyContainers(), h.pauseContainerReal)
+				agents.POST("/:id/containers/:cid/unpause", h.RequireModifyContainers(), h.unpauseContainerReal)
+				agents.POST("/:id/containers/:cid/kill", h.RequireModifyContainers(), h.killContainerReal)
+				agents.POST("/:id/containers/:cid/rename", h.RequireModifyContainers(), h.renameContainerReal)
+				agents.PUT("/:id/containers/:cid", h.RequireModifyContainers(), h.updateContainerReal)
+				agents.GET("/:id/containers/:cid/inspect", h.inspectContainerReal)
 				agents.DELETE("/:id/containers/:cid", h.RequireModifyContainers(), h.deleteContainerReal)
 				agents.GET("/:id/containers/:cid/logs", h.getContainerLogsReal)
 				agents.GET("/:id/containers/:cid/logs/stream", h.streamContainerLogs)
@@ -433,6 +439,12 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				// Traffic Resource Upstreams
 				traffic.GET("/resources/:id/upstreams", h.listTrafficUpstreams)
 				traffic.POST("/resources/:id/upstreams", h.RequireManageAlerts(), h.createTrafficUpstream)
+
+				// Traffic Resource Apply/Validate/Rollback
+				traffic.POST("/resources/:id/apply", h.RequireManageAlerts(), h.applyTrafficResource)
+				traffic.POST("/resources/:id/dry-run", h.RequireManageAlerts(), h.dryRunTrafficResource)
+				traffic.POST("/resources/:id/rollback", h.RequireManageAlerts(), h.rollbackTrafficResource)
+				traffic.GET("/resources/:id/config-preview", h.getTrafficResourceConfigPreview)
 
 				// Traffic Resource History
 				traffic.GET("/resources/:id/history", h.getTrafficApplyHistory)

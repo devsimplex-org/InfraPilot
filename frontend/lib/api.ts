@@ -158,6 +158,9 @@ export interface ProxyHost {
   basic_auth_enabled: boolean;
   basic_auth_realm?: string;
   basic_auth_excluded_paths?: string[];
+  access_log: boolean;
+  error_log: boolean;
+  log_format?: string;
   is_system_proxy: boolean;
   status: string;
   created_at: string;
@@ -974,6 +977,8 @@ export interface Deployment {
   deployed_at?: string;
   created_at: string;
   updated_at: string;
+  stack_id?: string;
+  service_order?: number;
 }
 
 export interface ScanResult {
@@ -2056,6 +2061,37 @@ export interface TrafficApplyHistory {
   error_message?: string;
   rendered_nginx_config?: string;
   config_hash?: string;
+}
+
+export interface ApplyTrafficResponse {
+  success: boolean;
+  resource_id: string;
+  resource_name?: string;
+  action: 'apply' | 'dry_run' | 'rollback';
+  validation_passed: boolean;
+  validation_output?: string;
+  warnings?: string[];
+  errors?: string[];
+  config_hash?: string;
+  applied_at?: string;
+  duration_ms: number;
+  nginx_config?: string;
+  diff?: {
+    has_changes: boolean;
+    current?: string;
+    proposed?: string;
+  };
+}
+
+export interface TrafficConfigPreview {
+  resource_id: string;
+  resource_name: string;
+  nginx_config: string;
+  config_hash: string;
+  domains: string[];
+  upstreams: TrafficUpstream[];
+  policies: TrafficPolicy[];
+  tls_config?: TrafficTLSConfig;
 }
 
 export interface TrafficResourceSummary {
@@ -3410,6 +3446,49 @@ export const api = {
       }
     ),
 
+  pauseContainer: (agentId: string, containerId: string) =>
+    fetchAPI(`/agents/${agentId}/containers/${containerId}/pause`, {
+      method: "POST",
+    }),
+
+  unpauseContainer: (agentId: string, containerId: string) =>
+    fetchAPI(`/agents/${agentId}/containers/${containerId}/unpause`, {
+      method: "POST",
+    }),
+
+  killContainer: (agentId: string, containerId: string, signal: string = "SIGKILL") =>
+    fetchAPI(`/agents/${agentId}/containers/${containerId}/kill`, {
+      method: "POST",
+      body: JSON.stringify({ signal }),
+    }),
+
+  renameContainer: (agentId: string, containerId: string, newName: string) =>
+    fetchAPI<{ message: string; container_id: string; old_name: string; new_name: string }>(
+      `/agents/${agentId}/containers/${containerId}/rename`,
+      {
+        method: "POST",
+        body: JSON.stringify({ new_name: newName }),
+      }
+    ),
+
+  updateContainer: (agentId: string, containerId: string, config: {
+    restart_policy?: string;
+    max_retries?: number;
+    memory_limit?: number;
+    memory_swap?: number;
+    cpu_shares?: number;
+    cpu_quota?: number;
+    cpu_period?: number;
+  }) =>
+    fetchAPI(`/agents/${agentId}/containers/${containerId}`, {
+      method: "PUT",
+      body: JSON.stringify(config),
+    }),
+
+  inspectContainer: (agentId: string, containerId: string) =>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    fetchAPI<any>(`/agents/${agentId}/containers/${containerId}/inspect`),
+
   getContainerLogs: (agentId: string, containerId: string, tail: number = 100) =>
     fetchAPI<{ container_id: string; logs: string }>(
       `/agents/${agentId}/containers/${containerId}/logs?tail=${tail}`
@@ -4317,10 +4396,10 @@ export const api = {
       method: "POST",
     }),
 
-  redeployDeployment: (agentId: string, deploymentId: string, pullLatest: boolean = true) =>
+  redeployDeployment: (agentId: string, deploymentId: string, pullLatest: boolean = true, skipScanning: boolean = false) =>
     fetchAPI<{ id: string; status: string; message: string }>(`/agents/${agentId}/deployments/${deploymentId}/redeploy`, {
       method: "POST",
-      body: JSON.stringify({ pull_latest: pullLatest }),
+      body: JSON.stringify({ pull_latest: pullLatest, skip_scanning: skipScanning }),
     }),
 
   syncDeploymentStatus: (agentId: string) =>
@@ -5022,9 +5101,40 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  updateTrafficUpstream: (resourceId: string, upstreamId: string, data: Partial<CreateTrafficUpstreamRequest>) =>
+    fetchAPI<TrafficUpstream>(`/traffic/resources/${resourceId}/upstreams/${upstreamId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  deleteTrafficUpstream: (resourceId: string, upstreamId: string) =>
+    fetchAPI<{ message: string }>(`/traffic/resources/${resourceId}/upstreams/${upstreamId}`, {
+      method: "DELETE",
+    }),
+
   // Traffic Apply History
   getTrafficApplyHistory: (resourceId: string) =>
     fetchAPI<{ history: TrafficApplyHistory[] }>(`/traffic/resources/${resourceId}/history`),
+
+  // Traffic Resource Apply/Validate/Rollback
+  applyTrafficResource: (resourceId: string, force?: boolean) =>
+    fetchAPI<ApplyTrafficResponse>(`/traffic/resources/${resourceId}/apply`, {
+      method: "POST",
+      body: JSON.stringify({ force: force || false }),
+    }),
+
+  dryRunTrafficResource: (resourceId: string) =>
+    fetchAPI<ApplyTrafficResponse>(`/traffic/resources/${resourceId}/dry-run`, {
+      method: "POST",
+    }),
+
+  rollbackTrafficResource: (resourceId: string) =>
+    fetchAPI<ApplyTrafficResponse>(`/traffic/resources/${resourceId}/rollback`, {
+      method: "POST",
+    }),
+
+  getTrafficResourceConfigPreview: (resourceId: string) =>
+    fetchAPI<TrafficConfigPreview>(`/traffic/resources/${resourceId}/config-preview`),
 
   // Traffic Policies
   listTrafficPolicies: (params?: { type?: TrafficPolicyType; limit?: number; offset?: number }) => {
@@ -5063,6 +5173,14 @@ export const api = {
     fetchAPI<TrafficPolicyAssignment>(`/traffic/policies/${policyId}/assign`, {
       method: "POST",
       body: JSON.stringify(data),
+    }),
+
+  listTrafficResourcePolicyAssignments: (resourceId: string) =>
+    fetchAPI<{ assignments: TrafficPolicyAssignment[] }>(`/traffic/resources/${resourceId}/policy-assignments`),
+
+  unassignTrafficPolicy: (assignmentId: string) =>
+    fetchAPI<{ message: string }>(`/traffic/policy-assignments/${assignmentId}`, {
+      method: "DELETE",
     }),
 
   // Epic 14: Database & Data Governance

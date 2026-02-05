@@ -44,6 +44,7 @@ import { AlertBar } from "@/components/ui/alert-bar";
 import { api } from "@/lib/api";
 import { Navigation, NavigationSection } from "@/components/ui/Navigation";
 import { CommandPalette } from "@/components/ui/CommandPalette";
+import { Spinner } from "@/components/ui/Spinner";
 
 // DevSecOps Lifecycle Navigation Structure
 // Streamlined: ~32 items → ~16 visible items (intent-centric, not tool-centric)
@@ -55,7 +56,9 @@ const navigationSections: NavigationSection[] = [
     color: "text-blue-600 dark:text-blue-400",
     items: [
       { name: "Dashboard", href: "/", icon: LayoutDashboard },
+      { name: "Docker", href: "/docker", icon: Container },
       { name: "Security Posture", href: "/security", icon: Shield },
+      { name: "Traffic", href: "/traffic", icon: Network },
     ],
   },
   {
@@ -75,7 +78,7 @@ const navigationSections: NavigationSection[] = [
     icon: Rocket,
     color: "text-orange-600 dark:text-orange-400",
     items: [
-      { name: "Deployments", href: "/deployments", icon: Package },
+      { name: "Deployments", href: "/docker/deployments", icon: Package },
       { name: "Artifacts", href: "/deploy/artifacts", icon: Box }, // Consolidated: Images, Scans, SBOMs, Registries
       { name: "Vulnerabilities", href: "/vulnerabilities", icon: AlertTriangle },
     ],
@@ -88,9 +91,6 @@ const navigationSections: NavigationSection[] = [
     items: [
       { name: "Runtime Security", href: "/runtime-security", icon: ShieldCheck },
       { name: "Exposure", href: "/run/exposure", icon: Globe },
-      { name: "Traffic", href: "/traffic", icon: Network }, // Single entry for traffic management
-      { name: "Docker", href: "/docker", icon: Container },
-      { name: "Logs", href: "/logs", icon: FileText },
       { name: "Alerts", href: "/alerts", icon: Bell },
     ],
   },
@@ -215,7 +215,7 @@ export default function DashboardLayout({
   if (isChecking) {
     return (
       <div className="flex h-screen items-center justify-center bg-gray-100 dark:bg-gray-950">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+        <Spinner.Logo size="xl" label="Loading InfraPilot..." />
       </div>
     );
   }
