@@ -12,6 +12,7 @@ import {
   FileText,
   Activity,
   Settings,
+  Layers,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -19,15 +20,32 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Spinner } from "@/components/ui/Spinner";
+import { Badge } from "@/components/ui/Badge";
 import { cn } from "@/lib/utils";
 
-const tabs = [
-  { id: "overview", label: "Overview", href: "/traffic" },
-  { id: "resources", label: "Resources", href: "/traffic/resources" },
-  { id: "policies", label: "Policies", href: "/traffic/policies" },
-  { id: "proxies", label: "Proxies", href: "/traffic/proxies" },
-  { id: "logs", label: "Nginx Logs", href: "/traffic/logs" },
+// Tab groups for visual separation
+const tabGroups = [
+  {
+    id: "governance",
+    label: "Traffic Governance",
+    tabs: [
+      { id: "overview", label: "Overview", href: "/traffic", icon: Layers },
+      { id: "resources", label: "Resources", href: "/traffic/resources", icon: Network },
+      { id: "policies", label: "Policies", href: "/traffic/policies", icon: Shield },
+    ],
+  },
+  {
+    id: "proxies",
+    label: "Reverse Proxy",
+    tabs: [
+      { id: "proxies", label: "Proxy Hosts", href: "/traffic/proxies", icon: Globe },
+      { id: "logs", label: "Nginx Logs", href: "/traffic/logs", icon: FileText },
+    ],
+  },
 ];
+
+// Flat tabs for easy lookup
+const allTabs = tabGroups.flatMap((g) => g.tabs);
 
 export default function TrafficLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -54,11 +72,22 @@ export default function TrafficLayout({ children }: { children: ReactNode }) {
   const getActiveTab = () => {
     if (pathname === "/traffic") return "overview";
     if (pathname === "/traffic/proxies" || pathname.startsWith("/traffic/proxies/")) return "proxies";
+    if (pathname === "/traffic/logs" || pathname.startsWith("/traffic/logs/")) return "logs";
     const segment = pathname.split("/")[2];
     return segment || "overview";
   };
 
   const activeTab = getActiveTab();
+
+  // Check which group the active tab belongs to
+  const getActiveGroup = () => {
+    for (const group of tabGroups) {
+      if (group.tabs.some((t) => t.id === activeTab)) {
+        return group.id;
+      }
+    }
+    return "governance";
+  };
 
   // Get action button based on active tab
   const getActionButton = () => {
@@ -104,7 +133,7 @@ export default function TrafficLayout({ children }: { children: ReactNode }) {
         <PageHeader
           title="Traffic"
           description="Manage traffic routing, policies, and nginx configuration"
-          breadcrumbs={<Breadcrumb items={[{ label: "Run" }, { label: "Traffic" }]} />}
+          breadcrumbs={<Breadcrumb items={[{ label: "Overview" }, { label: "Traffic" }]} />}
         />
         <Spinner.LogoPage label="Loading..." />
       </div>
@@ -122,7 +151,7 @@ export default function TrafficLayout({ children }: { children: ReactNode }) {
       <PageHeader
         title="Traffic"
         description="Manage traffic routing, policies, and nginx configuration"
-        breadcrumbs={<Breadcrumb items={[{ label: "Run" }, { label: "Traffic" }]} />}
+        breadcrumbs={<Breadcrumb items={[{ label: "Overview" }, { label: "Traffic" }]} />}
         action={
           <div className="flex items-center gap-3">
             {activeAgents.length > 1 && (
@@ -152,21 +181,25 @@ export default function TrafficLayout({ children }: { children: ReactNode }) {
 
       {/* Navigation Tabs */}
       <div className="border-b border-gray-200 dark:border-gray-700">
-        <nav className="-mb-px flex space-x-8">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => router.push(tab.href)}
-              className={cn(
-                "whitespace-nowrap border-b-2 py-3 px-1 text-sm font-medium transition-colors",
-                activeTab === tab.id
-                  ? "border-primary-500 text-primary-600 dark:text-primary-400"
-                  : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-              )}
-            >
-              {tab.label}
-            </button>
-          ))}
+        <nav className="-mb-px flex space-x-1">
+          {allTabs.map((tab) => {
+            const Icon = tab.icon;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => router.push(tab.href)}
+                className={cn(
+                  "flex items-center gap-2 whitespace-nowrap border-b-2 py-3 px-3 text-sm font-medium transition-colors",
+                  activeTab === tab.id
+                    ? "border-primary-500 text-primary-600 dark:text-primary-400"
+                    : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+                )}
+              >
+                <Icon className="w-4 h-4" />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
         </nav>
       </div>
 

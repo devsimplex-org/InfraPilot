@@ -58,6 +58,7 @@ const navigationSections: NavigationSection[] = [
       { name: "Dashboard", href: "/", icon: LayoutDashboard },
       { name: "Docker", href: "/docker", icon: Container },
       { name: "Security Posture", href: "/security", icon: Shield },
+      { name: "Traffic", href: "/traffic", icon: Network },
     ],
   },
   {
@@ -90,7 +91,6 @@ const navigationSections: NavigationSection[] = [
     items: [
       { name: "Runtime Security", href: "/runtime-security", icon: ShieldCheck },
       { name: "Exposure", href: "/run/exposure", icon: Globe },
-      { name: "Traffic", href: "/traffic", icon: Network }, // Single entry for traffic management
       { name: "Alerts", href: "/alerts", icon: Bell },
     ],
   },
