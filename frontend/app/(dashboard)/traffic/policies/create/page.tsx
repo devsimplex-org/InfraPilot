@@ -27,6 +27,7 @@ import { api, CreateTrafficPolicyRequest, TrafficPolicyType } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { Badge } from "@/components/ui/Badge";
+import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 
 // Policy type configuration
 const POLICY_TYPES: {
@@ -303,86 +304,91 @@ export default function CreateTrafficPolicyPage() {
         {/* Main Form */}
         <div className="col-span-2 space-y-6">
           {/* Basic Info */}
-          <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-6">
-            <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-4">
-              Basic Information
-            </h3>
+          <Card>
+            <CardBody>
+              <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-4">
+                Basic Information
+              </h3>
 
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Policy Name <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g., api-rate-limit"
-                  className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                />
-              </div>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Policy Name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="e.g., api-rate-limit"
+                    className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  />
+                </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Description
-                </label>
-                <textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Optional description..."
-                  rows={2}
-                  className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                />
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Description
+                  </label>
+                  <textarea
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    placeholder="Optional description..."
+                    rows={2}
+                    className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  />
+                </div>
               </div>
-            </div>
-          </div>
+            </CardBody>
+          </Card>
 
           {/* Policy Type Selection */}
-          <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-6">
-            <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-4">
-              Policy Type <span className="text-red-500">*</span>
-            </h3>
+          <Card>
+            <CardBody>
+              <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-4">
+                Policy Type <span className="text-red-500">*</span>
+              </h3>
 
-            <div className="grid grid-cols-2 gap-3">
-              {POLICY_TYPES.map((type) => {
-                const Icon = type.icon;
-                return (
-                  <label
-                    key={type.id}
-                    className={cn(
-                      "flex items-start gap-3 p-4 rounded-lg border-2 cursor-pointer transition-colors",
-                      policyType === type.id
-                        ? "border-primary-500 bg-primary-50 dark:bg-primary-900/20"
-                        : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
-                    )}
-                  >
-                    <input
-                      type="radio"
-                      name="policyType"
-                      value={type.id}
-                      checked={policyType === type.id}
-                      onChange={() => setPolicyType(type.id)}
-                      className="sr-only"
-                    />
-                    <div className={cn("p-2 rounded-lg bg-gray-100 dark:bg-gray-800", type.color)}>
-                      <Icon className="h-5 w-5" />
-                    </div>
-                    <div className="flex-1">
-                      <div className="font-medium text-gray-900 dark:text-white">{type.label}</div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">{type.description}</div>
-                    </div>
-                  </label>
-                );
-              })}
-            </div>
-          </div>
+              <div className="grid grid-cols-2 gap-3">
+                {POLICY_TYPES.map((type) => {
+                  const Icon = type.icon;
+                  return (
+                    <label
+                      key={type.id}
+                      className={cn(
+                        "flex items-start gap-3 p-4 rounded-lg border-2 cursor-pointer transition-colors",
+                        policyType === type.id
+                          ? "border-primary-500 bg-primary-50 dark:bg-primary-900/20"
+                          : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
+                      )}
+                    >
+                      <input
+                        type="radio"
+                        name="policyType"
+                        value={type.id}
+                        checked={policyType === type.id}
+                        onChange={() => setPolicyType(type.id)}
+                        className="sr-only"
+                      />
+                      <div className={cn("p-2 rounded-lg bg-gray-100 dark:bg-gray-800", type.color)}>
+                        <Icon className="h-5 w-5" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-medium text-gray-900 dark:text-white">{type.label}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">{type.description}</div>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            </CardBody>
+          </Card>
 
           {/* Type-Specific Configuration */}
           {policyType && (
-            <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-6">
-              <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-4">
-                Configuration
-              </h3>
+            <Card>
+              <CardBody>
+                <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-4">
+                  Configuration
+                </h3>
 
               {/* Rate Limit Config */}
               {policyType === "rate_limit" && (
@@ -909,17 +915,19 @@ export default function CreateTrafficPolicyPage() {
                   </div>
                 </div>
               )}
-            </div>
+              </CardBody>
+            </Card>
           )}
         </div>
 
         {/* Sidebar */}
         <div className="space-y-6">
           {/* Settings */}
-          <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-6">
-            <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-4">
-              Settings
-            </h3>
+          <Card>
+            <CardBody>
+              <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-4">
+                Settings
+              </h3>
 
             <div className="space-y-4">
               <div>
@@ -964,7 +972,8 @@ export default function CreateTrafficPolicyPage() {
                 </label>
               </div>
             </div>
-          </div>
+            </CardBody>
+          </Card>
 
           {/* Info */}
           <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">

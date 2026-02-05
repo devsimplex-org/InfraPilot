@@ -53,6 +53,8 @@ import { Badge } from "@/components/ui/Badge";
 import { Table } from "@/components/ui/Table";
 import { Spinner } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { Card, CardHeader, CardBody } from "@/components/ui/Card";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { cn } from "@/lib/utils";
 
 type TabType = "overview" | "upstreams" | "policies" | "history" | "config";
@@ -70,6 +72,12 @@ export default function TrafficResourceDetailPage() {
   const [showPolicyModal, setShowPolicyModal] = useState(false);
   const [editingUpstream, setEditingUpstream] = useState<TrafficUpstream | null>(null);
   const [applyResult, setApplyResult] = useState<ApplyTrafficResponse | null>(null);
+
+  // Confirm dialog states
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showRollbackConfirm, setShowRollbackConfirm] = useState(false);
+  const [upstreamToDelete, setUpstreamToDelete] = useState<string | null>(null);
+  const [assignmentToDelete, setAssignmentToDelete] = useState<string | null>(null);
 
   // Query resource
   const { data: resource, isLoading: resourceLoading } = useQuery({
@@ -358,9 +366,7 @@ export default function TrafficResourceDetailPage() {
           <button
             onClick={(e) => {
               e.stopPropagation();
-              if (confirm("Delete this upstream?")) {
-                deleteUpstreamMutation.mutate(value);
-              }
+              setUpstreamToDelete(value);
             }}
             className="p-1 text-gray-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
           >
@@ -477,11 +483,7 @@ export default function TrafficResourceDetailPage() {
       </button>
       {historyData?.history && historyData.history.length > 0 && (
         <button
-          onClick={() => {
-            if (confirm("Rollback to previous configuration?")) {
-              rollbackMutation.mutate();
-            }
-          }}
+          onClick={() => setShowRollbackConfirm(true)}
           disabled={rollbackMutation.isPending}
           className="flex items-center gap-2 px-3 py-2 text-yellow-700 dark:text-yellow-300 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-300 dark:border-yellow-700 rounded-lg hover:bg-yellow-100 dark:hover:bg-yellow-900/30 disabled:opacity-50"
         >
@@ -501,11 +503,7 @@ export default function TrafficResourceDetailPage() {
         Refresh
       </button>
       <button
-        onClick={() => {
-          if (confirm("Are you sure you want to delete this resource?")) {
-            deleteMutation.mutate();
-          }
-        }}
+        onClick={() => setShowDeleteConfirm(true)}
         className="flex items-center gap-2 px-3 py-2 text-red-600 bg-white dark:bg-gray-800 border border-red-300 dark:border-red-600 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20"
       >
         <Trash2 className="h-4 w-4" />
@@ -624,38 +622,42 @@ export default function TrafficResourceDetailPage() {
 
           <div className="grid grid-cols-2 gap-6">
             {/* Domains */}
-            <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-6">
-              <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Domains</h3>
-              <div className="space-y-2">
-                {resource.domains.map((domain, i) => (
-                  <div
-                    key={i}
-                    className="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-800 rounded-lg"
-                  >
-                    <Globe className="h-4 w-4 text-gray-400" />
-                    <span className="text-sm text-gray-700 dark:text-gray-300">{domain}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <Card>
+              <CardBody>
+                <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Domains</h3>
+                <div className="space-y-2">
+                  {resource.domains.map((domain, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-800 rounded-lg"
+                    >
+                      <Globe className="h-4 w-4 text-gray-400" />
+                      <span className="text-sm text-gray-700 dark:text-gray-300">{domain}</span>
+                    </div>
+                  ))}
+                </div>
+              </CardBody>
+            </Card>
 
             {/* Paths */}
-            <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-6">
-              <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Path Configuration</h3>
-              <div className="space-y-2">
-                {resource.paths.map((pathConfig, i) => (
-                  <div
-                    key={i}
-                    className="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-800 rounded-lg"
-                  >
-                    <span className="text-sm text-gray-700 dark:text-gray-300 font-mono">
-                      {pathConfig.path}
-                    </span>
-                    <Badge color="gray">{pathConfig.match}</Badge>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <Card>
+              <CardBody>
+                <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Path Configuration</h3>
+                <div className="space-y-2">
+                  {resource.paths.map((pathConfig, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-800 rounded-lg"
+                    >
+                      <span className="text-sm text-gray-700 dark:text-gray-300 font-mono">
+                        {pathConfig.path}
+                      </span>
+                      <Badge color="gray">{pathConfig.match}</Badge>
+                    </div>
+                  ))}
+                </div>
+              </CardBody>
+            </Card>
           </div>
 
           {/* Labels & Annotations */}
@@ -663,58 +665,64 @@ export default function TrafficResourceDetailPage() {
             Object.keys(resource.annotations || {}).length > 0) && (
             <div className="grid grid-cols-2 gap-6">
               {Object.keys(resource.labels || {}).length > 0 && (
-                <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-6">
-                  <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Labels</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {Object.entries(resource.labels).map(([key, value]) => (
-                      <Badge key={key} color="gray">
-                        {key}: {value}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
+                <Card>
+                  <CardBody>
+                    <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Labels</h3>
+                    <div className="flex flex-wrap gap-2">
+                      {Object.entries(resource.labels).map(([key, value]) => (
+                        <Badge key={key} color="gray">
+                          {key}: {value}
+                        </Badge>
+                      ))}
+                    </div>
+                  </CardBody>
+                </Card>
               )}
 
               {Object.keys(resource.annotations || {}).length > 0 && (
-                <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-6">
-                  <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Annotations</h3>
-                  <div className="space-y-2">
-                    {Object.entries(resource.annotations).map(([key, value]) => (
-                      <div key={key} className="text-sm">
-                        <span className="text-gray-500 dark:text-gray-400">{key}:</span>{" "}
-                        <span className="text-gray-700 dark:text-gray-300">{value}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                <Card>
+                  <CardBody>
+                    <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Annotations</h3>
+                    <div className="space-y-2">
+                      {Object.entries(resource.annotations).map(([key, value]) => (
+                        <div key={key} className="text-sm">
+                          <span className="text-gray-500 dark:text-gray-400">{key}:</span>{" "}
+                          <span className="text-gray-700 dark:text-gray-300">{value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </CardBody>
+                </Card>
               )}
             </div>
           )}
 
           {/* Timestamps */}
-          <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-6">
-            <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Timestamps</h3>
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <div className="text-sm text-gray-500 dark:text-gray-400">Created</div>
-                <div className="text-sm font-medium text-gray-900 dark:text-white">
-                  {formatTimestamp(resource.created_at)}
+          <Card>
+            <CardBody>
+              <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Timestamps</h3>
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <div className="text-sm text-gray-500 dark:text-gray-400">Created</div>
+                  <div className="text-sm font-medium text-gray-900 dark:text-white">
+                    {formatTimestamp(resource.created_at)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-sm text-gray-500 dark:text-gray-400">Updated</div>
+                  <div className="text-sm font-medium text-gray-900 dark:text-white">
+                    {formatTimestamp(resource.updated_at)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-sm text-gray-500 dark:text-gray-400">Last Applied</div>
+                  <div className="text-sm font-medium text-gray-900 dark:text-white">
+                    {resource.last_applied_at ? formatTimestamp(resource.last_applied_at) : "Never"}
+                  </div>
                 </div>
               </div>
-              <div>
-                <div className="text-sm text-gray-500 dark:text-gray-400">Updated</div>
-                <div className="text-sm font-medium text-gray-900 dark:text-white">
-                  {formatTimestamp(resource.updated_at)}
-                </div>
-              </div>
-              <div>
-                <div className="text-sm text-gray-500 dark:text-gray-400">Last Applied</div>
-                <div className="text-sm font-medium text-gray-900 dark:text-white">
-                  {resource.last_applied_at ? formatTimestamp(resource.last_applied_at) : "Never"}
-                </div>
-              </div>
-            </div>
-          </div>
+            </CardBody>
+          </Card>
         </div>
       )}
 
@@ -733,7 +741,7 @@ export default function TrafficResourceDetailPage() {
             </button>
           </div>
 
-          <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
+          <Card>
             {upstreamsLoading ? (
               <div className="flex items-center justify-center h-64">
                 <Spinner size="lg" label="Loading upstreams..." />
@@ -764,7 +772,7 @@ export default function TrafficResourceDetailPage() {
                 size="sm"
               />
             )}
-          </div>
+          </Card>
         </div>
       )}
 
@@ -780,7 +788,7 @@ export default function TrafficResourceDetailPage() {
             </button>
           </div>
 
-          <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
+          <Card>
             {assignmentsData?.assignments && assignmentsData.assignments.length > 0 ? (
               <div className="divide-y divide-gray-200 dark:divide-gray-700">
                 {assignmentsData.assignments.map((assignment) => (
@@ -806,11 +814,7 @@ export default function TrafficResourceDetailPage() {
                         <Badge color="gray">Disabled</Badge>
                       )}
                       <button
-                        onClick={() => {
-                          if (confirm("Remove this policy assignment?")) {
-                            unassignPolicyMutation.mutate(assignment.id);
-                          }
-                        }}
+                        onClick={() => setAssignmentToDelete(assignment.id)}
                         className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
                       >
                         <Trash2 className="h-4 w-4" />
@@ -835,12 +839,12 @@ export default function TrafficResourceDetailPage() {
                 size="sm"
               />
             )}
-          </div>
+          </Card>
         </div>
       )}
 
       {activeTab === "history" && (
-        <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
+        <Card>
           {historyLoading ? (
             <div className="flex items-center justify-center h-64">
               <Spinner size="lg" label="Loading history..." />
@@ -860,17 +864,17 @@ export default function TrafficResourceDetailPage() {
               size="sm"
             />
           )}
-        </div>
+        </Card>
       )}
 
       {activeTab === "config" && (
-        <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
+        <Card>
           {configLoading ? (
             <div className="flex items-center justify-center h-64">
               <Spinner size="lg" label="Loading config preview..." />
             </div>
           ) : configPreview?.nginx_config ? (
-            <div className="p-4">
+            <CardBody>
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold text-gray-900 dark:text-white">Generated Nginx Configuration</h3>
                 <div className="flex items-center gap-2 text-sm text-gray-500">
@@ -880,7 +884,7 @@ export default function TrafficResourceDetailPage() {
               <pre className="text-xs bg-gray-900 text-green-400 p-4 rounded-lg overflow-auto max-h-[600px] font-mono">
                 {configPreview.nginx_config}
               </pre>
-            </div>
+            </CardBody>
           ) : (
             <EmptyState
               icon={Code}
@@ -889,7 +893,7 @@ export default function TrafficResourceDetailPage() {
               size="sm"
             />
           )}
-        </div>
+        </Card>
       )}
 
       {/* Apply Result Modal */}
@@ -1050,6 +1054,71 @@ export default function TrafficResourceDetailPage() {
           });
         }}
         isLoading={assignPolicyMutation.isPending}
+      />
+
+      {/* Confirm Dialogs */}
+      <ConfirmDialog
+        isOpen={showDeleteConfirm}
+        onClose={() => setShowDeleteConfirm(false)}
+        onConfirm={() => {
+          deleteMutation.mutate();
+          setShowDeleteConfirm(false);
+        }}
+        title="Delete Traffic Resource"
+        message={`Are you sure you want to delete "${resource?.name}"? This action cannot be undone.`}
+        confirmText="Delete"
+        variant="danger"
+        icon="delete"
+        isLoading={deleteMutation.isPending}
+      />
+
+      <ConfirmDialog
+        isOpen={showRollbackConfirm}
+        onClose={() => setShowRollbackConfirm(false)}
+        onConfirm={() => {
+          rollbackMutation.mutate();
+          setShowRollbackConfirm(false);
+        }}
+        title="Rollback Configuration"
+        message="This will revert to the previous configuration. Are you sure you want to rollback?"
+        confirmText="Rollback"
+        variant="warning"
+        icon="redeploy"
+        isLoading={rollbackMutation.isPending}
+      />
+
+      <ConfirmDialog
+        isOpen={!!upstreamToDelete}
+        onClose={() => setUpstreamToDelete(null)}
+        onConfirm={() => {
+          if (upstreamToDelete) {
+            deleteUpstreamMutation.mutate(upstreamToDelete);
+            setUpstreamToDelete(null);
+          }
+        }}
+        title="Delete Upstream"
+        message="Are you sure you want to delete this upstream? This will affect traffic routing."
+        confirmText="Delete"
+        variant="danger"
+        icon="delete"
+        isLoading={deleteUpstreamMutation.isPending}
+      />
+
+      <ConfirmDialog
+        isOpen={!!assignmentToDelete}
+        onClose={() => setAssignmentToDelete(null)}
+        onConfirm={() => {
+          if (assignmentToDelete) {
+            unassignPolicyMutation.mutate(assignmentToDelete);
+            setAssignmentToDelete(null);
+          }
+        }}
+        title="Remove Policy Assignment"
+        message="Are you sure you want to remove this policy from the resource?"
+        confirmText="Remove"
+        variant="danger"
+        icon="delete"
+        isLoading={unassignPolicyMutation.isPending}
       />
     </div>
   );

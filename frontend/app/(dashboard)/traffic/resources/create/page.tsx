@@ -33,6 +33,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
+import { Card, CardBody, CardFooter } from "@/components/ui/Card";
 
 type WizardStep = "basics" | "domains" | "paths" | "agent" | "review";
 type WizardStage = "wizard" | "validating" | "creating" | "success" | "error";
@@ -248,7 +249,7 @@ export default function CreateTrafficResourcePage() {
       />
 
       {/* Main Content */}
-      <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800">
+      <Card>
         {/* Wizard Steps Indicator */}
         {stage === "wizard" && (
           <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
@@ -863,7 +864,7 @@ export default function CreateTrafficResourcePage() {
 
         {/* Footer */}
         {stage === "wizard" && (
-          <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+          <CardFooter className="flex items-center justify-between gap-3">
             <div>
               {stepIndex > 0 && (
                 <Button variant="secondary" onClick={goBack}>
@@ -891,9 +892,9 @@ export default function CreateTrafficResourcePage() {
                 </Button>
               )}
             </div>
-          </div>
+          </CardFooter>
         )}
-      </div>
+      </Card>
     </div>
   );
 }
