@@ -440,6 +440,12 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				traffic.GET("/resources/:id/upstreams", h.listTrafficUpstreams)
 				traffic.POST("/resources/:id/upstreams", h.RequireManageAlerts(), h.createTrafficUpstream)
 
+				// Traffic Resource Apply/Validate/Rollback
+				traffic.POST("/resources/:id/apply", h.RequireManageAlerts(), h.applyTrafficResource)
+				traffic.POST("/resources/:id/dry-run", h.RequireManageAlerts(), h.dryRunTrafficResource)
+				traffic.POST("/resources/:id/rollback", h.RequireManageAlerts(), h.rollbackTrafficResource)
+				traffic.GET("/resources/:id/config-preview", h.getTrafficResourceConfigPreview)
+
 				// Traffic Resource History
 				traffic.GET("/resources/:id/history", h.getTrafficApplyHistory)
 

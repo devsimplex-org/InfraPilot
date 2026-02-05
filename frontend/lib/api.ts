@@ -2060,6 +2060,37 @@ export interface TrafficApplyHistory {
   config_hash?: string;
 }
 
+export interface ApplyTrafficResponse {
+  success: boolean;
+  resource_id: string;
+  resource_name?: string;
+  action: 'apply' | 'dry_run' | 'rollback';
+  validation_passed: boolean;
+  validation_output?: string;
+  warnings?: string[];
+  errors?: string[];
+  config_hash?: string;
+  applied_at?: string;
+  duration_ms: number;
+  nginx_config?: string;
+  diff?: {
+    has_changes: boolean;
+    current?: string;
+    proposed?: string;
+  };
+}
+
+export interface TrafficConfigPreview {
+  resource_id: string;
+  resource_name: string;
+  nginx_config: string;
+  config_hash: string;
+  domains: string[];
+  upstreams: TrafficUpstream[];
+  policies: TrafficPolicy[];
+  tls_config?: TrafficTLSConfig;
+}
+
 export interface TrafficResourceSummary {
   org_id: string;
   total_resources: number;
@@ -5070,6 +5101,26 @@ export const api = {
   // Traffic Apply History
   getTrafficApplyHistory: (resourceId: string) =>
     fetchAPI<{ history: TrafficApplyHistory[] }>(`/traffic/resources/${resourceId}/history`),
+
+  // Traffic Resource Apply/Validate/Rollback
+  applyTrafficResource: (resourceId: string, force?: boolean) =>
+    fetchAPI<ApplyTrafficResponse>(`/traffic/resources/${resourceId}/apply`, {
+      method: "POST",
+      body: JSON.stringify({ force: force || false }),
+    }),
+
+  dryRunTrafficResource: (resourceId: string) =>
+    fetchAPI<ApplyTrafficResponse>(`/traffic/resources/${resourceId}/dry-run`, {
+      method: "POST",
+    }),
+
+  rollbackTrafficResource: (resourceId: string) =>
+    fetchAPI<ApplyTrafficResponse>(`/traffic/resources/${resourceId}/rollback`, {
+      method: "POST",
+    }),
+
+  getTrafficResourceConfigPreview: (resourceId: string) =>
+    fetchAPI<TrafficConfigPreview>(`/traffic/resources/${resourceId}/config-preview`),
 
   // Traffic Policies
   listTrafficPolicies: (params?: { type?: TrafficPolicyType; limit?: number; offset?: number }) => {

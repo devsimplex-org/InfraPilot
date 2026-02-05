@@ -4,29 +4,26 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Network,
-  Plus,
-  Trash2,
-  RefreshCw,
   Server,
   Globe,
   CheckCircle2,
   XCircle,
   Clock,
   AlertTriangle,
+  RefreshCw,
   Search,
 } from "lucide-react";
 import Link from "next/link";
-import { api, TrafficResource, Agent } from "@/lib/api";
+import { api, TrafficResource } from "@/lib/api";
 
 // Component library imports
-import { PageHeader } from "@/components/ui/PageHeader";
-import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { Table } from "@/components/ui/Table";
 import { SlideOver } from "@/components/ui/SlideOver";
 import { FilterPanel } from "@/components/ui/FilterPanel";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Spinner } from "@/components/ui/Spinner";
+import { Input } from "@/components/ui/page-layout";
 import { cn } from "@/lib/utils";
 
 export default function TrafficResourcesPage() {
@@ -238,88 +235,83 @@ export default function TrafficResourcesPage() {
     },
   ];
 
-  // Breadcrumbs
-  const breadcrumbs = (
-    <Breadcrumb
-      items={[
-        { label: "Traffic", href: "/traffic" },
-        { label: "Resources", current: true },
-      ]}
-    />
-  );
-
-  // Page Header Action
-  const headerAction = (
-    <div className="flex items-center gap-2">
-      <button
-        onClick={() => queryClient.invalidateQueries({ queryKey: ["traffic-resources"] })}
-        className="flex items-center gap-2 px-3 py-2 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
-      >
-        <RefreshCw className="h-4 w-4" />
-        Refresh
-      </button>
-      <button
-        onClick={() => setShowCreateModal(true)}
-        className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
-      >
-        <Plus className="h-4 w-4" />
-        New Resource
-      </button>
-    </div>
-  );
+  if (isLoading) {
+    return <Spinner.LogoPage label="Loading traffic resources..." />;
+  }
 
   return (
     <div className="space-y-6">
-      {/* Page Header */}
-      <PageHeader
-        title="Traffic Resources"
-        description="Manage traffic routing, load balancing, and gateway configurations"
-        breadcrumbs={breadcrumbs}
-        action={headerAction}
-      />
-
-      {/* Content */}
-      <div className="flex gap-6">
-        {/* Filters Sidebar */}
-        <div className="w-64 flex-shrink-0">
-          <FilterPanel
-            filters={filterGroups}
-            onReset={() => setFilters({ status: "", gateway_type: "", agent_id: "" })}
+      {/* Filters */}
+      <div className="flex items-center gap-4 flex-wrap">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <Input
+            placeholder="Search resources..."
+            className="pl-10"
           />
         </div>
 
-        {/* Resources Table */}
-        <div className="flex-1 min-w-0 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
-          {isLoading ? (
-            <div className="flex items-center justify-center h-64">
-              <Spinner size="lg" label="Loading traffic resources..." />
-            </div>
-          ) : resourcesData?.resources && resourcesData.resources.length > 0 ? (
-            <Table
-              columns={columns}
-              data={resourcesData.resources}
-              keyExtractor={(row) => row.id}
-              onRowClick={(row) => setSelectedResource(row)}
-              hoverable
-            />
-          ) : (
-            <EmptyState
-              icon={Network}
-              title="No traffic resources"
-              description="Create your first traffic resource to manage routing and load balancing"
-              action={
-                <button
-                  onClick={() => setShowCreateModal(true)}
-                  className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-medium"
-                >
-                  Create Resource
-                </button>
-              }
-              size="sm"
-            />
-          )}
+        <div className="flex items-center gap-2">
+          {filterGroups[0].options.slice(1).map((option) => (
+            <button
+              key={option.value}
+              onClick={() => setFilters({ ...filters, status: filters.status === option.value ? "" : option.value })}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-sm font-medium transition-colors",
+                filters.status === option.value
+                  ? "bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300"
+                  : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"
+              )}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-2">
+          {filterGroups[1].options.slice(1).map((option) => (
+            <button
+              key={option.value}
+              onClick={() => setFilters({ ...filters, gateway_type: filters.gateway_type === option.value ? "" : option.value })}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-sm font-medium transition-colors",
+                filters.gateway_type === option.value
+                  ? "bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300"
+                  : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"
+              )}
+            >
+              {option.label}
+            </button>
+          ))}
         </div>
       </div>
+
+      {/* Resources Table */}
+      {resourcesData?.resources && resourcesData.resources.length > 0 ? (
+        <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
+          <Table
+            columns={columns}
+            data={resourcesData.resources}
+            keyExtractor={(row) => row.id}
+            onRowClick={(row) => setSelectedResource(row)}
+            hoverable
+          />
+        </div>
+      ) : (
+        <EmptyState
+          icon={Network}
+          title="No traffic resources"
+          description="Create your first traffic resource to manage routing and load balancing"
+          action={
+            <Link
+              href="/traffic/resources/create"
+              className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-medium"
+            >
+              Create Resource
+            </Link>
+          }
+        />
+      )}
 
       {/* Resource Detail SlideOver */}
       <SlideOver isOpen={!!selectedResource} onClose={() => setSelectedResource(null)} size="lg">

@@ -1244,14 +1244,12 @@ func generateNginxConfig(proxy ProxyHost, headers SecurityHeaders) string {
 
 	// HTTPS server block (if SSL enabled)
 	if proxy.SSLEnabled {
-		listen := "443 ssl"
-		if proxy.HTTP2Enabled {
-			listen = "443 ssl http2"
-		}
-
 		config += "server {\n"
-		config += fmt.Sprintf("    listen %s;\n", listen)
-		config += fmt.Sprintf("    listen [::]:%s;\n", listen)
+		config += "    listen 443 ssl;\n"
+		config += "    listen [::]:443 ssl;\n"
+		if proxy.HTTP2Enabled {
+			config += "    http2 on;\n"
+		}
 		config += fmt.Sprintf("    server_name %s;\n\n", serverName)
 
 		// SSL configuration - determine effective cert paths
