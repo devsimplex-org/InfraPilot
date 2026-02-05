@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode } from "react";
+import { ReactNode, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { RefreshCw, Server, Download, Plus, Layers } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -10,6 +10,7 @@ import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Spinner } from "@/components/ui/Spinner";
 import { ContainerPanel } from "@/components/docker/ContainerPanel";
+import { StackDeployWizard } from "@/components/StackDeployWizard";
 import { cn } from "@/lib/utils";
 
 const tabs = [
@@ -27,6 +28,7 @@ function DockerLayoutContent({ children }: { children: ReactNode }) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { activeAgents, selectedAgent, setSelectedAgent, isLoadingAgents } = useDocker();
+  const [showStackDeployWizard, setShowStackDeployWizard] = useState(false);
 
   // Check if we're on a detail page (e.g., /docker/containers/[agentId]/[containerId])
   const isDetailPage = pathname.split("/").length > 3;
@@ -46,7 +48,7 @@ function DockerLayoutContent({ children }: { children: ReactNode }) {
       case "overview":
         return (
           <button
-            onClick={() => router.push("/docker/images?action=deploy-stack")}
+            onClick={() => setShowStackDeployWizard(true)}
             className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors text-sm font-medium"
           >
             <Layers className="w-4 h-4" />
@@ -119,6 +121,10 @@ function DockerLayoutContent({ children }: { children: ReactNode }) {
       <>
         {children}
         <ContainerPanel />
+        <StackDeployWizard
+          isOpen={showStackDeployWizard}
+          onClose={() => setShowStackDeployWizard(false)}
+        />
       </>
     );
   }
@@ -182,6 +188,12 @@ function DockerLayoutContent({ children }: { children: ReactNode }) {
 
       {/* Global Container Panel */}
       <ContainerPanel />
+
+      {/* Stack Deploy Wizard Modal */}
+      <StackDeployWizard
+        isOpen={showStackDeployWizard}
+        onClose={() => setShowStackDeployWizard(false)}
+      />
     </div>
   );
 }
