@@ -617,7 +617,7 @@ export function SSLWizard({
 
                   {/* Actions */}
                   <div className="flex justify-between pt-4">
-                    <Button variant="secondary" onClick={(e: React.MouseEvent) => { e.stopPropagation(); onOpenChange(false); }}>
+                    <Button variant="secondary" onClick={(e) => { e?.stopPropagation(); onOpenChange(false); }}>
                       Cancel
                     </Button>
                     <div className="flex gap-2">
@@ -1417,7 +1417,7 @@ export function SSLWizard({
                 </a>
               </p>
 
-              <Button variant="primary" onClick={(e: React.MouseEvent) => { e.stopPropagation(); onOpenChange(false); }} className="mt-4">
+              <Button variant="primary" onClick={(e) => { e?.stopPropagation(); onOpenChange(false); }} className="mt-4">
                 Done
               </Button>
             </div>
