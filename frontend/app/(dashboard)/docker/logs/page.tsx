@@ -1,16 +1,13 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useRef, useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   FileText,
   RefreshCw,
-  AlertCircle,
   AlertTriangle,
   Info,
   Bug,
-  Server,
-  Globe,
   Pause,
   Play,
   Download,
@@ -21,8 +18,7 @@ import {
 } from "lucide-react";
 import { api, LogEntry } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { Breadcrumb } from "@/components/ui/Breadcrumb";
+import { useDocker } from "@/lib/docker-context";
 import { FilterPanel } from "@/components/ui/FilterPanel";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -33,8 +29,8 @@ import { Button } from "@/components/ui/page-layout";
 
 type LogLevel = "all" | "error" | "warn" | "info" | "debug";
 
-export default function LogsPage() {
-  const [selectedAgentId, setSelectedAgentId] = useState<string>("");
+export default function DockerLogsPage() {
+  const { selectedAgent } = useDocker();
   const [search, setSearch] = useState("");
   const [level, setLevel] = useState<LogLevel>("all");
   const [selectedContainer, setSelectedContainer] = useState<string>("all");
@@ -43,33 +39,20 @@ export default function LogsPage() {
   const [selectedLog, setSelectedLog] = useState<LogEntry | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
-  // Fetch agents
-  const { data: agents, isLoading: agentsLoading } = useQuery({
-    queryKey: ["agents"],
-    queryFn: () => api.getAgents(),
-  });
-
-  // Set default agent when agents load
-  useEffect(() => {
-    if (agents && agents.length > 0 && !selectedAgentId) {
-      setSelectedAgentId(agents[0].id);
-    }
-  }, [agents, selectedAgentId]);
-
   // Fetch unified logs
   const {
     data: unifiedLogs,
     isLoading: isLoading,
     refetch,
   } = useQuery({
-    queryKey: ["unifiedLogs", selectedAgentId, search, level, tail],
+    queryKey: ["unifiedLogs", selectedAgent, search, level, tail],
     queryFn: () =>
-      api.getUnifiedLogs(selectedAgentId, {
+      api.getUnifiedLogs(selectedAgent!, {
         search: search || undefined,
         levels: level !== "all" ? [level] : undefined,
         tail,
       }),
-    enabled: !!selectedAgentId,
+    enabled: !!selectedAgent,
     refetchInterval: autoRefresh ? 5000 : false,
   });
 
@@ -228,87 +211,57 @@ export default function LogsPage() {
     },
   ];
 
+  if (!selectedAgent) {
+    return <Spinner.LogoPage label="Selecting agent..." />;
+  }
+
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Log Explorer"
-        description="Real-time log aggregation and analysis across all containers"
-        breadcrumbs={
-          <Breadcrumb
-            items={[
-              { label: "Run", href: "/" },
-              { label: "Logs" },
-            ]}
-          />
-        }
-        action={
-          <div className="flex items-center gap-3">
-            {/* Agent Selector */}
-            <div className="flex items-center gap-2">
-              <Server className="h-4 w-4 text-gray-400" />
-              <select
-                value={selectedAgentId}
-                onChange={(e) => setSelectedAgentId(e.target.value)}
-                className="px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                disabled={agentsLoading || !agents?.length}
-              >
-                {agentsLoading ? (
-                  <option>Loading...</option>
-                ) : agents && agents.length > 0 ? (
-                  agents.map((agent) => (
-                    <option key={agent.id} value={agent.id}>
-                      {agent.name}
-                    </option>
-                  ))
-                ) : (
-                  <option>No agents</option>
-                )}
-              </select>
-            </div>
+    <div className="space-y-4">
+      {/* Controls Bar */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          {/* Lines selector */}
+          <select
+            value={tail}
+            onChange={(e) => setTail(parseInt(e.target.value))}
+            className="px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500"
+          >
+            <option value={100}>100 lines</option>
+            <option value={200}>200 lines</option>
+            <option value={500}>500 lines</option>
+            <option value={1000}>1000 lines</option>
+            <option value={2000}>2000 lines</option>
+          </select>
+        </div>
 
-            {/* Lines selector */}
-            <select
-              value={tail}
-              onChange={(e) => setTail(parseInt(e.target.value))}
-              className="px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500"
-            >
-              <option value={100}>100 lines</option>
-              <option value={200}>200 lines</option>
-              <option value={500}>500 lines</option>
-              <option value={1000}>1000 lines</option>
-              <option value={2000}>2000 lines</option>
-            </select>
-
-            <div className="h-6 w-px bg-gray-300 dark:bg-gray-700" />
-
-            <Button
-              variant={autoRefresh ? "primary" : "secondary"}
-              size="sm"
-              icon={autoRefresh ? Pause : Play}
-              onClick={() => setAutoRefresh(!autoRefresh)}
-            >
-              {autoRefresh ? "Pause" : "Live"}
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              icon={RefreshCw}
-              onClick={handleRefresh}
-            >
-              Refresh
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              icon={Download}
-              onClick={exportLogs}
-              disabled={!filteredLogs || filteredLogs.length === 0}
-            >
-              Export
-            </Button>
-          </div>
-        }
-      />
+        <div className="flex items-center gap-2">
+          <Button
+            variant={autoRefresh ? "primary" : "secondary"}
+            size="sm"
+            icon={autoRefresh ? Pause : Play}
+            onClick={() => setAutoRefresh(!autoRefresh)}
+          >
+            {autoRefresh ? "Pause" : "Live"}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={RefreshCw}
+            onClick={handleRefresh}
+          >
+            Refresh
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={Download}
+            onClick={exportLogs}
+            disabled={!filteredLogs || filteredLogs.length === 0}
+          >
+            Export
+          </Button>
+        </div>
+      </div>
 
       {/* Metrics Overview */}
       <MetricsGrid columns={6}>
@@ -392,18 +345,10 @@ export default function LogsPage() {
             </div>
 
             {/* Log Entries */}
-            <div className="h-[calc(100vh-420px)] min-h-[400px] overflow-auto">
+            <div className="h-[calc(100vh-480px)] min-h-[400px] overflow-auto">
               {isLoading ? (
                 <div className="flex items-center justify-center h-64">
                   <Spinner size="lg" label="Loading logs..." />
-                </div>
-              ) : !selectedAgentId ? (
-                <div className="py-16">
-                  <EmptyState
-                    icon={Server}
-                    title="No agent selected"
-                    description="Select an agent to view logs"
-                  />
                 </div>
               ) : filteredLogs && filteredLogs.length > 0 ? (
                 <div className="divide-y divide-gray-100 dark:divide-gray-800">

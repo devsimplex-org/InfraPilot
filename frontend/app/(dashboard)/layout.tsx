@@ -91,7 +91,6 @@ const navigationSections: NavigationSection[] = [
       { name: "Exposure", href: "/run/exposure", icon: Globe },
       { name: "Traffic", href: "/traffic", icon: Network }, // Single entry for traffic management
       { name: "Docker", href: "/docker", icon: Container },
-      { name: "Logs", href: "/logs", icon: FileText },
       { name: "Alerts", href: "/alerts", icon: Bell },
     ],
   },

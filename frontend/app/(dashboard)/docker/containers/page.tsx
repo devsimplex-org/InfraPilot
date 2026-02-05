@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { useRouter } from "next/navigation";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Container as ContainerIcon,
   CheckSquare,
@@ -14,11 +13,6 @@ import {
   RotateCcw,
   Cpu,
   MemoryStick,
-  Copy,
-  Check,
-  ExternalLink,
-  RefreshCw,
-  Terminal as TerminalIcon,
 } from "lucide-react";
 import { api, Container } from "@/lib/api";
 import { useDocker, getStatusLevel } from "@/lib/docker-context";
@@ -29,17 +23,13 @@ import { StatusIndicator } from "@/components/ui/StatusIndicator";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Spinner } from "@/components/ui/Spinner";
 import { Button, Input } from "@/components/ui/page-layout";
-import { SlideOver } from "@/components/ui/SlideOver";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { Terminal } from "@/components/containers/Terminal";
 import { cn } from "@/lib/utils";
 
 type StatusFilter = "all" | "running" | "exited";
 
 export default function DockerContainersPage() {
-  const router = useRouter();
   const queryClient = useQueryClient();
-  const { selectedAgent, forceDelete, setForceDelete } = useDocker();
+  const { selectedAgent, forceDelete, setForceDelete, openContainerPanel } = useDocker();
 
   // Local state
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -48,72 +38,12 @@ export default function DockerContainersPage() {
   const [showBulkModal, setShowBulkModal] = useState<"stop" | "delete" | null>(null);
   const [bulkProgress, setBulkProgress] = useState<{ total: number; completed: number; failed: string[] } | null>(null);
 
-  // SlideOver state
-  const [selectedContainer, setSelectedContainer] = useState<Container | null>(null);
-  const [containerPanelTab, setContainerPanelTab] = useState<"details" | "logs" | "terminal">("details");
-  const [logsTail, setLogsTail] = useState(100);
-  const [copied, setCopied] = useState<string | null>(null);
-  const [showStopModal, setShowStopModal] = useState(false);
-  const [showRestartModal, setShowRestartModal] = useState(false);
-  const [showDeleteContainerModal, setShowDeleteContainerModal] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-
   // Fetch containers
   const { data: containers, isLoading } = useQuery({
     queryKey: ["containers", selectedAgent],
     queryFn: () => selectedAgent ? api.getContainers(selectedAgent) : Promise.resolve([]),
     enabled: !!selectedAgent,
     refetchInterval: 10000,
-  });
-
-  // Fetch container logs
-  const { data: logsData, isLoading: logsLoading, refetch: refetchLogs } = useQuery({
-    queryKey: ["containerLogs", selectedAgent, selectedContainer?.container_id, logsTail],
-    queryFn: () =>
-      selectedAgent && selectedContainer
-        ? api.getContainerLogs(selectedAgent, selectedContainer.container_id, logsTail)
-        : Promise.resolve(null),
-    enabled: !!selectedAgent && !!selectedContainer && containerPanelTab === "logs",
-  });
-
-  // Single container mutations
-  const startMutation = useMutation({
-    mutationFn: ({ containerId }: { containerId: string }) =>
-      api.startContainer(selectedAgent!, containerId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["containers", selectedAgent] });
-    },
-  });
-
-  const stopMutation = useMutation({
-    mutationFn: ({ containerId }: { containerId: string }) =>
-      api.stopContainer(selectedAgent!, containerId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["containers", selectedAgent] });
-      setShowStopModal(false);
-    },
-  });
-
-  const restartMutation = useMutation({
-    mutationFn: ({ containerId }: { containerId: string }) =>
-      api.restartContainer(selectedAgent!, containerId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["containers", selectedAgent] });
-      setShowRestartModal(false);
-    },
-  });
-
-  const deleteContainerMutation = useMutation({
-    mutationFn: () =>
-      api.deleteContainer(selectedAgent!, selectedContainer!.container_id, selectedContainer!.name, forceDelete),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["containers", selectedAgent] });
-      setShowDeleteContainerModal(false);
-      setSelectedContainer(null);
-      setDeleteError(null);
-      setForceDelete(false);
-    },
-    onError: (error: Error) => setDeleteError(error.message),
   });
 
   // Filtered containers
@@ -128,10 +58,9 @@ export default function DockerContainersPage() {
     });
   }, [containers, statusFilter, searchFilter]);
 
-  // Management container check
+  // Management container check - only protect the main infrapilot container
   const isManagementContainer = (container: Container) => {
-    const protectedNames = ["infrapilot", "infrapilot-ee", "infrapilot_ee"];
-    return protectedNames.includes(container.name) || container.image.includes("infrapilot");
+    return container.name === "infrapilot";
   };
 
   const selectableContainers = filteredContainers.filter((c) => !isManagementContainer(c));
@@ -163,13 +92,6 @@ export default function DockerContainersPage() {
     stopped: containers?.filter((c) => c.status === "exited").length || 0,
     cpuUsage: containers?.reduce((sum, c) => sum + (c.cpu_percent || 0), 0) || 0,
     memoryUsage: containers?.reduce((sum, c) => sum + (c.memory_mb || 0), 0) || 0,
-  };
-
-  // Copy helper
-  const handleCopy = (text: string, key: string) => {
-    navigator.clipboard.writeText(text);
-    setCopied(key);
-    setTimeout(() => setCopied(null), 2000);
   };
 
   // Bulk operations
@@ -226,7 +148,13 @@ export default function DockerContainersPage() {
       width: "40px",
       render: (_: unknown, row: Container) => (
         <button onClick={(e) => { e.stopPropagation(); if (!isManagementContainer(row)) toggleSelection(row.container_id); }} className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded" title={isManagementContainer(row) ? "Management container" : undefined}>
-          {isManagementContainer(row) ? <Lock className="h-4 w-4 text-gray-400" /> : selectedContainerIds.has(row.container_id) ? <CheckSquare className="h-4 w-4 text-primary-600" /> : <Square className="h-4 w-4 text-gray-400" />}
+          {isManagementContainer(row) ? (
+            <Lock className="h-4 w-4 text-gray-400" />
+          ) : selectedContainerIds.has(row.container_id) ? (
+            <CheckSquare className="h-4 w-4 text-primary-600" />
+          ) : (
+            <Square className="h-4 w-4 text-gray-400" />
+          )}
         </button>
       ),
     },
@@ -344,7 +272,7 @@ export default function DockerContainersPage() {
             data={filteredContainers}
             columns={columns}
             keyExtractor={(row) => row.container_id}
-            onRowClick={(row) => { setSelectedContainer(row); setContainerPanelTab("details"); }}
+            onRowClick={(row) => openContainerPanel(row.container_id)}
             hoverable
             rowClassName={(row) => cn(selectedContainerIds.has(row.container_id) && "bg-blue-50 dark:bg-blue-900/10")}
           />
@@ -415,183 +343,6 @@ export default function DockerContainersPage() {
           </div>
         </div>
       )}
-
-      {/* Container SlideOver */}
-      <SlideOver isOpen={!!selectedContainer} onClose={() => setSelectedContainer(null)} size="lg">
-        {selectedContainer && (
-          <>
-            <SlideOver.Header onClose={() => setSelectedContainer(null)}>
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{selectedContainer.name}</h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{selectedContainer.image}</p>
-              </div>
-            </SlideOver.Header>
-            <SlideOver.Body>
-              {/* Tabs */}
-              <div className="flex gap-2 mb-6 border-b border-gray-200 dark:border-gray-700">
-                <button onClick={() => setContainerPanelTab("details")} className={cn("px-4 py-2 text-sm font-medium border-b-2 transition-colors", containerPanelTab === "details" ? "border-primary-600 text-primary-600 dark:text-primary-400" : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300")}>Details</button>
-                <button onClick={() => setContainerPanelTab("logs")} className={cn("px-4 py-2 text-sm font-medium border-b-2 transition-colors", containerPanelTab === "logs" ? "border-primary-600 text-primary-600 dark:text-primary-400" : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300")}>Logs</button>
-                {selectedContainer.status === "running" && (
-                  <button onClick={() => setContainerPanelTab("terminal")} className={cn("px-4 py-2 text-sm font-medium border-b-2 transition-colors", containerPanelTab === "terminal" ? "border-primary-600 text-primary-600 dark:text-primary-400" : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300")}>Terminal</button>
-                )}
-              </div>
-
-              {containerPanelTab === "details" && (
-                <div className="space-y-6">
-                  {/* Actions */}
-                  <div>
-                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Actions</h3>
-                    <div className="flex flex-wrap gap-2">
-                      {selectedContainer.status === "running" ? (
-                        <>
-                          <button onClick={() => setShowStopModal(true)} disabled={stopMutation.isPending} className="px-3 py-1.5 text-sm bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400 rounded-lg hover:bg-yellow-200 dark:hover:bg-yellow-900/50 disabled:opacity-50">
-                            <Square className="h-4 w-4 inline mr-1" />Stop
-                          </button>
-                          <button onClick={() => setShowRestartModal(true)} disabled={restartMutation.isPending} className="px-3 py-1.5 text-sm bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-900/50 disabled:opacity-50">
-                            <RotateCcw className="h-4 w-4 inline mr-1" />Restart
-                          </button>
-                        </>
-                      ) : (
-                        <button onClick={() => startMutation.mutate({ containerId: selectedContainer.container_id })} disabled={startMutation.isPending} className="px-3 py-1.5 text-sm bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 rounded-lg hover:bg-green-200 dark:hover:bg-green-900/50 disabled:opacity-50">
-                          <Play className="h-4 w-4 inline mr-1" />Start
-                        </button>
-                      )}
-                      <button onClick={() => router.push(`/docker/containers/${selectedAgent}/${selectedContainer.container_id}`)} className="px-3 py-1.5 text-sm bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700">
-                        <ExternalLink className="h-4 w-4 inline mr-1" />Full Details
-                      </button>
-                      <button onClick={() => { setDeleteError(null); setForceDelete(false); setShowDeleteContainerModal(true); }} className="px-3 py-1.5 text-sm bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/50">
-                        <Trash2 className="h-4 w-4 inline mr-1" />Delete
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Container Info */}
-                  <div>
-                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Container Info</h3>
-                    <div className="space-y-3">
-                      <div className="flex justify-between">
-                        <span className="text-sm text-gray-500 dark:text-gray-400">Status</span>
-                        <StatusIndicator status={getStatusLevel(selectedContainer.status)} label={selectedContainer.status} size="sm" />
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-sm text-gray-500 dark:text-gray-400">Container ID</span>
-                        <div className="flex items-center gap-1">
-                          <code className="text-sm">{selectedContainer.container_id.slice(0, 12)}</code>
-                          <button onClick={() => handleCopy(selectedContainer.container_id, "container-id")} className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded">
-                            {copied === "container-id" ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3 text-gray-400" />}
-                          </button>
-                        </div>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-sm text-gray-500 dark:text-gray-400">Stack</span>
-                        <span className="text-sm text-gray-900 dark:text-white">{selectedContainer.stack_name || "Standalone"}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Resources */}
-                  <div>
-                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Resources</h3>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="bg-gray-100 dark:bg-gray-800/50 rounded-lg p-3">
-                        <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs mb-1">
-                          <Cpu className="h-3 w-3" />CPU Usage
-                        </div>
-                        <p className="text-lg font-semibold text-gray-900 dark:text-white">{selectedContainer.cpu_percent?.toFixed(1) || 0}%</p>
-                      </div>
-                      <div className="bg-gray-100 dark:bg-gray-800/50 rounded-lg p-3">
-                        <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs mb-1">
-                          <MemoryStick className="h-3 w-3" />Memory
-                        </div>
-                        <p className="text-lg font-semibold text-gray-900 dark:text-white">{selectedContainer.memory_mb || 0} MB</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Networks */}
-                  {selectedContainer.networks && selectedContainer.networks.length > 0 && (
-                    <div>
-                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Networks</h3>
-                      <div className="flex flex-wrap gap-2">
-                        {selectedContainer.networks.map((network) => (
-                          <Badge key={network} size="sm">{network}</Badge>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {containerPanelTab === "logs" && (
-                <div className="flex flex-col -mx-6 h-[calc(100vh-300px)]">
-                  <div className="flex items-center justify-between px-6 py-2 bg-gray-800 border-b border-gray-700 flex-shrink-0">
-                    <select value={logsTail} onChange={(e) => setLogsTail(Number(e.target.value))} className="px-2 py-1 bg-gray-700 border border-gray-600 rounded text-xs text-gray-200">
-                      <option value={50}>50 lines</option>
-                      <option value={100}>100 lines</option>
-                      <option value={500}>500 lines</option>
-                      <option value={1000}>1000 lines</option>
-                    </select>
-                    <button onClick={() => refetchLogs()} className="p-1.5 hover:bg-gray-700 rounded transition-colors">
-                      <RefreshCw className={cn("h-3.5 w-3.5 text-gray-400", logsLoading && "animate-spin")} />
-                    </button>
-                  </div>
-                  <div className="flex-1 bg-gray-900 overflow-y-auto min-h-0 px-6">
-                    {logsLoading ? (
-                      <div className="flex items-center justify-center h-32"><div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary-500" /></div>
-                    ) : logsData?.logs ? (
-                      <div className="font-mono text-xs py-2">
-                        {logsData.logs.split("\n").filter((l: string) => l.trim()).map((line: string, idx: number) => (
-                          <div key={idx} className="text-gray-300 hover:bg-gray-800/50 py-0.5 px-3 -mx-3">{line}</div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-center text-gray-500 py-8 text-sm">No logs available</div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {containerPanelTab === "terminal" && (
-                selectedContainer.status !== "running" ? (
-                  <div className="flex flex-col items-center justify-center h-64 text-gray-500">
-                    <TerminalIcon className="h-8 w-8 mb-2 opacity-50" />
-                    <p className="text-sm">Container must be running to access terminal</p>
-                  </div>
-                ) : (
-                  <div className="h-[500px] bg-gray-900 rounded-lg overflow-hidden -mx-6">
-                    <Terminal containerId={selectedContainer.container_id} agentId={selectedAgent!} onClose={() => setContainerPanelTab("details")} />
-                  </div>
-                )
-              )}
-            </SlideOver.Body>
-          </>
-        )}
-      </SlideOver>
-
-      {/* Confirmation Dialogs */}
-      <ConfirmDialog isOpen={showStopModal && !!selectedContainer} onClose={() => setShowStopModal(false)} onConfirm={() => stopMutation.mutate({ containerId: selectedContainer!.container_id })} title="Stop Container" message={`Are you sure you want to stop ${selectedContainer?.name}?`} confirmText="Stop Container" variant="warning" icon="stop" isLoading={stopMutation.isPending} />
-
-      <ConfirmDialog isOpen={showRestartModal && !!selectedContainer} onClose={() => setShowRestartModal(false)} onConfirm={() => restartMutation.mutate({ containerId: selectedContainer!.container_id })} title="Restart Container" message={`Are you sure you want to restart ${selectedContainer?.name}?`} confirmText="Restart Container" variant="default" icon="redeploy" isLoading={restartMutation.isPending} />
-
-      <ConfirmDialog
-        isOpen={showDeleteContainerModal && !!selectedContainer}
-        onClose={() => { setShowDeleteContainerModal(false); setDeleteError(null); setForceDelete(false); }}
-        onConfirm={() => deleteContainerMutation.mutate()}
-        title="Delete Container"
-        message={`Are you sure you want to delete ${selectedContainer?.name}?`}
-        confirmText="Delete Container"
-        variant="danger"
-        icon="delete"
-        isLoading={deleteContainerMutation.isPending}
-        error={deleteError}
-      >
-        {selectedContainer?.status === "running" && (
-          <label className="flex items-center gap-2 mt-4">
-            <input type="checkbox" checked={forceDelete} onChange={(e) => setForceDelete(e.target.checked)} className="rounded border-gray-300" />
-            <span className="text-sm text-yellow-600">Force delete (container is running)</span>
-          </label>
-        )}
-      </ConfirmDialog>
     </div>
   );
 }

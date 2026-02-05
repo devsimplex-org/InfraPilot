@@ -12,9 +12,11 @@ import {
   Layers,
   Shield,
   Download,
+  Lock,
 } from "lucide-react";
 import { api, DockerImage } from "@/lib/api";
 import { useDocker, formatSize } from "@/lib/docker-context";
+import { ContainerListPopover } from "@/components/docker/ContainerListPopover";
 import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
 import { Table } from "@/components/ui/Table";
 import { Badge } from "@/components/ui/Badge";
@@ -25,7 +27,7 @@ import { cn } from "@/lib/utils";
 
 export default function DockerImagesPage() {
   const queryClient = useQueryClient();
-  const { selectedAgent, forceDelete, setForceDelete } = useDocker();
+  const { selectedAgent, forceDelete, setForceDelete, openContainerPanel } = useDocker();
 
   // Local state
   const [searchFilter, setSearchFilter] = useState("");
@@ -60,12 +62,15 @@ export default function DockerImagesPage() {
     });
   };
 
-  const selectAll = () => setSelectedIds(new Set(filteredImages.map((img) => img.id)));
+  // Only unused images can be selected
+  const selectableImages = filteredImages.filter((img) => img.used_by.length === 0);
+
+  const selectAll = () => setSelectedIds(new Set(selectableImages.map((img) => img.id)));
   const selectNone = () => setSelectedIds(new Set());
   const selectUnused = () => setSelectedIds(new Set(filteredImages.filter((img) => img.used_by.length === 0).map((img) => img.id)));
-  const selectDangling = () => setSelectedIds(new Set(filteredImages.filter((img) => img.tags.length === 0).map((img) => img.id)));
+  const selectDangling = () => setSelectedIds(new Set(filteredImages.filter((img) => img.tags.length === 0 && img.used_by.length === 0).map((img) => img.id)));
 
-  const isAllSelected = filteredImages.length > 0 && selectedIds.size === filteredImages.length;
+  const isAllSelected = selectableImages.length > 0 && selectedIds.size === selectableImages.length;
   const isSomeSelected = selectedIds.size > 0 && !isAllSelected;
   const selectedData = filteredImages.filter((img) => selectedIds.has(img.id));
   const selectedSize = selectedData.reduce((sum, img) => sum + img.size, 0);
@@ -113,8 +118,18 @@ export default function DockerImagesPage() {
       ),
       width: "40px",
       render: (_: unknown, row: DockerImage) => (
-        <button onClick={(e) => { e.stopPropagation(); toggleSelection(row.id); }} className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded">
-          {selectedIds.has(row.id) ? <CheckSquare className="h-4 w-4 text-primary-600" /> : <Square className="h-4 w-4 text-gray-400" />}
+        <button
+          onClick={(e) => { e.stopPropagation(); if (row.used_by.length === 0) toggleSelection(row.id); }}
+          className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
+          title={row.used_by.length > 0 ? "Image is in use" : undefined}
+        >
+          {row.used_by.length > 0 ? (
+            <Lock className="h-4 w-4 text-green-500" />
+          ) : selectedIds.has(row.id) ? (
+            <CheckSquare className="h-4 w-4 text-primary-600" />
+          ) : (
+            <Square className="h-4 w-4 text-gray-400" />
+          )}
         </button>
       ),
     },
@@ -159,10 +174,8 @@ export default function DockerImagesPage() {
     {
       key: "used_by",
       header: "Status",
-      render: (value: string[]) => value.length > 0 ? (
-        <Badge className="px-2 py-1 text-xs bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 rounded border-0">{value.length} container{value.length !== 1 && "s"}</Badge>
-      ) : (
-        <Badge className="px-2 py-1 text-xs bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 rounded border-0">Unused</Badge>
+      render: (value: string[]) => (
+        <ContainerListPopover containers={value} onContainerClick={openContainerPanel} label="container" />
       ),
     },
   ];

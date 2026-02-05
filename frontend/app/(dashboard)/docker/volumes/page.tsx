@@ -15,9 +15,11 @@ import {
   AlertTriangle,
   Copy,
   Check,
+  Server,
 } from "lucide-react";
 import { api, DockerVolume } from "@/lib/api";
 import { useDocker } from "@/lib/docker-context";
+import { ContainerListPopover } from "@/components/docker/ContainerListPopover";
 import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
 import { Table } from "@/components/ui/Table";
 import { Badge } from "@/components/ui/Badge";
@@ -30,7 +32,7 @@ import { cn } from "@/lib/utils";
 
 export default function DockerVolumesPage() {
   const queryClient = useQueryClient();
-  const { selectedAgent, forceDelete, setForceDelete } = useDocker();
+  const { selectedAgent, forceDelete, setForceDelete, openContainerPanel } = useDocker();
 
   // Local state
   const [searchFilter, setSearchFilter] = useState("");
@@ -181,7 +183,7 @@ export default function DockerVolumesPage() {
           title={row.used_by.length > 0 ? "Volume is in use" : undefined}
         >
           {row.used_by.length > 0 ? (
-            <Lock className="h-4 w-4 text-gray-400" />
+            <Lock className="h-4 w-4 text-green-500" />
           ) : selectedNames.has(row.name) ? (
             <CheckSquare className="h-4 w-4 text-primary-600" />
           ) : (
@@ -224,14 +226,8 @@ export default function DockerVolumesPage() {
       key: "used_by",
       header: "In Use",
       align: "center" as const,
-      render: (value: string[]) => value.length > 0 ? (
-        <Badge className="px-2 py-1 text-xs bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 rounded border-0">
-          {value.length} container{value.length !== 1 && "s"}
-        </Badge>
-      ) : (
-        <Badge className="px-2 py-1 text-xs bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 rounded border-0">
-          Unused
-        </Badge>
+      render: (value: string[]) => (
+        <ContainerListPopover containers={value} onContainerClick={openContainerPanel} label="container" />
       ),
     },
   ];
@@ -424,7 +420,17 @@ export default function DockerVolumesPage() {
                   {selectedVolume.used_by.length > 0 ? (
                     <div className="space-y-2">
                       {selectedVolume.used_by.map((containerName, idx) => (
-                        <div key={idx} className="text-sm text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 px-3 py-2 rounded">{containerName}</div>
+                        <button
+                          key={idx}
+                          onClick={() => {
+                            openContainerPanel(containerName);
+                            setSelectedVolume(null);
+                          }}
+                          className="w-full flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 px-3 py-2 rounded transition-colors text-left"
+                        >
+                          <Server className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                          <span className="truncate">{containerName}</span>
+                        </button>
                       ))}
                     </div>
                   ) : (

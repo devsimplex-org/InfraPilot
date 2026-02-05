@@ -9,6 +9,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Spinner } from "@/components/ui/Spinner";
+import { ContainerPanel } from "@/components/docker/ContainerPanel";
 import { cn } from "@/lib/utils";
 
 const tabs = [
@@ -17,6 +18,7 @@ const tabs = [
   { id: "images", label: "Images", href: "/docker/images" },
   { id: "volumes", label: "Volumes", href: "/docker/volumes" },
   { id: "networks", label: "Networks", href: "/docker/networks" },
+  { id: "logs", label: "Logs", href: "/docker/logs" },
   { id: "registries", label: "Registries", href: "/docker/registries" },
 ];
 
@@ -113,7 +115,12 @@ function DockerLayoutContent({ children }: { children: ReactNode }) {
 
   // For detail pages, just render children without the layout wrapper
   if (isDetailPage) {
-    return <>{children}</>;
+    return (
+      <>
+        {children}
+        <ContainerPanel />
+      </>
+    );
   }
 
   return (
@@ -172,6 +179,9 @@ function DockerLayoutContent({ children }: { children: ReactNode }) {
 
       {/* Page Content */}
       {children}
+
+      {/* Global Container Panel */}
+      <ContainerPanel />
     </div>
   );
 }

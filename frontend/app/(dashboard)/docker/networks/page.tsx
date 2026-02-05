@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Network,
@@ -8,9 +8,16 @@ import {
   Trash2,
   Copy,
   Check,
+  CheckSquare,
+  MinusSquare,
+  Square,
+  Lock,
+  AlertTriangle,
+  Globe,
 } from "lucide-react";
 import { api, DockerNetwork } from "@/lib/api";
 import { useDocker } from "@/lib/docker-context";
+import { ContainerListPopover } from "@/components/docker/ContainerListPopover";
 import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
 import { Table } from "@/components/ui/Table";
 import { Badge } from "@/components/ui/Badge";
@@ -21,12 +28,21 @@ import { SlideOver } from "@/components/ui/SlideOver";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { cn } from "@/lib/utils";
 
+// Default Docker networks that should not be deleted
+const PROTECTED_NETWORKS = ["bridge", "host", "none"];
+
 export default function DockerNetworksPage() {
   const queryClient = useQueryClient();
-  const { selectedAgent } = useDocker();
+  const { selectedAgent, openContainerPanel } = useDocker();
 
   // Local state
   const [searchFilter, setSearchFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "in-use" | "unused">("all");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState<{ total: number; completed: number; failed: string[] } | null>(null);
+
+  // Single network selection for slide-over
   const [selectedNetwork, setSelectedNetwork] = useState<DockerNetwork | null>(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -39,20 +55,57 @@ export default function DockerNetworksPage() {
     enabled: !!selectedAgent,
   });
 
+  // Helper to check if network is in use
+  const isInUse = (network: DockerNetwork) => Object.keys(network.containers || {}).length > 0;
+
+  // Helper to check if network is protected (default Docker networks)
+  const isProtected = (network: DockerNetwork) => PROTECTED_NETWORKS.includes(network.name);
+
   // Filtered networks
-  const filteredNetworks = (networks || []).filter((n) => {
-    if (!searchFilter) return true;
-    return n.name.toLowerCase().includes(searchFilter.toLowerCase()) ||
-      n.driver.toLowerCase().includes(searchFilter.toLowerCase()) ||
-      n.id.toLowerCase().includes(searchFilter.toLowerCase());
-  });
+  const filteredNetworks = useMemo(() => {
+    if (!networks) return [];
+    return networks.filter((n) => {
+      const matchesSearch = !searchFilter ||
+        n.name.toLowerCase().includes(searchFilter.toLowerCase()) ||
+        n.driver.toLowerCase().includes(searchFilter.toLowerCase()) ||
+        n.id.toLowerCase().includes(searchFilter.toLowerCase());
+      const matchesStatus = statusFilter === "all" ||
+        (statusFilter === "in-use" && isInUse(n)) ||
+        (statusFilter === "unused" && !isInUse(n));
+      return matchesSearch && matchesStatus;
+    });
+  }, [networks, searchFilter, statusFilter]);
+
+  // Selectable networks (not protected and not in use)
+  const selectableNetworks = filteredNetworks.filter((n) => !isProtected(n) && !isInUse(n));
+
+  // Selection helpers
+  const toggleSelection = (id: string) => {
+    setSelectedIds((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) newSet.delete(id);
+      else newSet.add(id);
+      return newSet;
+    });
+  };
+
+  const selectAll = () => setSelectedIds(new Set(selectableNetworks.map((n) => n.id)));
+  const selectNone = () => setSelectedIds(new Set());
+  const selectUnused = () => {
+    const unused = filteredNetworks.filter((n) => !isProtected(n) && !isInUse(n));
+    setSelectedIds(new Set(unused.map((n) => n.id)));
+  };
+
+  const isAllSelected = selectableNetworks.length > 0 && selectedIds.size === selectableNetworks.length;
+  const isSomeSelected = selectedIds.size > 0 && !isAllSelected;
+  const selectedData = filteredNetworks.filter((n) => selectedIds.has(n.id));
 
   // Metrics
   const metrics = {
     total: networks?.length || 0,
-    bridge: networks?.filter((n) => n.driver === "bridge").length || 0,
-    host: networks?.filter((n) => n.driver === "host").length || 0,
-    overlay: networks?.filter((n) => n.driver === "overlay").length || 0,
+    inUse: networks?.filter((n) => isInUse(n)).length || 0,
+    unused: networks?.filter((n) => !isInUse(n)).length || 0,
+    deletable: networks?.filter((n) => !isProtected(n) && !isInUse(n)).length || 0,
   };
 
   // Copy helper
@@ -62,7 +115,7 @@ export default function DockerNetworksPage() {
     setTimeout(() => setCopied(null), 2000);
   };
 
-  // Delete mutation
+  // Delete single network mutation
   const deleteMutation = useMutation({
     mutationFn: () => api.deleteDockerNetwork(selectedAgent!, selectedNetwork!.id),
     onSuccess: () => {
@@ -74,8 +127,65 @@ export default function DockerNetworksPage() {
     onError: (error: Error) => setDeleteError(error.message),
   });
 
+  // Bulk delete
+  const handleBulkDelete = async () => {
+    const toDelete = selectedData.filter((n) => !isProtected(n) && !isInUse(n));
+    if (toDelete.length === 0) return;
+    setBulkProgress({ total: toDelete.length, completed: 0, failed: [] });
+    const failed: string[] = [];
+    for (let i = 0; i < toDelete.length; i++) {
+      try {
+        await api.deleteDockerNetwork(selectedAgent!, toDelete[i].id);
+      } catch {
+        failed.push(toDelete[i].name);
+      }
+      setBulkProgress({ total: toDelete.length, completed: i + 1, failed });
+    }
+    queryClient.invalidateQueries({ queryKey: ["docker-networks", selectedAgent] });
+    if (failed.length === 0) {
+      setShowBulkDeleteModal(false);
+      selectNone();
+      setBulkProgress(null);
+    }
+  };
+
   // Table columns
   const columns = [
+    {
+      key: "checkbox",
+      header: (
+        <button
+          onClick={(e) => { e.stopPropagation(); isAllSelected ? selectNone() : selectAll(); }}
+          className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
+        >
+          {isAllSelected ? <CheckSquare className="h-4 w-4 text-primary-600" /> : isSomeSelected ? <MinusSquare className="h-4 w-4 text-primary-600" /> : <Square className="h-4 w-4 text-gray-400" />}
+        </button>
+      ),
+      width: "40px",
+      render: (_: unknown, row: DockerNetwork) => {
+        const canSelect = !isProtected(row) && !isInUse(row);
+        return (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (canSelect) toggleSelection(row.id);
+            }}
+            className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
+            title={isProtected(row) ? "System network" : isInUse(row) ? "Network is in use" : undefined}
+          >
+            {isProtected(row) ? (
+              <Lock className="h-4 w-4 text-gray-400" />
+            ) : isInUse(row) ? (
+              <Lock className="h-4 w-4 text-green-500" />
+            ) : selectedIds.has(row.id) ? (
+              <CheckSquare className="h-4 w-4 text-primary-600" />
+            ) : (
+              <Square className="h-4 w-4 text-gray-400" />
+            )}
+          </button>
+        );
+      },
+    },
     {
       key: "name",
       header: "Name",
@@ -86,7 +196,14 @@ export default function DockerNetworksPage() {
             <Network className="h-5 w-5 text-gray-500" />
           </div>
           <div>
-            <p className="font-medium text-gray-900 dark:text-white">{value}</p>
+            <div className="flex items-center gap-2">
+              <p className="font-medium text-gray-900 dark:text-white">{value}</p>
+              {isProtected(row) && (
+                <Badge className="px-1.5 py-0.5 text-[10px] bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 rounded border-0">
+                  system
+                </Badge>
+              )}
+            </div>
             <p className="text-xs text-gray-500 font-mono">{row.id.slice(0, 12)}</p>
           </div>
         </div>
@@ -114,16 +231,9 @@ export default function DockerNetworksPage() {
       key: "containers",
       header: "Containers",
       align: "center" as const,
-      render: (value: Record<string, string>) => {
-        const count = Object.keys(value || {}).length;
-        return count > 0 ? (
-          <Badge className="px-2 py-0.5 text-xs bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 rounded border-0">
-            {count} connected
-          </Badge>
-        ) : (
-          <span className="text-sm text-gray-400">None</span>
-        );
-      },
+      render: (value: Record<string, string>) => (
+        <ContainerListPopover containers={value} onContainerClick={openContainerPanel} label="connected" />
+      ),
     },
     {
       key: "internal",
@@ -145,21 +255,104 @@ export default function DockerNetworksPage() {
     <div className="space-y-4">
       {/* Metrics */}
       <MetricsGrid columns={4}>
-        <StatCard label="Total Networks" value={metrics.total} icon={Network} iconColor="text-orange-600 dark:text-orange-400" />
-        <StatCard label="Bridge" value={metrics.bridge} icon={Network} iconColor="text-blue-600 dark:text-blue-400" />
-        <StatCard label="Host" value={metrics.host} icon={Network} iconColor="text-green-600 dark:text-green-400" />
-        <StatCard label="Overlay" value={metrics.overlay} icon={Network} iconColor="text-purple-600 dark:text-purple-400" />
+        <StatCard label="Total Networks" value={metrics.total} icon={Network} iconColor="text-blue-600 dark:text-blue-400" />
+        <StatCard label="In Use" value={metrics.inUse} icon={Globe} iconColor="text-green-600 dark:text-green-400" />
+        <StatCard label="Unused" value={metrics.unused} icon={Network} iconColor="text-purple-600 dark:text-purple-400" />
+        <StatCard label="Orphaned" value={metrics.deletable} icon={AlertTriangle} iconColor="text-orange-600 dark:text-orange-400" />
       </MetricsGrid>
 
-      {/* Filters */}
+      {/* Horizontal Filters */}
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-2">
+          <span className="text-sm text-gray-500 dark:text-gray-400">Status:</span>
+          <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
+            <button
+              onClick={() => setStatusFilter("all")}
+              className={cn(
+                "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
+                statusFilter === "all"
+                  ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
+                  : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+              )}
+            >
+              All ({metrics.total})
+            </button>
+            <button
+              onClick={() => setStatusFilter("in-use")}
+              className={cn(
+                "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
+                statusFilter === "in-use"
+                  ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
+                  : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+              )}
+            >
+              In Use ({metrics.inUse})
+            </button>
+            <button
+              onClick={() => setStatusFilter("unused")}
+              className={cn(
+                "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
+                statusFilter === "unused"
+                  ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
+                  : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+              )}
+            >
+              Unused ({metrics.unused})
+            </button>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
           <Input placeholder="Search networks..." value={searchFilter} onChange={(e) => setSearchFilter(e.target.value)} className="w-64" />
-          {searchFilter && (
-            <button onClick={() => setSearchFilter("")} className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400">Reset</button>
+          {(statusFilter !== "all" || searchFilter) && (
+            <button
+              onClick={() => { setStatusFilter("all"); setSearchFilter(""); }}
+              className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+            >
+              Reset
+            </button>
           )}
         </div>
       </div>
+
+      {/* Selection Action Bar */}
+      {networks && networks.length > 0 && (
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-500 dark:text-gray-400">Quick select:</span>
+            <button
+              onClick={selectAll}
+              disabled={selectableNetworks.length === 0}
+              className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              All Deletable ({selectableNetworks.length})
+            </button>
+            <button
+              onClick={selectUnused}
+              disabled={metrics.deletable === 0}
+              className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Orphaned ({metrics.deletable})
+            </button>
+            {selectedIds.size > 0 && (
+              <button onClick={selectNone} className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors">
+                Clear
+              </button>
+            )}
+          </div>
+
+          {selectedIds.size > 0 && (
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-gray-700 dark:text-gray-300">
+                <strong>{selectedIds.size}</strong> selected
+              </span>
+              <Button variant="danger" size="sm" onClick={() => setShowBulkDeleteModal(true)}>
+                <Trash2 className="h-4 w-4 mr-1" />
+                Delete Selected
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Table */}
       {isLoading ? (
@@ -173,7 +366,10 @@ export default function DockerNetworksPage() {
             onRowClick={(row) => setSelectedNetwork(row)}
             hoverable
             rowClassName={(row) =>
-              cn(selectedNetwork?.id === row.id && "bg-primary-50 dark:bg-primary-900/20")
+              cn(
+                selectedNetwork?.id === row.id && "bg-primary-50 dark:bg-primary-900/20",
+                selectedIds.has(row.id) && "bg-blue-50 dark:bg-blue-900/10"
+              )
             }
           />
         </div>
@@ -181,7 +377,7 @@ export default function DockerNetworksPage() {
         <EmptyState
           icon={Network}
           title="No networks found"
-          description={networks?.length === 0 ? "No networks are configured on this agent" : "No networks match the search"}
+          description={networks?.length === 0 ? "No networks are configured on this agent" : "No networks match the current filters"}
         />
       )}
 
@@ -191,7 +387,14 @@ export default function DockerNetworksPage() {
           <>
             <SlideOver.Header onClose={() => setSelectedNetwork(null)}>
               <div>
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{selectedNetwork.name}</h2>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{selectedNetwork.name}</h2>
+                  {isProtected(selectedNetwork) && (
+                    <Badge className="px-1.5 py-0.5 text-[10px] bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 rounded border-0">
+                      system
+                    </Badge>
+                  )}
+                </div>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{selectedNetwork.driver} network</p>
               </div>
             </SlideOver.Header>
@@ -226,6 +429,18 @@ export default function DockerNetworksPage() {
                       <span className="text-sm text-gray-500 dark:text-gray-400">Internal</span>
                       <span className="text-sm text-gray-900 dark:text-white">{selectedNetwork.internal ? "Yes" : "No"}</span>
                     </div>
+                    <div className="flex justify-between">
+                      <span className="text-sm text-gray-500 dark:text-gray-400">Status</span>
+                      {isInUse(selectedNetwork) ? (
+                        <Badge className="px-2 py-0.5 text-xs bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 rounded border-0">
+                          In Use
+                        </Badge>
+                      ) : (
+                        <Badge className="px-2 py-0.5 text-xs bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 rounded border-0">
+                          Unused
+                        </Badge>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -235,13 +450,20 @@ export default function DockerNetworksPage() {
                   {Object.entries(selectedNetwork.containers || {}).length > 0 ? (
                     <div className="space-y-2">
                       {Object.entries(selectedNetwork.containers).map(([id, name]) => (
-                        <div key={id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                        <button
+                          key={id}
+                          onClick={() => {
+                            openContainerPanel(id);
+                            setSelectedNetwork(null);
+                          }}
+                          className="w-full flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                        >
                           <div className="flex items-center gap-2">
                             <Server className="h-4 w-4 text-gray-400" />
                             <span className="text-sm font-medium text-gray-900 dark:text-white">{name}</span>
                           </div>
                           <span className="text-xs text-gray-500 font-mono">{id.slice(0, 12)}</span>
-                        </div>
+                        </button>
                       ))}
                     </div>
                   ) : (
@@ -256,11 +478,14 @@ export default function DockerNetworksPage() {
                     variant="danger"
                     size="sm"
                     onClick={() => { setDeleteError(null); setShowDeleteModal(true); }}
-                    disabled={Object.keys(selectedNetwork.containers || {}).length > 0}
+                    disabled={isProtected(selectedNetwork) || isInUse(selectedNetwork)}
                   >
                     <Trash2 className="h-4 w-4 mr-1" />Delete Network
                   </Button>
-                  {Object.keys(selectedNetwork.containers || {}).length > 0 && (
+                  {isProtected(selectedNetwork) && (
+                    <p className="text-xs text-gray-500 mt-2">System networks cannot be deleted</p>
+                  )}
+                  {!isProtected(selectedNetwork) && isInUse(selectedNetwork) && (
                     <p className="text-xs text-gray-500 mt-2">Cannot delete network with connected containers</p>
                   )}
                 </div>
@@ -270,7 +495,86 @@ export default function DockerNetworksPage() {
         )}
       </SlideOver>
 
-      {/* Delete Confirmation */}
+      {/* Bulk Delete Modal */}
+      {showBulkDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => !bulkProgress && setShowBulkDeleteModal(false)} />
+          <div className="relative bg-white dark:bg-gray-900 rounded-lg shadow-xl max-w-lg w-full mx-4 p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-full">
+                <Trash2 className="h-5 w-5 text-red-600 dark:text-red-400" />
+              </div>
+              <h3 className="text-lg font-semibold">Delete {selectedIds.size} Networks</h3>
+            </div>
+
+            {!bulkProgress ? (
+              <>
+                <p className="text-gray-600 dark:text-gray-400 mb-4">
+                  Are you sure you want to delete <strong>{selectedIds.size}</strong> selected networks?
+                  This action cannot be undone.
+                </p>
+                <div className="max-h-48 overflow-y-auto mb-4 space-y-1">
+                  {selectedData.map((net) => {
+                    const canDelete = !isProtected(net) && !isInUse(net);
+                    return (
+                      <div key={net.id} className={cn("flex items-center justify-between p-2 rounded text-sm", !canDelete ? "bg-yellow-50 dark:bg-yellow-900/20" : "bg-gray-50 dark:bg-gray-800")}>
+                        <span className="font-mono truncate">{net.name}</span>
+                        <span className="text-gray-500 text-xs">
+                          {net.driver}
+                          {isProtected(net) && <span className="ml-2 text-yellow-600 dark:text-yellow-400">(system - will skip)</span>}
+                          {!isProtected(net) && isInUse(net) && <span className="ml-2 text-yellow-600 dark:text-yellow-400">(in use - will skip)</span>}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+                {selectedData.some((net) => isProtected(net) || isInUse(net)) && (
+                  <div className="mb-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                    <p className="text-sm text-yellow-700 dark:text-yellow-400">
+                      {selectedData.filter((net) => isProtected(net) || isInUse(net)).length} network(s) are protected or in use and will be skipped.
+                    </p>
+                  </div>
+                )}
+                <div className="flex justify-end gap-3">
+                  <Button variant="secondary" onClick={() => setShowBulkDeleteModal(false)}>Cancel</Button>
+                  <Button variant="danger" onClick={handleBulkDelete} disabled={selectedData.filter((n) => !isProtected(n) && !isInUse(n)).length === 0}>
+                    Delete {selectedData.filter((n) => !isProtected(n) && !isInUse(n)).length} Networks
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <div className="space-y-4">
+                <div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span>Deleting networks...</span>
+                    <span>{bulkProgress.completed} / {bulkProgress.total}</span>
+                  </div>
+                  <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                    <div className="bg-red-600 h-2 rounded-full transition-all duration-300" style={{ width: `${(bulkProgress.completed / bulkProgress.total) * 100}%` }} />
+                  </div>
+                </div>
+                {bulkProgress.failed.length > 0 && (
+                  <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                    <p className="text-sm font-medium text-red-600 dark:text-red-400 mb-2">Failed to delete {bulkProgress.failed.length} networks:</p>
+                    <ul className="text-xs text-red-600 dark:text-red-400 space-y-1">
+                      {bulkProgress.failed.map((name, idx) => <li key={idx}>• {name}</li>)}
+                    </ul>
+                  </div>
+                )}
+                {bulkProgress.completed === bulkProgress.total && (
+                  <div className="flex justify-end">
+                    <Button variant="secondary" onClick={() => { setShowBulkDeleteModal(false); selectNone(); setBulkProgress(null); }}>
+                      {bulkProgress.failed.length > 0 ? "Close" : "Done"}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Single Delete Confirmation */}
       <ConfirmDialog
         isOpen={showDeleteModal && !!selectedNetwork}
         onClose={() => { setShowDeleteModal(false); setDeleteError(null); }}

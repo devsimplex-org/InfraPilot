@@ -3412,6 +3412,49 @@ export const api = {
       }
     ),
 
+  pauseContainer: (agentId: string, containerId: string) =>
+    fetchAPI(`/agents/${agentId}/containers/${containerId}/pause`, {
+      method: "POST",
+    }),
+
+  unpauseContainer: (agentId: string, containerId: string) =>
+    fetchAPI(`/agents/${agentId}/containers/${containerId}/unpause`, {
+      method: "POST",
+    }),
+
+  killContainer: (agentId: string, containerId: string, signal: string = "SIGKILL") =>
+    fetchAPI(`/agents/${agentId}/containers/${containerId}/kill`, {
+      method: "POST",
+      body: JSON.stringify({ signal }),
+    }),
+
+  renameContainer: (agentId: string, containerId: string, newName: string) =>
+    fetchAPI<{ message: string; container_id: string; old_name: string; new_name: string }>(
+      `/agents/${agentId}/containers/${containerId}/rename`,
+      {
+        method: "POST",
+        body: JSON.stringify({ new_name: newName }),
+      }
+    ),
+
+  updateContainer: (agentId: string, containerId: string, config: {
+    restart_policy?: string;
+    max_retries?: number;
+    memory_limit?: number;
+    memory_swap?: number;
+    cpu_shares?: number;
+    cpu_quota?: number;
+    cpu_period?: number;
+  }) =>
+    fetchAPI(`/agents/${agentId}/containers/${containerId}`, {
+      method: "PUT",
+      body: JSON.stringify(config),
+    }),
+
+  inspectContainer: (agentId: string, containerId: string) =>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    fetchAPI<any>(`/agents/${agentId}/containers/${containerId}/inspect`),
+
   getContainerLogs: (agentId: string, containerId: string, tail: number = 100) =>
     fetchAPI<{ container_id: string; logs: string }>(
       `/agents/${agentId}/containers/${containerId}/logs?tail=${tail}`

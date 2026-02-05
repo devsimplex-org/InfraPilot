@@ -351,18 +351,27 @@ func (c *Client) ListNetworks(ctx context.Context) ([]NetworkInfo, error) {
 			continue
 		}
 
-		// Build container map
+		// NetworkList doesn't return container info - we need to inspect each network
+		// to get the connected containers
 		containers := make(map[string]string)
-		for id, ep := range net.Containers {
-			shortID := id
-			if len(id) > 12 {
-				shortID = id[:12]
+		inspected, err := c.cli.NetworkInspect(ctx, net.ID, network.InspectOptions{})
+		if err == nil {
+			for id, ep := range inspected.Containers {
+				shortID := id
+				if len(id) > 12 {
+					shortID = id[:12]
+				}
+				containers[shortID] = ep.Name
 			}
-			containers[shortID] = ep.Name
+		}
+
+		networkID := net.ID
+		if len(networkID) > 12 {
+			networkID = networkID[:12]
 		}
 
 		result = append(result, NetworkInfo{
-			ID:         net.ID[:12],
+			ID:         networkID,
 			Name:       net.Name,
 			Driver:     net.Driver,
 			Scope:      net.Scope,
