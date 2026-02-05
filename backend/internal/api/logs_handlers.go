@@ -473,9 +473,35 @@ func (h *Handler) getNginxLogsReal(c *gin.Context) {
 	}
 
 	// Execute command to read log file
-	logFile := "/var/log/nginx/access.log"
-	if logType == "error" {
-		logFile = "/var/log/nginx/error.log"
+	// Support per-domain log files if domain is specified
+	domain := c.Query("domain")
+	var logFile string
+
+	if domain != "" {
+		// Use per-domain log file
+		if logType == "error" {
+			logFile = fmt.Sprintf("/var/log/nginx/domains/%s.error.log", domain)
+		} else {
+			logFile = fmt.Sprintf("/var/log/nginx/domains/%s.access.log", domain)
+		}
+	} else {
+		// Fall back to global log file
+		if logType == "error" {
+			logFile = "/var/log/nginx/error.log"
+		} else {
+			logFile = "/var/log/nginx/access.log"
+		}
+	}
+
+	// First, ensure the domains log directory exists
+	if domain != "" {
+		mkdirConfig := container.ExecOptions{
+			Cmd: []string{"mkdir", "-p", "/var/log/nginx/domains"},
+		}
+		mkdirResp, _ := docker.ContainerExecCreate(ctx, nginxContainerID, mkdirConfig)
+		if mkdirResp.ID != "" {
+			docker.ContainerExecStart(ctx, mkdirResp.ID, container.ExecStartOptions{})
+		}
 	}
 
 	execConfig := container.ExecOptions{

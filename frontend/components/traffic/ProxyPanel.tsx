@@ -7,21 +7,14 @@ import {
   Lock,
   Shield,
   ShieldCheck,
-  ExternalLink,
   Trash2,
   Pencil,
-  Code,
   FileText,
   RefreshCw,
   Check,
   AlertTriangle,
-  Copy,
-  ArrowRight,
   Settings,
   Activity,
-  ChevronDown,
-  ChevronRight,
-  Eye,
   Loader2,
   Play,
   Save,
@@ -40,44 +33,13 @@ import {
   Input,
 } from "@/components/ui/page-layout";
 
-type PanelTab = "config" | "logs";
+// Import shared components
+import {
+  Section,
+  ConfigPreviewSection,
+} from "@/components/traffic/DomainConfigPanel";
 
-// Collapsible Section component
-function Section({
-  title,
-  icon: Icon,
-  children,
-  defaultOpen = true,
-  badge,
-}: {
-  title: string;
-  icon: React.ElementType;
-  children: React.ReactNode;
-  defaultOpen?: boolean;
-  badge?: React.ReactNode;
-}) {
-  const [isOpen, setIsOpen] = useState(defaultOpen);
-  return (
-    <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 dark:bg-gray-800/50 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-      >
-        <div className="flex items-center gap-2">
-          <Icon className="h-4 w-4 text-gray-500" />
-          <span className="text-sm font-medium text-gray-900 dark:text-white">{title}</span>
-          {badge}
-        </div>
-        {isOpen ? (
-          <ChevronDown className="h-4 w-4 text-gray-400" />
-        ) : (
-          <ChevronRight className="h-4 w-4 text-gray-400" />
-        )}
-      </button>
-      {isOpen && <div className="p-4 space-y-4">{children}</div>}
-    </div>
-  );
-}
+type PanelTab = "config" | "logs";
 
 export function ProxyPanel() {
   const queryClient = useQueryClient();
@@ -86,10 +48,8 @@ export function ProxyPanel() {
   // Local state
   const [tab, setTab] = useState<PanelTab>("config");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [copied, setCopied] = useState<string | null>(null);
   const [logsTail, setLogsTail] = useState(100);
   const [hasChanges, setHasChanges] = useState(false);
-  const [showConfigPreview, setShowConfigPreview] = useState(false);
 
   // SSL Wizard state
   const [showSSLWizard, setShowSSLWizard] = useState(false);
@@ -138,7 +98,6 @@ export function ProxyPanel() {
     if (proxyPanelId) {
       setTab("config");
       setHasChanges(false);
-      setShowConfigPreview(false);
     }
   }, [proxyPanelId]);
 
@@ -316,12 +275,6 @@ export function ProxyPanel() {
       setRateLimits(rateLimits.filter((rl) => rl.id !== deletedId));
     },
   });
-
-  const handleCopy = (text: string, key: string) => {
-    navigator.clipboard.writeText(text);
-    setCopied(key);
-    setTimeout(() => setCopied(null), 2000);
-  };
 
   const panelTabs = [
     { id: "config", label: "Configuration", icon: Settings },
@@ -845,38 +798,12 @@ export function ProxyPanel() {
               </div>
             </Section>
 
-            {/* Nginx Configuration Preview */}
-            <Section title="Nginx Configuration Preview" icon={Code} defaultOpen={false}>
-              <div className="space-y-3">
-                <div className="bg-gray-900 rounded-lg overflow-hidden">
-                  {configLoading ? (
-                    <div className="flex items-center justify-center h-32">
-                      <Spinner size="lg" />
-                    </div>
-                  ) : (
-                    <pre className="p-3 text-xs text-green-400 font-mono overflow-auto max-h-[300px]">
-                      {configData?.config || "No configuration generated"}
-                    </pre>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => refetchConfig()}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700"
-                  >
-                    <RefreshCw className={cn("h-3.5 w-3.5", configLoading && "animate-spin")} />
-                    Refresh
-                  </button>
-                  <button
-                    onClick={() => handleCopy(configData?.config || "", "config")}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700"
-                  >
-                    {copied === "config" ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
-                    {copied === "config" ? "Copied!" : "Copy"}
-                  </button>
-                </div>
-              </div>
-            </Section>
+            {/* Nginx Configuration Preview - Using shared component */}
+            <ConfigPreviewSection
+              config={configData?.config}
+              isLoading={configLoading}
+              onRefresh={() => refetchConfig()}
+            />
 
             {/* Action Buttons - Fixed at bottom */}
             <div className="sticky bottom-0 -mx-6 px-6 py-4 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between gap-3">

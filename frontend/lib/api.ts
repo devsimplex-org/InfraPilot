@@ -158,6 +158,9 @@ export interface ProxyHost {
   basic_auth_enabled: boolean;
   basic_auth_realm?: string;
   basic_auth_excluded_paths?: string[];
+  access_log: boolean;
+  error_log: boolean;
+  log_format?: string;
   is_system_proxy: boolean;
   status: string;
   created_at: string;

@@ -24,30 +24,45 @@ import {
 } from "lucide-react";
 
 interface SSLWizardProps {
+  /** Primary domain for the certificate */
   domain: string;
+  /** Additional domains (for Traffic Resources with multiple domains) */
+  domains?: string[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess?: () => void;
-  // For regular proxy hosts (not system domain)
+  // For regular proxy hosts
   agentId?: string;
   proxyId?: string;
+  // For traffic resources
+  resourceId?: string;
   // Whether to include www subdomain in SSL cert
   includeWWW?: boolean;
 }
+
+/** Resource type for unified handling */
+type ResourceType = "proxy" | "resource" | "system";
 
 type WizardStep = "check" | "source" | "wildcard" | "dns" | "email" | "request" | "dns_challenge" | "dns_verify" | "complete";
 
 export function SSLWizard({
   domain,
+  domains = [],
   open,
   onOpenChange,
   onSuccess,
   agentId,
   proxyId,
+  resourceId,
   includeWWW = false,
 }: SSLWizardProps) {
-  // Check if this is for a regular proxy (not system domain)
-  const isRegularProxy = !!(agentId && proxyId);
+  // Determine resource type
+  const resourceType: ResourceType = resourceId ? "resource" : (agentId && proxyId) ? "proxy" : "system";
+  const isRegularProxy = resourceType === "proxy";
+  const isTrafficResource = resourceType === "resource";
+
+  // All domains for this certificate (primary + additional)
+  const allDomains = [domain, ...domains.filter(d => d !== domain)];
   const [step, setStep] = useState<WizardStep>("check");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

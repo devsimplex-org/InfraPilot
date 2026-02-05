@@ -36,6 +36,9 @@ type ProxyHost struct {
 	BasicAuthEnabled       bool     `json:"basic_auth_enabled"`
 	BasicAuthRealm         string   `json:"basic_auth_realm,omitempty"`
 	BasicAuthExcludedPaths []string `json:"basic_auth_excluded_paths,omitempty"`
+	AccessLog              bool     `json:"access_log"`
+	ErrorLog               bool     `json:"error_log"`
+	LogFormat              *string  `json:"log_format,omitempty"`
 	ConfigHash             *string  `json:"config_hash,omitempty"`
 	Status           string     `json:"status"`
 	IsSystemProxy    bool       `json:"is_system_proxy"`
@@ -67,6 +70,8 @@ type CreateProxyRequest struct {
 	IncludeWWW       bool    `json:"include_www"`
 	BasicAuthEnabled bool    `json:"basic_auth_enabled"`
 	BasicAuthRealm   string  `json:"basic_auth_realm,omitempty"`
+	AccessLog        *bool   `json:"access_log,omitempty"`            // Enable access logging (default true)
+	ErrorLog         *bool   `json:"error_log,omitempty"`             // Enable error logging (default true)
 }
 
 // UpdateProxyRequest is the request body for updating a proxy host
@@ -82,6 +87,8 @@ type UpdateProxyRequest struct {
 	BasicAuthEnabled       *bool     `json:"basic_auth_enabled,omitempty"`
 	BasicAuthRealm         *string   `json:"basic_auth_realm,omitempty"`
 	BasicAuthExcludedPaths *[]string `json:"basic_auth_excluded_paths,omitempty"`
+	AccessLog              *bool     `json:"access_log,omitempty"`
+	ErrorLog               *bool     `json:"error_log,omitempty"`
 	Status                 *string   `json:"status,omitempty"`
 }
 
@@ -127,6 +134,7 @@ func (h *Handler) listProxyHosts(c *gin.Context) {
 		       force_ssl, http2_enabled, include_www,
 		       COALESCE(basic_auth_enabled, false), COALESCE(basic_auth_realm, 'Restricted'),
 		       COALESCE(basic_auth_excluded_paths, '{}'),
+		       COALESCE(access_log, true), COALESCE(error_log, true), log_format,
 		       config_hash, status, is_system_proxy, created_at, updated_at
 		FROM proxy_hosts
 		WHERE agent_id = $1
@@ -147,6 +155,7 @@ func (h *Handler) listProxyHosts(c *gin.Context) {
 			&p.SSLEnabled, &p.SSLCertPath, &p.SSLKeyPath, &p.SSLExpiresAt,
 			&p.ForceSSL, &p.HTTP2Enabled, &p.IncludeWWW,
 			&p.BasicAuthEnabled, &p.BasicAuthRealm, &p.BasicAuthExcludedPaths,
+			&p.AccessLog, &p.ErrorLog, &p.LogFormat,
 			&p.ConfigHash, &p.Status, &p.IsSystemProxy, &p.CreatedAt, &p.UpdatedAt,
 		); err != nil {
 			continue
@@ -259,14 +268,26 @@ func (h *Handler) createProxyHost(c *gin.Context) {
 		redirectCode = &req.RedirectCode
 	}
 
+	// Default logging to true if not specified
+	accessLog := true
+	errorLog := true
+	if req.AccessLog != nil {
+		accessLog = *req.AccessLog
+	}
+	if req.ErrorLog != nil {
+		errorLog = *req.ErrorLog
+	}
+
 	var proxyID uuid.UUID
 	err = h.db.QueryRow(c.Request.Context(), `
 		INSERT INTO proxy_hosts (agent_id, domain, upstream_target, proxy_type, redirect_url, redirect_code,
-		                         force_ssl, http2_enabled, include_www, basic_auth_enabled, basic_auth_realm, status)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'active')
+		                         force_ssl, http2_enabled, include_www, basic_auth_enabled, basic_auth_realm,
+		                         access_log, error_log, status)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'active')
 		RETURNING id
 	`, agentID, req.Domain, req.UpstreamTarget, req.ProxyType, redirectURL, redirectCode,
-		req.ForceSSL, req.HTTP2Enabled, req.IncludeWWW, req.BasicAuthEnabled, basicAuthRealm).Scan(&proxyID)
+		req.ForceSSL, req.HTTP2Enabled, req.IncludeWWW, req.BasicAuthEnabled, basicAuthRealm,
+		accessLog, errorLog).Scan(&proxyID)
 
 	if err != nil {
 		h.logger.Error("Failed to create proxy host")
@@ -299,7 +320,8 @@ func (h *Handler) createProxyHost(c *gin.Context) {
 		       ssl_enabled, ssl_cert_path, ssl_key_path, ssl_expires_at,
 		       force_ssl, http2_enabled, include_www,
 		       COALESCE(basic_auth_enabled, false), COALESCE(basic_auth_realm, 'Restricted'),
-		       config_hash, status, created_at, updated_at
+		       COALESCE(access_log, true), COALESCE(error_log, true), log_format,
+		       config_hash, status, is_system_proxy, created_at, updated_at
 		FROM proxy_hosts
 		WHERE id = $1
 	`, proxyID).Scan(
@@ -308,7 +330,8 @@ func (h *Handler) createProxyHost(c *gin.Context) {
 		&proxy.SSLEnabled, &proxy.SSLCertPath, &proxy.SSLKeyPath, &proxy.SSLExpiresAt,
 		&proxy.ForceSSL, &proxy.HTTP2Enabled, &proxy.IncludeWWW,
 		&proxy.BasicAuthEnabled, &proxy.BasicAuthRealm,
-		&proxy.ConfigHash, &proxy.Status, &proxy.CreatedAt, &proxy.UpdatedAt,
+		&proxy.AccessLog, &proxy.ErrorLog, &proxy.LogFormat,
+		&proxy.ConfigHash, &proxy.Status, &proxy.IsSystemProxy, &proxy.CreatedAt, &proxy.UpdatedAt,
 	)
 
 	if err != nil {
@@ -355,7 +378,8 @@ func (h *Handler) getProxyHost(c *gin.Context) {
 		       ssl_enabled, ssl_cert_path, ssl_key_path, ssl_expires_at,
 		       force_ssl, http2_enabled, include_www,
 		       COALESCE(basic_auth_enabled, false), COALESCE(basic_auth_realm, 'Restricted'),
-		       config_hash, status, created_at, updated_at
+		       COALESCE(access_log, true), COALESCE(error_log, true), log_format,
+		       config_hash, status, is_system_proxy, created_at, updated_at
 		FROM proxy_hosts
 		WHERE id = $1 AND agent_id = $2
 	`, proxyID, agentID).Scan(
@@ -364,7 +388,8 @@ func (h *Handler) getProxyHost(c *gin.Context) {
 		&proxy.SSLEnabled, &proxy.SSLCertPath, &proxy.SSLKeyPath, &proxy.SSLExpiresAt,
 		&proxy.ForceSSL, &proxy.HTTP2Enabled, &proxy.IncludeWWW,
 		&proxy.BasicAuthEnabled, &proxy.BasicAuthRealm,
-		&proxy.ConfigHash, &proxy.Status, &proxy.CreatedAt, &proxy.UpdatedAt,
+		&proxy.AccessLog, &proxy.ErrorLog, &proxy.LogFormat,
+		&proxy.ConfigHash, &proxy.Status, &proxy.IsSystemProxy, &proxy.CreatedAt, &proxy.UpdatedAt,
 	)
 
 	if err != nil {
@@ -508,6 +533,16 @@ func (h *Handler) updateProxyHost(c *gin.Context) {
 		query += fmt.Sprintf(", basic_auth_excluded_paths = $%d", argCount)
 		args = append(args, *req.BasicAuthExcludedPaths)
 	}
+	if req.AccessLog != nil {
+		argCount++
+		query += fmt.Sprintf(", access_log = $%d", argCount)
+		args = append(args, *req.AccessLog)
+	}
+	if req.ErrorLog != nil {
+		argCount++
+		query += fmt.Sprintf(", error_log = $%d", argCount)
+		args = append(args, *req.ErrorLog)
+	}
 	if req.Status != nil {
 		argCount++
 		query += fmt.Sprintf(", status = $%d", argCount)
@@ -545,7 +580,8 @@ func (h *Handler) updateProxyHost(c *gin.Context) {
 		       force_ssl, http2_enabled, include_www,
 		       COALESCE(basic_auth_enabled, false), COALESCE(basic_auth_realm, 'Restricted'),
 		       COALESCE(basic_auth_excluded_paths, '{}'),
-		       config_hash, status, created_at, updated_at
+		       COALESCE(access_log, true), COALESCE(error_log, true), log_format,
+		       config_hash, status, is_system_proxy, created_at, updated_at
 		FROM proxy_hosts
 		WHERE id = $1
 	`, proxyID).Scan(
@@ -554,7 +590,8 @@ func (h *Handler) updateProxyHost(c *gin.Context) {
 		&proxy.SSLEnabled, &proxy.SSLCertPath, &proxy.SSLKeyPath, &proxy.SSLExpiresAt,
 		&proxy.ForceSSL, &proxy.HTTP2Enabled, &proxy.IncludeWWW,
 		&proxy.BasicAuthEnabled, &proxy.BasicAuthRealm, &proxy.BasicAuthExcludedPaths,
-		&proxy.ConfigHash, &proxy.Status, &proxy.CreatedAt, &proxy.UpdatedAt,
+		&proxy.AccessLog, &proxy.ErrorLog, &proxy.LogFormat,
+		&proxy.ConfigHash, &proxy.Status, &proxy.IsSystemProxy, &proxy.CreatedAt, &proxy.UpdatedAt,
 	)
 
 	// Push updated config to agent via gRPC
@@ -1203,6 +1240,31 @@ func (h *Handler) updateSecurityHeaders(c *gin.Context) {
 	c.JSON(http.StatusOK, headers)
 }
 
+// generateLoggingConfig creates nginx logging directives for a domain
+func generateLoggingConfig(domain string, accessLog, errorLog bool) string {
+	var config string
+
+	// Use per-domain log files for better filtering
+	// Logs are stored in /var/log/nginx/domains/
+	if accessLog {
+		config += fmt.Sprintf("    access_log /var/log/nginx/domains/%s.access.log combined;\n", domain)
+	} else {
+		config += "    access_log off;\n"
+	}
+
+	if errorLog {
+		config += fmt.Sprintf("    error_log /var/log/nginx/domains/%s.error.log warn;\n", domain)
+	} else {
+		config += "    error_log /dev/null;\n"
+	}
+
+	if accessLog || errorLog {
+		config += "\n"
+	}
+
+	return config
+}
+
 // generateNginxConfig creates nginx server block config
 func generateNginxConfig(proxy ProxyHost, headers SecurityHeaders) string {
 	var config string
@@ -1218,6 +1280,9 @@ func generateNginxConfig(proxy ProxyHost, headers SecurityHeaders) string {
 	config += "    listen 80;\n"
 	config += "    listen [::]:80;\n"
 	config += fmt.Sprintf("    server_name %s;\n\n", serverName)
+
+	// Logging configuration for HTTP block
+	config += generateLoggingConfig(proxy.Domain, proxy.AccessLog, proxy.ErrorLog)
 
 	// Always include ACME challenge location for Let's Encrypt certificate issuance/renewal
 	config += "    # ACME challenge for Let's Encrypt\n"
@@ -1251,6 +1316,9 @@ func generateNginxConfig(proxy ProxyHost, headers SecurityHeaders) string {
 			config += "    http2 on;\n"
 		}
 		config += fmt.Sprintf("    server_name %s;\n\n", serverName)
+
+		// Logging configuration for HTTPS block
+		config += generateLoggingConfig(proxy.Domain, proxy.AccessLog, proxy.ErrorLog)
 
 		// SSL configuration - determine effective cert paths
 		var certPath, keyPath string
