@@ -93,11 +93,15 @@ export interface CardBodyProps {
    * Reduced padding for compact layouts
    */
   compact?: boolean;
+  /**
+   * No padding - useful for lists or custom content
+   */
+  noPadding?: boolean;
 }
 
-export function CardBody({ children, className, compact = false }: CardBodyProps) {
+export function CardBody({ children, className, compact = false, noPadding = false }: CardBodyProps) {
   return (
-    <div className={cn(compact ? 'px-6 py-3' : 'px-6 py-4', className)}>
+    <div className={cn(noPadding ? '' : compact ? 'px-6 py-3' : 'px-6 py-4', className)}>
       {children}
     </div>
   );

@@ -608,7 +608,7 @@ func (h *Handler) runDeploymentPipeline(ctx context.Context, orgID, deploymentID
 			return
 		}
 
-		containerResult, err := h.deployContainerToAgent(ctx, deploymentID, agentID, imageRef, deployment.ServiceName, deployment.Environment, containerConfig)
+		containerResult, err := h.deployContainerToAgent(ctx, orgID, deploymentID, agentID, imageRef, deployment.ServiceName, deployment.Environment, containerConfig)
 		if err != nil {
 			h.updateDeploymentStatus(ctx, deploymentID.String(), "failed",
 				fmt.Sprintf("Container deployment failed: %v", err))
@@ -643,7 +643,12 @@ func (h *Handler) runDeploymentPipeline(ctx context.Context, orgID, deploymentID
 }
 
 // deployContainerToAgent sends a command to the agent to run a container
-func (h *Handler) deployContainerToAgent(ctx context.Context, deploymentID, agentID uuid.UUID, imageRef, serviceName, environment string, containerConfig *DeploymentContainerConfig) (*agentgrpc.ContainerRunResult, error) {
+func (h *Handler) deployContainerToAgent(ctx context.Context, orgID, deploymentID, agentID uuid.UUID, imageRef, serviceName, environment string, containerConfig *DeploymentContainerConfig) (*agentgrpc.ContainerRunResult, error) {
+	logger := h.logger.With(
+		zap.String("deployment_id", deploymentID.String()),
+		zap.String("image", imageRef),
+	)
+
 	// Use container_name from compose if provided, otherwise generate one
 	containerName := ""
 	if containerConfig != nil && containerConfig.ContainerName != "" {
@@ -671,6 +676,36 @@ func (h *Handler) deployContainerToAgent(ctx context.Context, deploymentID, agen
 		"name":           containerName,
 		"restart_policy": "unless-stopped",
 		"labels":         labels,
+	}
+
+	// Try to get registry auth for the image
+	if h.registryService != nil {
+		reg, err := h.registryService.GetRegistryByImageRef(ctx, orgID, imageRef)
+		if err != nil {
+			logger.Debug("No registry found for image, will try without auth",
+				zap.String("image", imageRef),
+				zap.Error(err),
+			)
+		} else {
+			// Build auth config
+			authConfig, err := h.buildAuthConfigFromRegistry(ctx, orgID, reg.ID)
+			if err != nil {
+				logger.Warn("Failed to build auth config from registry",
+					zap.String("registry_id", reg.ID.String()),
+					zap.Error(err),
+				)
+			} else if authConfig != nil {
+				logger.Info("Using registry auth for image pull",
+					zap.String("registry", reg.Name),
+					zap.String("provider", string(reg.Provider)),
+				)
+				options["auth"] = map[string]interface{}{
+					"username":       authConfig.Username,
+					"password":       authConfig.Password,
+					"server_address": authConfig.ServerAddress,
+				}
+			}
+		}
 	}
 
 	// Add container configuration if provided
@@ -880,10 +915,12 @@ func (h *Handler) redeployDeployment(c *gin.Context) {
 
 	// Parse request body for redeploy options
 	var req struct {
-		PullLatest bool `json:"pull_latest"`
+		PullLatest   bool `json:"pull_latest"`
+		SkipScanning bool `json:"skip_scanning"`
 	}
 	// Default to true if not specified
 	req.PullLatest = true
+	req.SkipScanning = false
 	if err := c.ShouldBindJSON(&req); err != nil {
 		// If there's no body, that's OK - use defaults
 		h.logger.Debug("No request body for redeploy, using defaults", zap.Error(err))
@@ -970,6 +1007,7 @@ func (h *Handler) redeployDeployment(c *gin.Context) {
 
 	h.logger.Info("Redeploy options",
 		zap.Bool("pull_latest", req.PullLatest),
+		zap.Bool("skip_scanning", req.SkipScanning),
 		zap.String("deployment_id", newID.String()),
 	)
 
@@ -985,7 +1023,7 @@ func (h *Handler) redeployDeployment(c *gin.Context) {
 
 	// Trigger deployment pipeline asynchronously
 	go h.runDeploymentPipeline(context.Background(), orgID, newID,
-		original.ImageRepository, imageTag, imageDigest, containerConfig, false)
+		original.ImageRepository, imageTag, imageDigest, containerConfig, req.SkipScanning)
 
 	c.JSON(http.StatusOK, gin.H{
 		"id":      newID.String(),

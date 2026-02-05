@@ -24,30 +24,45 @@ import {
 } from "lucide-react";
 
 interface SSLWizardProps {
+  /** Primary domain for the certificate */
   domain: string;
+  /** Additional domains (for Traffic Resources with multiple domains) */
+  domains?: string[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess?: () => void;
-  // For regular proxy hosts (not system domain)
+  // For regular proxy hosts
   agentId?: string;
   proxyId?: string;
+  // For traffic resources
+  resourceId?: string;
   // Whether to include www subdomain in SSL cert
   includeWWW?: boolean;
 }
+
+/** Resource type for unified handling */
+type ResourceType = "proxy" | "resource" | "system";
 
 type WizardStep = "check" | "source" | "wildcard" | "dns" | "email" | "request" | "dns_challenge" | "dns_verify" | "complete";
 
 export function SSLWizard({
   domain,
+  domains = [],
   open,
   onOpenChange,
   onSuccess,
   agentId,
   proxyId,
+  resourceId,
   includeWWW = false,
 }: SSLWizardProps) {
-  // Check if this is for a regular proxy (not system domain)
-  const isRegularProxy = !!(agentId && proxyId);
+  // Determine resource type
+  const resourceType: ResourceType = resourceId ? "resource" : (agentId && proxyId) ? "proxy" : "system";
+  const isRegularProxy = resourceType === "proxy";
+  const isTrafficResource = resourceType === "resource";
+
+  // All domains for this certificate (primary + additional)
+  const allDomains = [domain, ...domains.filter(d => d !== domain)];
   const [step, setStep] = useState<WizardStep>("check");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -425,11 +440,17 @@ export function SSLWizard({
   const currentStepIndex = steps.findIndex((s) => s.key === step);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center"
+      onClick={(e) => e.stopPropagation()}
+    >
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/50"
-        onClick={() => onOpenChange(false)}
+        onClick={(e) => {
+          e.stopPropagation();
+          onOpenChange(false);
+        }}
       />
 
       {/* Dialog */}
@@ -448,7 +469,10 @@ export function SSLWizard({
             </div>
           </div>
           <button
-            onClick={() => onOpenChange(false)}
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenChange(false);
+            }}
             className="p-2 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
           >
             <X className="h-5 w-5" />
@@ -593,7 +617,7 @@ export function SSLWizard({
 
                   {/* Actions */}
                   <div className="flex justify-between pt-4">
-                    <Button variant="secondary" onClick={() => onOpenChange(false)}>
+                    <Button variant="secondary" onClick={(e) => { e?.stopPropagation(); onOpenChange(false); }}>
                       Cancel
                     </Button>
                     <div className="flex gap-2">
@@ -1393,7 +1417,7 @@ export function SSLWizard({
                 </a>
               </p>
 
-              <Button variant="primary" onClick={() => onOpenChange(false)} className="mt-4">
+              <Button variant="primary" onClick={(e) => { e?.stopPropagation(); onOpenChange(false); }} className="mt-4">
                 Done
               </Button>
             </div>

@@ -272,7 +272,7 @@ export default function ArtifactsPage() {
   const breadcrumbs = (
     <Breadcrumb
       items={[
-        { label: "Deploy", href: "/deployments" },
+        { label: "Deploy", href: "/docker/deployments" },
         { label: "Artifacts", current: true },
       ]}
     />
