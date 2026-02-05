@@ -4,12 +4,18 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
+
+// parseJSON is a helper to unmarshal JSON bytes into a target
+func parseJSON(data []byte, target interface{}) {
+	json.Unmarshal(data, target)
+}
 
 // CompiledTrafficConfig represents the output of the traffic compiler
 type CompiledTrafficConfig struct {
@@ -22,27 +28,6 @@ type CompiledTrafficConfig struct {
 	Policies     []TrafficPolicy        `json:"policies"`
 	TLSConfig    *TrafficTLSConfig      `json:"tls_config,omitempty"`
 	Metadata     map[string]interface{} `json:"metadata"`
-}
-
-// TrafficTLSConfig represents TLS configuration for a traffic resource
-type TrafficTLSConfig struct {
-	ID                    uuid.UUID `json:"id"`
-	TrafficResourceID     uuid.UUID `json:"traffic_resource_id"`
-	CertSource            string    `json:"cert_source"`
-	CertID                *uuid.UUID `json:"cert_id,omitempty"`
-	MinVersion            string    `json:"min_version"`
-	MaxVersion            string    `json:"max_version"`
-	CipherSuites          []string  `json:"cipher_suites,omitempty"`
-	PreferServerCiphers   bool      `json:"prefer_server_ciphers"`
-	HSTSEnabled           bool      `json:"hsts_enabled"`
-	HSTSMaxAge            int       `json:"hsts_max_age"`
-	HSTSIncludeSubdomains bool      `json:"hsts_include_subdomains"`
-	HSTSPreload           bool      `json:"hsts_preload"`
-	OCSPStapling          bool      `json:"ocsp_stapling"`
-	MTLSEnabled           bool      `json:"mtls_enabled"`
-	MTLSCACert            *string   `json:"mtls_ca_cert,omitempty"`
-	MTLSVerifyDepth       int       `json:"mtls_verify_depth"`
-	MTLSVerifyClient      string    `json:"mtls_verify_client"`
 }
 
 // compileTrafficResource generates nginx configuration from a TrafficResource
