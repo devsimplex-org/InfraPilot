@@ -148,6 +148,17 @@ export default function DockerPage() {
     failed: string[];
   } | null>(null);
 
+  // Volume multi-selection
+  const [selectedVolumeNames, setSelectedVolumeNames] = useState<Set<string>>(new Set());
+  const [showBulkVolumeDeleteModal, setShowBulkVolumeDeleteModal] = useState(false);
+  const [bulkVolumeDeleteProgress, setBulkVolumeDeleteProgress] = useState<{
+    total: number;
+    completed: number;
+    failed: string[];
+  } | null>(null);
+  const [volumeSearchFilter, setVolumeSearchFilter] = useState("");
+  const [volumeStatusFilter, setVolumeStatusFilter] = useState<"all" | "used" | "unused">("all");
+
   // Image modals
   const [showPullModal, setShowPullModal] = useState(false);
   const [pullImageRef, setPullImageRef] = useState("");
@@ -843,6 +854,76 @@ export default function DockerPage() {
     }
   };
 
+  // Volume filtering and selection
+  const filteredVolumes = volumes?.filter((v) => {
+    const matchesSearch = !volumeSearchFilter ||
+      v.name.toLowerCase().includes(volumeSearchFilter.toLowerCase()) ||
+      v.driver.toLowerCase().includes(volumeSearchFilter.toLowerCase());
+    const matchesStatus = volumeStatusFilter === "all" ||
+      (volumeStatusFilter === "used" && v.used_by.length > 0) ||
+      (volumeStatusFilter === "unused" && v.used_by.length === 0);
+    return matchesSearch && matchesStatus;
+  }) || [];
+
+  const selectableVolumes = filteredVolumes.filter((v) => v.used_by.length === 0);
+
+  const toggleVolumeSelection = (name: string) => {
+    setSelectedVolumeNames((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(name)) {
+        newSet.delete(name);
+      } else {
+        newSet.add(name);
+      }
+      return newSet;
+    });
+  };
+
+  const selectAllVolumes = () => {
+    setSelectedVolumeNames(new Set(selectableVolumes.map((v) => v.name)));
+  };
+
+  const selectNoVolumes = () => {
+    setSelectedVolumeNames(new Set());
+  };
+
+  const selectUnusedVolumes = () => {
+    const unused = filteredVolumes.filter((v) => v.used_by.length === 0);
+    setSelectedVolumeNames(new Set(unused.map((v) => v.name)));
+  };
+
+  const isAllVolumesSelected = selectableVolumes.length > 0 && selectedVolumeNames.size === selectableVolumes.length;
+  const isSomeVolumesSelected = selectedVolumeNames.size > 0 && !isAllVolumesSelected;
+  const selectedVolumesData = filteredVolumes.filter((v) => selectedVolumeNames.has(v.name));
+
+  const handleBulkDeleteVolumes = async () => {
+    if (!selectedAgent || selectedVolumeNames.size === 0) return;
+
+    const volumesToDelete = selectedVolumesData.filter((v) => v.used_by.length === 0);
+    if (volumesToDelete.length === 0) return;
+
+    setBulkVolumeDeleteProgress({ total: volumesToDelete.length, completed: 0, failed: [] });
+
+    const failed: string[] = [];
+
+    for (let i = 0; i < volumesToDelete.length; i++) {
+      try {
+        await api.deleteDockerVolume(selectedAgent, volumesToDelete[i].name, forceDelete);
+      } catch {
+        failed.push(volumesToDelete[i].name);
+      }
+      setBulkVolumeDeleteProgress({ total: volumesToDelete.length, completed: i + 1, failed });
+    }
+
+    queryClient.invalidateQueries({ queryKey: ["docker-volumes", selectedAgent] });
+
+    if (failed.length === 0) {
+      setShowBulkVolumeDeleteModal(false);
+      setSelectedVolumeNames(new Set());
+      setBulkVolumeDeleteProgress(null);
+    }
+  };
+
   // Metrics
   const containerMetrics = {
     total: containers?.length || 0,
@@ -1084,8 +1165,201 @@ export default function DockerPage() {
     },
   ];
 
+  // Table columns - Containers (with checkbox for selection)
+  const containerColumnsWithSelect = [
+    {
+      key: "checkbox",
+      header: (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (isAllContainersSelected) {
+              selectNoContainers();
+            } else {
+              selectAllContainers();
+            }
+          }}
+          className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
+        >
+          {isAllContainersSelected ? (
+            <CheckSquare className="h-4 w-4 text-primary-600" />
+          ) : isSomeContainersSelected ? (
+            <MinusSquare className="h-4 w-4 text-primary-600" />
+          ) : (
+            <Square className="h-4 w-4 text-gray-400" />
+          )}
+        </button>
+      ),
+      width: "40px",
+      render: (_: unknown, row: Container) => (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (!isManagementContainer(row)) {
+              toggleContainerSelection(row.container_id);
+            }
+          }}
+          className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
+          title={isManagementContainer(row) ? "Cannot modify management container" : undefined}
+        >
+          {isManagementContainer(row) ? (
+            <Lock className="h-4 w-4 text-gray-400" />
+          ) : selectedContainerIds.has(row.container_id) ? (
+            <CheckSquare className="h-4 w-4 text-primary-600" />
+          ) : (
+            <Square className="h-4 w-4 text-gray-400" />
+          )}
+        </button>
+      ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      render: (_: unknown, row: Container) => (
+        <StatusIndicator status={getStatusLevel(row.status)} label={row.status} />
+      ),
+    },
+    {
+      key: "name",
+      header: "Container",
+      sortable: true,
+      render: (_: unknown, row: Container) => (
+        <div>
+          <div className="font-medium text-gray-900 dark:text-white">{row.name}</div>
+          <div className="text-sm text-gray-500 dark:text-gray-400">{row.image}</div>
+        </div>
+      ),
+    },
+    {
+      key: "stack_name",
+      header: "Stack",
+      render: (value: string | undefined) => (
+        value ? (
+          <Badge className="px-2 py-1 text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 rounded border-0">
+            {value}
+          </Badge>
+        ) : (
+          <span className="text-gray-400 text-sm">Standalone</span>
+        )
+      ),
+    },
+    {
+      key: "cpu_percent",
+      header: "CPU",
+      render: (value: number | undefined) => (
+        <span className="text-sm text-gray-900 dark:text-white">
+          {value?.toFixed(1) || 0}%
+        </span>
+      ),
+    },
+    {
+      key: "memory_mb",
+      header: "Memory",
+      render: (value: number | undefined) => (
+        <span className="text-sm text-gray-900 dark:text-white">
+          {value?.toFixed(0) || 0} MB
+        </span>
+      ),
+    },
+  ];
+
   // Table columns - Volumes
   const volumeColumns = [
+    {
+      key: "name",
+      header: "Volume Name",
+      sortable: true,
+      render: (value: string, row: DockerVolume) => (
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-gray-100 dark:bg-gray-800">
+            <HardDrive className="h-5 w-5 text-gray-500" />
+          </div>
+          <div>
+            <p className="font-medium text-gray-900 dark:text-white truncate max-w-[200px]">{value}</p>
+            <p className="text-xs text-gray-500">{row.driver} driver</p>
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "mountpoint",
+      header: "Mount Point",
+      render: (value: string) => (
+        <Badge className="px-2 py-1 text-xs bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 rounded font-mono border-0">
+          {value.length > 40 ? `...${value.slice(-37)}` : value}
+        </Badge>
+      ),
+    },
+    {
+      key: "scope",
+      header: "Scope",
+      sortable: true,
+    },
+    {
+      key: "used_by",
+      header: "In Use",
+      align: "center" as const,
+      render: (value: string[]) => {
+        return value.length > 0 ? (
+          <Badge className="px-2 py-1 text-xs bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 rounded border-0">
+            {value.length} container{value.length !== 1 ? "s" : ""}
+          </Badge>
+        ) : (
+          <Badge className="px-2 py-1 text-xs bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 rounded border-0">
+            Unused
+          </Badge>
+        );
+      },
+    },
+  ];
+
+  // Table columns - Volumes (with checkbox for selection)
+  const volumeColumnsWithSelect = [
+    {
+      key: "checkbox",
+      header: (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (isAllVolumesSelected) {
+              selectNoVolumes();
+            } else {
+              selectAllVolumes();
+            }
+          }}
+          className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
+        >
+          {isAllVolumesSelected ? (
+            <CheckSquare className="h-4 w-4 text-primary-600" />
+          ) : isSomeVolumesSelected ? (
+            <MinusSquare className="h-4 w-4 text-primary-600" />
+          ) : (
+            <Square className="h-4 w-4 text-gray-400" />
+          )}
+        </button>
+      ),
+      width: "40px",
+      render: (_: unknown, row: DockerVolume) => (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (row.used_by.length === 0) {
+              toggleVolumeSelection(row.name);
+            }
+          }}
+          className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
+          title={row.used_by.length > 0 ? "Volume is in use" : undefined}
+        >
+          {row.used_by.length > 0 ? (
+            <Lock className="h-4 w-4 text-gray-400" />
+          ) : selectedVolumeNames.has(row.name) ? (
+            <CheckSquare className="h-4 w-4 text-primary-600" />
+          ) : (
+            <Square className="h-4 w-4 text-gray-400" />
+          )}
+        </button>
+      ),
+    },
     {
       key: "name",
       header: "Volume Name",
@@ -1350,123 +1624,90 @@ export default function DockerPage() {
                 </div>
               )}
 
-              <div className="flex gap-6">
-                {/* Filters Sidebar */}
-                <div className="w-64 flex-shrink-0">
-                  <FilterPanel
-                    filters={[
-                      {
-                        id: "status",
-                        label: "Status",
-                        type: "radio",
-                        options: [
-                          { label: "All", value: "all", count: containerMetrics.total },
-                          { label: "Running", value: "running", count: containerMetrics.running },
-                          { label: "Stopped", value: "exited", count: containerMetrics.stopped },
-                        ],
-                        value: statusFilter,
-                        onChange: (value) => setStatusFilter(value as StatusFilter),
-                      },
-                      {
-                        id: "search",
-                        label: "Search",
-                        type: "search",
-                        value: searchFilter,
-                        onChange: (value) => setSearchFilter(value as string),
-                      },
-                    ]}
-                    onReset={() => {
-                      setStatusFilter("all");
-                      setSearchFilter("");
-                    }}
-                  />
+              {/* Horizontal Filters */}
+              <div className="flex items-center justify-between gap-4 mb-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-500 dark:text-gray-400">Status:</span>
+                  <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
+                    <button
+                      onClick={() => setStatusFilter("all")}
+                      className={cn(
+                        "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
+                        statusFilter === "all"
+                          ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
+                          : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+                      )}
+                    >
+                      All ({containerMetrics.total})
+                    </button>
+                    <button
+                      onClick={() => setStatusFilter("running")}
+                      className={cn(
+                        "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
+                        statusFilter === "running"
+                          ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
+                          : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+                      )}
+                    >
+                      Running ({containerMetrics.running})
+                    </button>
+                    <button
+                      onClick={() => setStatusFilter("exited")}
+                      className={cn(
+                        "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
+                        statusFilter === "exited"
+                          ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
+                          : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+                      )}
+                    >
+                      Stopped ({containerMetrics.stopped})
+                    </button>
+                  </div>
                 </div>
-
-                {/* Containers Table */}
-                <div className="flex-1 min-w-0">
-                  {loadingContainers ? (
-                    <div className="flex items-center justify-center h-64"><Spinner size="lg" /></div>
-                  ) : filteredContainers.length > 0 ? (
-                    <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
-                      <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                        <thead className="bg-gray-50 dark:bg-gray-800">
-                          <tr>
-                            <th className="w-12 px-4 py-3">
-                              <input
-                                type="checkbox"
-                                checked={isAllContainersSelected}
-                                ref={(el) => { if (el) el.indeterminate = isSomeContainersSelected; }}
-                                onChange={(e) => e.target.checked ? selectAllContainers() : selectNoContainers()}
-                                className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                              />
-                            </th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Container</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Stack</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">CPU</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Memory</th>
-                          </tr>
-                        </thead>
-                        <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
-                          {filteredContainers.map((container) => (
-                            <tr
-                              key={container.container_id}
-                              className={cn(
-                                "hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer",
-                                selectedContainerIds.has(container.container_id) && "bg-blue-50 dark:bg-blue-900/20"
-                              )}
-                              onClick={() => { setSelectedContainer(container); setContainerPanelTab("details"); }}
-                            >
-                              <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                                {isManagementContainer(container) ? (
-                                  <span className="inline-flex items-center justify-center h-4 w-4 text-xs text-gray-400" title="Cannot modify management container">
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                                      <path fillRule="evenodd" d="M10 1a4.5 4.5 0 00-4.5 4.5V9H5a2 2 0 00-2 2v6a2 2 0 002 2h10a2 2 0 002-2v-6a2 2 0 00-2-2h-.5V5.5A4.5 4.5 0 0010 1zm3 8V5.5a3 3 0 10-6 0V9h6z" clipRule="evenodd" />
-                                    </svg>
-                                  </span>
-                                ) : (
-                                  <input
-                                    type="checkbox"
-                                    checked={selectedContainerIds.has(container.container_id)}
-                                    onChange={() => toggleContainerSelection(container.container_id)}
-                                    className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                                  />
-                                )}
-                              </td>
-                              <td className="px-4 py-3">
-                                <StatusIndicator status={getStatusLevel(container.status)} label={container.status} />
-                              </td>
-                              <td className="px-4 py-3">
-                                <div className="font-medium text-gray-900 dark:text-white">{container.name}</div>
-                                <div className="text-sm text-gray-500 dark:text-gray-400">{container.image}</div>
-                              </td>
-                              <td className="px-4 py-3">
-                                {container.stack_name ? (
-                                  <Badge className="px-2 py-1 text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 rounded border-0">{container.stack_name}</Badge>
-                                ) : (
-                                  <span className="text-gray-400 text-sm">Standalone</span>
-                                )}
-                              </td>
-                              <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
-                                {container.cpu_percent?.toFixed(1) || 0}%
-                              </td>
-                              <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
-                                {container.memory_mb?.toFixed(0) || 0} MB
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <EmptyState
-                      icon={ContainerIcon}
-                      title="No containers found"
-                      description={containers?.length === 0 ? "Make sure Docker is running and containers are deployed" : "No containers match the current filters"}
-                    />
+                <div className="flex items-center gap-2">
+                  <Input
+                    placeholder="Search containers..."
+                    value={searchFilter}
+                    onChange={(e) => setSearchFilter(e.target.value)}
+                    className="w-64"
+                  />
+                  {(statusFilter !== "all" || searchFilter) && (
+                    <button
+                      onClick={() => { setStatusFilter("all"); setSearchFilter(""); }}
+                      className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+                    >
+                      Reset
+                    </button>
                   )}
                 </div>
               </div>
+
+              {/* Containers Table */}
+              {loadingContainers ? (
+                <Spinner.LogoPage label="Loading containers..." />
+              ) : filteredContainers.length > 0 ? (
+                <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
+                  <Table
+                    data={filteredContainers}
+                    columns={containerColumnsWithSelect}
+                    keyExtractor={(row) => row.container_id}
+                    onRowClick={(row) => { setSelectedContainer(row); setContainerPanelTab("details"); }}
+                    hoverable
+                    rowClassName={(row) =>
+                      cn(
+                        selectedContainer?.container_id === row.container_id && "bg-primary-50 dark:bg-primary-900/20",
+                        selectedContainerIds.has(row.container_id) && "bg-blue-50 dark:bg-blue-900/10"
+                      )
+                    }
+                  />
+                </div>
+              ) : (
+                <EmptyState
+                  icon={ContainerIcon}
+                  title="No containers found"
+                  description={containers?.length === 0 ? "Make sure Docker is running and containers are deployed" : "No containers match the current filters"}
+                />
+              )}
             </div>
           )}
 
@@ -1520,7 +1761,7 @@ export default function DockerPage() {
               )}
 
               {loadingImages ? (
-                <div className="flex items-center justify-center h-64"><Spinner size="lg" /></div>
+                <Spinner.LogoPage label="Loading images..." />
               ) : images && images.length > 0 ? (
                 <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
                   <Table
@@ -1559,33 +1800,130 @@ export default function DockerPage() {
               <MetricsGrid columns={4}>
                 <StatCard label="Total Volumes" value={volumeMetrics.total} icon={HardDrive} iconColor="text-blue-600 dark:text-blue-400" />
                 <StatCard label="In Use" value={volumeMetrics.inUse} icon={Database} iconColor="text-green-600 dark:text-green-400" />
-                <StatCard label="Total Size" value="N/A" icon={FolderOpen} iconColor="text-purple-600 dark:text-purple-400" />
+                <StatCard label="Unused" value={volumeMetrics.total - volumeMetrics.inUse} icon={FolderOpen} iconColor="text-purple-600 dark:text-purple-400" />
                 <StatCard label="Orphaned" value={volumeMetrics.total - volumeMetrics.inUse} icon={AlertTriangle} iconColor="text-orange-600 dark:text-orange-400" />
               </MetricsGrid>
 
+              {/* Horizontal Filters */}
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-500 dark:text-gray-400">Status:</span>
+                  <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
+                    <button
+                      onClick={() => setVolumeStatusFilter("all")}
+                      className={cn(
+                        "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
+                        volumeStatusFilter === "all"
+                          ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
+                          : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+                      )}
+                    >
+                      All ({volumeMetrics.total})
+                    </button>
+                    <button
+                      onClick={() => setVolumeStatusFilter("used")}
+                      className={cn(
+                        "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
+                        volumeStatusFilter === "used"
+                          ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
+                          : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+                      )}
+                    >
+                      In Use ({volumeMetrics.inUse})
+                    </button>
+                    <button
+                      onClick={() => setVolumeStatusFilter("unused")}
+                      className={cn(
+                        "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
+                        volumeStatusFilter === "unused"
+                          ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
+                          : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+                      )}
+                    >
+                      Unused ({volumeMetrics.total - volumeMetrics.inUse})
+                    </button>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Input
+                    placeholder="Search volumes..."
+                    value={volumeSearchFilter}
+                    onChange={(e) => setVolumeSearchFilter(e.target.value)}
+                    className="w-64"
+                  />
+                  {(volumeStatusFilter !== "all" || volumeSearchFilter) && (
+                    <button
+                      onClick={() => { setVolumeStatusFilter("all"); setVolumeSearchFilter(""); }}
+                      className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Selection Action Bar */}
+              {volumes && volumes.length > 0 && (
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-500 dark:text-gray-400">Quick select:</span>
+                    <button onClick={selectAllVolumes} disabled={selectableVolumes.length === 0} className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                      All Deletable ({selectableVolumes.length})
+                    </button>
+                    <button onClick={selectUnusedVolumes} disabled={(volumeMetrics.total - volumeMetrics.inUse) === 0} className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                      Unused ({volumeMetrics.total - volumeMetrics.inUse})
+                    </button>
+                    {selectedVolumeNames.size > 0 && (
+                      <button onClick={selectNoVolumes} className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors">
+                        Clear
+                      </button>
+                    )}
+                  </div>
+
+                  {selectedVolumeNames.size > 0 && (
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm text-gray-700 dark:text-gray-300">
+                        <strong>{selectedVolumeNames.size}</strong> selected
+                      </span>
+                      <Button variant="danger" size="sm" onClick={() => setShowBulkVolumeDeleteModal(true)}>
+                        <Trash2 className="h-4 w-4 mr-1" />
+                        Delete Selected
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {loadingVolumes ? (
-                <div className="flex items-center justify-center h-64"><Spinner size="lg" /></div>
-              ) : volumes && volumes.length > 0 ? (
+                <Spinner.LogoPage label="Loading volumes..." />
+              ) : filteredVolumes.length > 0 ? (
                 <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
                   <Table
-                    data={volumes}
-                    columns={volumeColumns}
+                    data={filteredVolumes}
+                    columns={volumeColumnsWithSelect}
                     keyExtractor={(row) => row.name}
                     onRowClick={(row) => setSelectedVolume(row)}
                     hoverable
-                    rowClassName={(row) => selectedVolume?.name === row.name ? "bg-primary-50 dark:bg-primary-900/20" : ""}
+                    rowClassName={(row) =>
+                      cn(
+                        selectedVolume?.name === row.name && "bg-primary-50 dark:bg-primary-900/20",
+                        selectedVolumeNames.has(row.name) && "bg-blue-50 dark:bg-blue-900/10"
+                      )
+                    }
                   />
                 </div>
               ) : (
                 <EmptyState
                   icon={HardDrive}
                   title="No volumes found"
-                  description="Create a Docker volume to persist data"
+                  description={volumes?.length === 0 ? "Create a Docker volume to persist data" : "No volumes match the current filters"}
                   action={
-                    <Button variant="primary" onClick={() => setShowCreateVolumeModal(true)}>
-                      <Plus className="h-4 w-4 mr-1" />
-                      Create Volume
-                    </Button>
+                    volumes?.length === 0 ? (
+                      <Button variant="primary" onClick={() => setShowCreateVolumeModal(true)}>
+                        <Plus className="h-4 w-4 mr-1" />
+                        Create Volume
+                      </Button>
+                    ) : undefined
                   }
                 />
               )}
@@ -2717,6 +3055,81 @@ export default function DockerPage() {
                   <div className="flex justify-end">
                     <Button variant="secondary" onClick={() => { setShowBulkContainerModal(null); setSelectedContainerIds(new Set()); setBulkContainerProgress(null); setForceDelete(false); }}>
                       {bulkContainerProgress.failed.length > 0 ? "Close" : "Done"}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Delete Volumes Modal */}
+      {showBulkVolumeDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => !bulkVolumeDeleteProgress && setShowBulkVolumeDeleteModal(false)} />
+          <div className="relative bg-white dark:bg-gray-900 rounded-lg shadow-xl max-w-lg w-full mx-4 p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-full">
+                <Trash2 className="h-5 w-5 text-red-600 dark:text-red-400" />
+              </div>
+              <h3 className="text-lg font-semibold">Delete {selectedVolumeNames.size} Volumes</h3>
+            </div>
+
+            {!bulkVolumeDeleteProgress ? (
+              <>
+                <p className="text-gray-600 dark:text-gray-400 mb-4">
+                  Are you sure you want to delete <strong>{selectedVolumeNames.size}</strong> selected volumes?
+                  This action cannot be undone.
+                </p>
+                <div className="max-h-48 overflow-y-auto mb-4 space-y-1">
+                  {selectedVolumesData.map((vol) => (
+                    <div key={vol.name} className={cn("flex items-center justify-between p-2 rounded text-sm", vol.used_by.length > 0 ? "bg-yellow-50 dark:bg-yellow-900/20" : "bg-gray-50 dark:bg-gray-800")}>
+                      <span className="font-mono truncate">{vol.name}</span>
+                      <span className="text-gray-500 text-xs">
+                        {vol.driver}
+                        {vol.used_by.length > 0 && <span className="ml-2 text-yellow-600 dark:text-yellow-400">(in use - will skip)</span>}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                {selectedVolumesData.some((vol) => vol.used_by.length > 0) && (
+                  <div className="mb-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                    <p className="text-sm text-yellow-700 dark:text-yellow-400">
+                      {selectedVolumesData.filter((vol) => vol.used_by.length > 0).length} volume(s) are in use and will be skipped.
+                    </p>
+                  </div>
+                )}
+                <div className="flex justify-end gap-3">
+                  <Button variant="secondary" onClick={() => setShowBulkVolumeDeleteModal(false)}>Cancel</Button>
+                  <Button variant="danger" onClick={handleBulkDeleteVolumes} disabled={selectedVolumesData.filter((v) => v.used_by.length === 0).length === 0}>
+                    Delete {selectedVolumesData.filter((v) => v.used_by.length === 0).length} Volumes
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <div className="space-y-4">
+                <div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span>Deleting volumes...</span>
+                    <span>{bulkVolumeDeleteProgress.completed} / {bulkVolumeDeleteProgress.total}</span>
+                  </div>
+                  <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                    <div className="bg-red-600 h-2 rounded-full transition-all duration-300" style={{ width: `${(bulkVolumeDeleteProgress.completed / bulkVolumeDeleteProgress.total) * 100}%` }} />
+                  </div>
+                </div>
+                {bulkVolumeDeleteProgress.failed.length > 0 && (
+                  <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                    <p className="text-sm font-medium text-red-600 dark:text-red-400 mb-2">Failed to delete {bulkVolumeDeleteProgress.failed.length} volumes:</p>
+                    <ul className="text-xs text-red-600 dark:text-red-400 space-y-1">
+                      {bulkVolumeDeleteProgress.failed.map((name, idx) => <li key={idx}>• {name}</li>)}
+                    </ul>
+                  </div>
+                )}
+                {bulkVolumeDeleteProgress.completed === bulkVolumeDeleteProgress.total && (
+                  <div className="flex justify-end">
+                    <Button variant="secondary" onClick={() => { setShowBulkVolumeDeleteModal(false); setSelectedVolumeNames(new Set()); setBulkVolumeDeleteProgress(null); }}>
+                      {bulkVolumeDeleteProgress.failed.length > 0 ? "Close" : "Done"}
                     </Button>
                   </div>
                 )}
