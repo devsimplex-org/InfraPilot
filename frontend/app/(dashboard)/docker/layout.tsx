@@ -20,6 +20,7 @@ const tabs = [
   { id: "volumes", label: "Volumes", href: "/docker/volumes" },
   { id: "networks", label: "Networks", href: "/docker/networks" },
   { id: "stacks", label: "Stacks", href: "/docker/stacks" },
+  { id: "deployments", label: "Deployments", href: "/docker/deployments" },
   { id: "logs", label: "Logs", href: "/docker/logs" },
   { id: "registries", label: "Registries", href: "/docker/registries" },
 ];

@@ -1262,7 +1262,7 @@ export function DeployWizard({
                         Your deployment has been created and the security scan pipeline has started.
                       </p>
                       <a
-                        href="/deployments"
+                        href="/docker/deployments"
                         className="inline-flex items-center gap-1 text-sm text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300"
                       >
                         View Deployments

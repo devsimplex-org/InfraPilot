@@ -4362,10 +4362,10 @@ export const api = {
       method: "POST",
     }),
 
-  redeployDeployment: (agentId: string, deploymentId: string, pullLatest: boolean = true) =>
+  redeployDeployment: (agentId: string, deploymentId: string, pullLatest: boolean = true, skipScanning: boolean = false) =>
     fetchAPI<{ id: string; status: string; message: string }>(`/agents/${agentId}/deployments/${deploymentId}/redeploy`, {
       method: "POST",
-      body: JSON.stringify({ pull_latest: pullLatest }),
+      body: JSON.stringify({ pull_latest: pullLatest, skip_scanning: skipScanning }),
     }),
 
   syncDeploymentStatus: (agentId: string) =>
