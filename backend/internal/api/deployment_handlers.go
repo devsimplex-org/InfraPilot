@@ -880,10 +880,12 @@ func (h *Handler) redeployDeployment(c *gin.Context) {
 
 	// Parse request body for redeploy options
 	var req struct {
-		PullLatest bool `json:"pull_latest"`
+		PullLatest   bool `json:"pull_latest"`
+		SkipScanning bool `json:"skip_scanning"`
 	}
 	// Default to true if not specified
 	req.PullLatest = true
+	req.SkipScanning = false
 	if err := c.ShouldBindJSON(&req); err != nil {
 		// If there's no body, that's OK - use defaults
 		h.logger.Debug("No request body for redeploy, using defaults", zap.Error(err))
@@ -970,6 +972,7 @@ func (h *Handler) redeployDeployment(c *gin.Context) {
 
 	h.logger.Info("Redeploy options",
 		zap.Bool("pull_latest", req.PullLatest),
+		zap.Bool("skip_scanning", req.SkipScanning),
 		zap.String("deployment_id", newID.String()),
 	)
 
@@ -985,7 +988,7 @@ func (h *Handler) redeployDeployment(c *gin.Context) {
 
 	// Trigger deployment pipeline asynchronously
 	go h.runDeploymentPipeline(context.Background(), orgID, newID,
-		original.ImageRepository, imageTag, imageDigest, containerConfig, false)
+		original.ImageRepository, imageTag, imageDigest, containerConfig, req.SkipScanning)
 
 	c.JSON(http.StatusOK, gin.H{
 		"id":      newID.String(),

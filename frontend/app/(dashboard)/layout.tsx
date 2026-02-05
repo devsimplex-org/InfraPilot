@@ -76,7 +76,7 @@ const navigationSections: NavigationSection[] = [
     icon: Rocket,
     color: "text-orange-600 dark:text-orange-400",
     items: [
-      { name: "Deployments", href: "/deployments", icon: Package },
+      { name: "Deployments", href: "/docker/deployments", icon: Package },
       { name: "Artifacts", href: "/deploy/artifacts", icon: Box }, // Consolidated: Images, Scans, SBOMs, Registries
       { name: "Vulnerabilities", href: "/vulnerabilities", icon: AlertTriangle },
     ],

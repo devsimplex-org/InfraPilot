@@ -12,6 +12,8 @@ import {
   Globe,
   Download,
   AlertTriangle,
+  Shield,
+  ShieldOff,
 } from "lucide-react";
 import { Deployment } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -20,7 +22,7 @@ interface RedeployWizardProps {
   isOpen: boolean;
   deployment: Deployment | null;
   onClose: () => void;
-  onConfirm: (pullLatest: boolean) => void;
+  onConfirm: (pullLatest: boolean, skipScanning: boolean) => void;
   isLoading?: boolean;
 }
 
@@ -32,11 +34,12 @@ export function RedeployWizard({
   isLoading = false,
 }: RedeployWizardProps) {
   const [pullLatest, setPullLatest] = useState(true);
+  const [skipScanning, setSkipScanning] = useState(false);
 
   if (!deployment) return null;
 
   const handleConfirm = () => {
-    onConfirm(pullLatest);
+    onConfirm(pullLatest, skipScanning);
   };
 
   const getFullImageRef = () => {
@@ -153,7 +156,8 @@ export function RedeployWizard({
             {/* Redeployment Options */}
             <div>
               <h3 className="text-sm font-medium text-white mb-3">Redeployment Options</h3>
-              <div className="bg-zinc-800/50 rounded-lg border border-zinc-700 p-4">
+              <div className="bg-zinc-800/50 rounded-lg border border-zinc-700 p-4 space-y-4">
+                {/* Pull Latest Image */}
                 <label className="flex items-start gap-3 cursor-pointer group">
                   <div className="relative flex items-center">
                     <input
@@ -188,6 +192,51 @@ export function RedeployWizard({
                     </p>
                   </div>
                 </label>
+
+                {/* Security Scanning */}
+                <label className="flex items-start gap-3 cursor-pointer group">
+                  <div className="relative flex items-center">
+                    <input
+                      type="checkbox"
+                      checked={!skipScanning}
+                      onChange={(e) => setSkipScanning(!e.target.checked)}
+                      disabled={isLoading}
+                      className="w-5 h-5 rounded border-zinc-600 bg-zinc-800 text-indigo-500 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <div className="text-sm font-medium text-white group-hover:text-indigo-300 transition-colors">
+                        Security Scanning
+                      </div>
+                      {deployment?.environment === "prod" && (
+                        <span className="text-xs font-normal text-amber-400">(Recommended for Production)</span>
+                      )}
+                    </div>
+                    <p className="text-xs text-zinc-400 mt-1">
+                      {!skipScanning ? (
+                        <>
+                          <Shield className="h-3 w-3 inline mr-1 text-emerald-400" />
+                          <span className="text-emerald-400">
+                            Will scan image for vulnerabilities before deployment
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <ShieldOff className="h-3 w-3 inline mr-1 text-amber-400" />
+                          <span className="text-amber-400">
+                            Security scanning disabled - image will deploy immediately
+                          </span>
+                          {deployment?.environment === "prod" && (
+                            <span className="block mt-1 text-red-400 font-medium">
+                              Warning: Deploying to production without scanning is not recommended
+                            </span>
+                          )}
+                        </>
+                      )}
+                    </p>
+                  </div>
+                </label>
               </div>
             </div>
 
@@ -206,7 +255,11 @@ export function RedeployWizard({
                       {pullLatest ? "Latest image will be pulled" : "Cached image will be used"}
                     </li>
                     <li>A new container will be created with the same configuration</li>
-                    <li>Full deployment pipeline will run (scan, policy check, deploy)</li>
+                    <li>
+                      {skipScanning
+                        ? "Container will deploy immediately (scanning skipped)"
+                        : "Full deployment pipeline will run (scan, policy check, deploy)"}
+                    </li>
                   </ul>
                   <p className="text-xs text-indigo-200/60 mt-2">
                     Expected downtime: 10-15 seconds

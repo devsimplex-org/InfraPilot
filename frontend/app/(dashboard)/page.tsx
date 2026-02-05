@@ -157,7 +157,7 @@ export default function DashboardPage() {
           iconColor="text-purple-600 dark:text-purple-400"
           trend={runningDeployments === totalDeployments && totalDeployments > 0 ? "up" : undefined}
           trendValue={runningDeployments === totalDeployments && totalDeployments > 0 ? "All healthy" : undefined}
-          onClick={() => router.push("/deployments")}
+          onClick={() => router.push("/docker/deployments")}
         />
 
         <StatCard

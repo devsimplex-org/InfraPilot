@@ -70,9 +70,9 @@ export default function DeploymentsPage() {
 
   // Redeploy mutation
   const redeployMutation = useMutation({
-    mutationFn: ({ deploymentId, pullLatest }: { deploymentId: string; pullLatest: boolean }) => {
+    mutationFn: ({ deploymentId, pullLatest, skipScanning }: { deploymentId: string; pullLatest: boolean; skipScanning: boolean }) => {
       if (!selectedAgent) throw new Error("No agent selected");
-      return api.redeployDeployment(selectedAgent, deploymentId, pullLatest);
+      return api.redeployDeployment(selectedAgent, deploymentId, pullLatest, skipScanning);
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["deployments", selectedAgent] });
@@ -1477,10 +1477,10 @@ export default function DeploymentsPage() {
           setRedeployWizardOpen(false);
           setRedeployTarget(null);
         }}
-        onConfirm={(pullLatest) => {
+        onConfirm={(pullLatest, skipScanning) => {
           if (!redeployTarget) return;
           setRedeployingId(redeployTarget.id);
-          redeployMutation.mutate({ deploymentId: redeployTarget.id, pullLatest });
+          redeployMutation.mutate({ deploymentId: redeployTarget.id, pullLatest, skipScanning });
         }}
         isLoading={redeployMutation.isPending}
       />

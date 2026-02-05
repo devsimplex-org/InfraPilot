@@ -141,7 +141,7 @@ const defaultNavigationItems: CommandItem[] = [
     label: "Deployments",
     description: "Deployment history and status",
     icon: Package,
-    href: "/deployments",
+    href: "/docker/deployments",
     section: "Deploy",
     keywords: ["deploy", "deployment", "release"],
   },
