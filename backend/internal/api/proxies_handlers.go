@@ -1260,23 +1260,36 @@ func generateNginxConfig(proxy ProxyHost, headers SecurityHeaders) string {
 		if proxy.SSLKeyPath != nil && *proxy.SSLKeyPath != "" {
 			keyPath = *proxy.SSLKeyPath
 		}
-		// If no explicit paths, check for wildcard cert at parent domain for subdomains
+		// If no explicit paths, determine the correct certificate to use
 		if certPath == "" {
-			parts := strings.Split(proxy.Domain, ".")
-			if len(parts) > 2 {
-				// It's a subdomain - check if wildcard cert exists for parent domain
-				parentDomain := strings.Join(parts[1:], ".")
-				wildcardCertPath := fmt.Sprintf("/etc/letsencrypt/live/%s/fullchain.pem", parentDomain)
-				if _, err := os.Stat(wildcardCertPath); err == nil {
-					// Wildcard cert exists - use it
-					certPath = wildcardCertPath
-					keyPath = fmt.Sprintf("/etc/letsencrypt/live/%s/privkey.pem", parentDomain)
+			// First, check if this exact domain has its own certificate
+			exactCertPath := "/etc/letsencrypt/live/" + proxy.Domain + "/fullchain.pem"
+			exactKeyPath := "/etc/letsencrypt/live/" + proxy.Domain + "/privkey.pem"
+
+			if _, err := os.Stat(exactCertPath); err == nil {
+				// Domain has its own certificate - use it
+				certPath = exactCertPath
+				keyPath = exactKeyPath
+			} else {
+				// No exact cert, check for wildcard cert at parent domain for subdomains
+				parts := strings.Split(proxy.Domain, ".")
+				if len(parts) > 2 {
+					// It's a subdomain - check if wildcard cert exists for parent domain
+					// Note: We only use parent cert if this domain doesn't have its own cert
+					parentDomain := strings.Join(parts[1:], ".")
+					wildcardCertPath := fmt.Sprintf("/etc/letsencrypt/live/%s/fullchain.pem", parentDomain)
+					if _, err := os.Stat(wildcardCertPath); err == nil {
+						// Parent domain has a cert - use it (assuming it's a wildcard)
+						// TODO: Ideally verify it's actually a wildcard cert covering this subdomain
+						certPath = wildcardCertPath
+						keyPath = fmt.Sprintf("/etc/letsencrypt/live/%s/privkey.pem", parentDomain)
+					}
 				}
-			}
-			// If no wildcard cert found, use exact domain path
-			if certPath == "" {
-				certPath = "/etc/letsencrypt/live/" + proxy.Domain + "/fullchain.pem"
-				keyPath = "/etc/letsencrypt/live/" + proxy.Domain + "/privkey.pem"
+				// If still no cert found, default to exact domain path (will fail if cert doesn't exist)
+				if certPath == "" {
+					certPath = exactCertPath
+					keyPath = exactKeyPath
+				}
 			}
 		}
 
