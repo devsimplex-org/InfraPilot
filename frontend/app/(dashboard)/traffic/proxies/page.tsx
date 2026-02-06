@@ -109,6 +109,15 @@ export default function ProxiesPage() {
 
   const activeAgents = agents?.filter((a) => a.status === "active") || [];
 
+  // Build agent options for FilterToolbar
+  const agentOptions: SelectOption[] = agents
+    ? agents.map((a) => ({
+        value: a.id,
+        label: `${a.name} (${a.status})`,
+        disabled: a.status !== "active",
+      }))
+    : [];
+
   // Auto-select first active agent
   useEffect(() => {
     if (!selectedAgent && activeAgents.length > 0) {
