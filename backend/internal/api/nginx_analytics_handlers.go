@@ -249,17 +249,33 @@ func (h *Handler) bulkInsertNginxLogs(ctx context.Context, orgID, agentID uuid.U
 // GetTrafficAnalytics returns time-series analytics data
 // GET /api/v1/traffic/analytics
 func (h *Handler) GetTrafficAnalytics(c *gin.Context) {
-	orgID := c.GetString("org_id")
-	orgUUID, _ := uuid.Parse(orgID)
+	// Get org_id - middleware stores it as uuid.UUID
+	orgUUID, _ := c.Get("org_id")
+	orgID := orgUUID.(uuid.UUID)
 
 	// Parse query params
 	interval := c.DefaultQuery("interval", "1h")
-	hours, _ := strconv.Atoi(c.DefaultQuery("hours", "24"))
-	if hours < 1 {
-		hours = 24
-	}
-	if hours > 720 { // Max 30 days
-		hours = 720
+
+	// Support both hours and minutes parameters
+	var duration time.Duration
+	if minutesStr := c.Query("minutes"); minutesStr != "" {
+		minutes, _ := strconv.Atoi(minutesStr)
+		if minutes < 1 {
+			minutes = 5
+		}
+		if minutes > 1440 { // Max 24 hours in minutes
+			minutes = 1440
+		}
+		duration = time.Duration(minutes) * time.Minute
+	} else {
+		hours, _ := strconv.Atoi(c.DefaultQuery("hours", "24"))
+		if hours < 1 {
+			hours = 24
+		}
+		if hours > 720 { // Max 30 days
+			hours = 720
+		}
+		duration = time.Duration(hours) * time.Hour
 	}
 
 	agentIDStr := c.Query("agent_id")
@@ -272,7 +288,7 @@ func (h *Handler) GetTrafficAnalytics(c *gin.Context) {
 	}
 
 	endTime := time.Now()
-	startTime := endTime.Add(-time.Duration(hours) * time.Hour)
+	startTime := endTime.Add(-duration)
 
 	// Select the appropriate materialized view based on interval
 	var viewName string
@@ -315,7 +331,7 @@ func (h *Handler) GetTrafficAnalytics(c *gin.Context) {
 			WHERE org_id = $1 AND agent_id = $2 AND bucket >= $3 AND bucket <= $4
 			GROUP BY bucket
 			ORDER BY bucket ASC
-		`, viewName), orgUUID, agentID, startTime, endTime)
+		`, viewName), orgID, agentID, startTime, endTime)
 	} else {
 		rows, err = h.db.Query(ctx, fmt.Sprintf(`
 			SELECT
@@ -336,7 +352,7 @@ func (h *Handler) GetTrafficAnalytics(c *gin.Context) {
 			WHERE org_id = $1 AND bucket >= $2 AND bucket <= $3
 			GROUP BY bucket
 			ORDER BY bucket ASC
-		`, viewName), orgUUID, startTime, endTime)
+		`, viewName), orgID, startTime, endTime)
 	}
 
 	if err != nil {
@@ -382,12 +398,27 @@ func (h *Handler) GetTrafficAnalytics(c *gin.Context) {
 // GetTrafficAnalyticsSummary returns summary statistics
 // GET /api/v1/traffic/analytics/summary
 func (h *Handler) GetTrafficAnalyticsSummary(c *gin.Context) {
-	orgID := c.GetString("org_id")
-	orgUUID, _ := uuid.Parse(orgID)
+	// Get org_id - middleware stores it as uuid.UUID
+	orgUUIDVal, _ := c.Get("org_id")
+	orgID := orgUUIDVal.(uuid.UUID)
 
-	hours, _ := strconv.Atoi(c.DefaultQuery("hours", "24"))
-	if hours < 1 {
-		hours = 24
+	// Support both hours and minutes parameters
+	var duration time.Duration
+	var durationSeconds float64
+	if minutesStr := c.Query("minutes"); minutesStr != "" {
+		minutes, _ := strconv.Atoi(minutesStr)
+		if minutes < 1 {
+			minutes = 5
+		}
+		duration = time.Duration(minutes) * time.Minute
+		durationSeconds = float64(minutes * 60)
+	} else {
+		hours, _ := strconv.Atoi(c.DefaultQuery("hours", "24"))
+		if hours < 1 {
+			hours = 24
+		}
+		duration = time.Duration(hours) * time.Hour
+		durationSeconds = float64(hours * 3600)
 	}
 
 	agentIDStr := c.Query("agent_id")
@@ -400,7 +431,7 @@ func (h *Handler) GetTrafficAnalyticsSummary(c *gin.Context) {
 	}
 
 	endTime := time.Now()
-	startTime := endTime.Add(-time.Duration(hours) * time.Hour)
+	startTime := endTime.Add(-duration)
 
 	ctx := c.Request.Context()
 
@@ -423,7 +454,7 @@ func (h *Handler) GetTrafficAnalyticsSummary(c *gin.Context) {
 				COALESCE(SUM(count_5xx), 0)
 			FROM nginx_stats_1m
 			WHERE org_id = $1 AND agent_id = $2 AND bucket >= $3 AND bucket <= $4
-		`, orgUUID, agentID, startTime, endTime).Scan(
+		`, orgID, agentID, startTime, endTime).Scan(
 			&summary.TotalRequests,
 			&summary.TotalBytes,
 			&summary.UniqueVisitors,
@@ -450,7 +481,7 @@ func (h *Handler) GetTrafficAnalyticsSummary(c *gin.Context) {
 				COALESCE(SUM(count_5xx), 0)
 			FROM nginx_stats_1m
 			WHERE org_id = $1 AND bucket >= $2 AND bucket <= $3
-		`, orgUUID, startTime, endTime).Scan(
+		`, orgID, startTime, endTime).Scan(
 			&summary.TotalRequests,
 			&summary.TotalBytes,
 			&summary.UniqueVisitors,
@@ -475,11 +506,18 @@ func (h *Handler) GetTrafficAnalyticsSummary(c *gin.Context) {
 		summary.ErrorRate = float64(summary.Count4xx+summary.Count5xx) / float64(summary.TotalRequests) * 100
 	}
 
-	durationSeconds := float64(hours * 3600)
 	if durationSeconds > 0 {
 		summary.RequestsPerSecond = float64(summary.TotalRequests) / durationSeconds
 		summary.BytesPerSecond = float64(summary.TotalBytes) / durationSeconds
 	}
+
+	h.logger.Info("Analytics summary response",
+		zap.Int64("total_requests", summary.TotalRequests),
+		zap.Int64("total_bytes", summary.TotalBytes),
+		zap.Int64("count_4xx", summary.Count4xx),
+		zap.Time("start_time", startTime),
+		zap.Time("end_time", endTime),
+	)
 
 	c.JSON(http.StatusOK, summary)
 }
@@ -487,12 +525,24 @@ func (h *Handler) GetTrafficAnalyticsSummary(c *gin.Context) {
 // GetTopPaths returns top paths by request count
 // GET /api/v1/traffic/analytics/top-paths
 func (h *Handler) GetTopPaths(c *gin.Context) {
-	orgID := c.GetString("org_id")
-	orgUUID, _ := uuid.Parse(orgID)
+	// Get org_id - middleware stores it as uuid.UUID
+	orgUUIDVal, _ := c.Get("org_id")
+	orgID := orgUUIDVal.(uuid.UUID)
 
-	hours, _ := strconv.Atoi(c.DefaultQuery("hours", "24"))
-	if hours < 1 {
-		hours = 24
+	// Support both hours and minutes parameters
+	var duration time.Duration
+	if minutesStr := c.Query("minutes"); minutesStr != "" {
+		minutes, _ := strconv.Atoi(minutesStr)
+		if minutes < 1 {
+			minutes = 5
+		}
+		duration = time.Duration(minutes) * time.Minute
+	} else {
+		hours, _ := strconv.Atoi(c.DefaultQuery("hours", "24"))
+		if hours < 1 {
+			hours = 24
+		}
+		duration = time.Duration(hours) * time.Hour
 	}
 
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
@@ -513,7 +563,7 @@ func (h *Handler) GetTopPaths(c *gin.Context) {
 	}
 
 	endTime := time.Now()
-	startTime := endTime.Add(-time.Duration(hours) * time.Hour)
+	startTime := endTime.Add(-duration)
 
 	ctx := c.Request.Context()
 
@@ -537,7 +587,7 @@ func (h *Handler) GetTopPaths(c *gin.Context) {
 			GROUP BY path
 			ORDER BY total_requests DESC
 			LIMIT $5
-		`, orgUUID, agentID, startTime, endTime, limit)
+		`, orgID, agentID, startTime, endTime, limit)
 	} else {
 		rows, err = h.db.Query(ctx, `
 			SELECT
@@ -554,7 +604,7 @@ func (h *Handler) GetTopPaths(c *gin.Context) {
 			GROUP BY path
 			ORDER BY total_requests DESC
 			LIMIT $4
-		`, orgUUID, startTime, endTime, limit)
+		`, orgID, startTime, endTime, limit)
 	}
 
 	if err != nil {
@@ -598,12 +648,24 @@ func (h *Handler) GetTopPaths(c *gin.Context) {
 // GetStatusCodeDistribution returns status code breakdown
 // GET /api/v1/traffic/analytics/status-codes
 func (h *Handler) GetStatusCodeDistribution(c *gin.Context) {
-	orgID := c.GetString("org_id")
-	orgUUID, _ := uuid.Parse(orgID)
+	// Get org_id - middleware stores it as uuid.UUID
+	orgUUIDVal, _ := c.Get("org_id")
+	orgID := orgUUIDVal.(uuid.UUID)
 
-	hours, _ := strconv.Atoi(c.DefaultQuery("hours", "24"))
-	if hours < 1 {
-		hours = 24
+	// Support both hours and minutes parameters
+	var duration time.Duration
+	if minutesStr := c.Query("minutes"); minutesStr != "" {
+		minutes, _ := strconv.Atoi(minutesStr)
+		if minutes < 1 {
+			minutes = 5
+		}
+		duration = time.Duration(minutes) * time.Minute
+	} else {
+		hours, _ := strconv.Atoi(c.DefaultQuery("hours", "24"))
+		if hours < 1 {
+			hours = 24
+		}
+		duration = time.Duration(hours) * time.Hour
 	}
 
 	agentIDStr := c.Query("agent_id")
@@ -616,7 +678,7 @@ func (h *Handler) GetStatusCodeDistribution(c *gin.Context) {
 	}
 
 	endTime := time.Now()
-	startTime := endTime.Add(-time.Duration(hours) * time.Hour)
+	startTime := endTime.Add(-duration)
 
 	ctx := c.Request.Context()
 
@@ -633,7 +695,7 @@ func (h *Handler) GetStatusCodeDistribution(c *gin.Context) {
 			WHERE org_id = $1 AND agent_id = $2 AND time >= $3 AND time <= $4
 			GROUP BY status_code
 			ORDER BY count DESC
-		`, orgUUID, agentID, startTime, endTime)
+		`, orgID, agentID, startTime, endTime)
 	} else {
 		rows, err = h.db.Query(ctx, `
 			SELECT
@@ -643,7 +705,7 @@ func (h *Handler) GetStatusCodeDistribution(c *gin.Context) {
 			WHERE org_id = $1 AND time >= $2 AND time <= $3
 			GROUP BY status_code
 			ORDER BY count DESC
-		`, orgUUID, startTime, endTime)
+		`, orgID, startTime, endTime)
 	}
 
 	if err != nil {
