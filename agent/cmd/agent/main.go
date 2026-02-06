@@ -176,6 +176,28 @@ func main() {
 		logger.Info("Log persistence enabled - streaming logs to backend")
 	}
 
+	// Start nginx log collector (sends nginx access logs to backend for analytics)
+	if cfg.NginxLogAnalytics && cfg.IsManagedProxy() {
+		nginxConfig := logstreamer.NginxCollectorConfig{
+			LogPath:          cfg.NginxAccessLogPath,
+			BackendURL:       cfg.BackendHTTPURL,
+			AgentID:          cfg.AgentID,
+			BufferSize:       cfg.NginxLogBufferSize,
+			FlushInterval:    time.Duration(cfg.NginxLogFlushInterval) * time.Second,
+			SkipHealthChecks: cfg.NginxLogSkipHealth,
+			NormalizePaths:   false, // Keep original paths for detailed analytics
+		}
+		nginxCollector := logstreamer.NewNginxCollector(nginxConfig, logger)
+		go func() {
+			if err := nginxCollector.Start(ctx); err != nil {
+				logger.Error("Nginx log collector error", zap.Error(err))
+			}
+		}()
+		logger.Info("Nginx log analytics enabled - streaming access logs to backend",
+			zap.String("log_path", cfg.NginxAccessLogPath),
+		)
+	}
+
 	// Start certificate renewal checker (runs daily)
 	if certManager != nil {
 		go func() {
