@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"regexp"
 	"sort"
 	"strconv"
@@ -546,7 +547,6 @@ func (h *Handler) getNginxLogsReal(c *gin.Context) {
 	h.logger.Debug("Found nginx container", zap.String("id", nginxContainerID), zap.String("name", nginxContainerName))
 
 	// Support per-domain log files if domain is specified
-	domain := c.Query("domain")
 	var logs []LogEntry
 
 	if domain != "" {
@@ -775,6 +775,96 @@ func (h *Handler) getNginxLogsFromFile(ctx context.Context, docker *client.Clien
 		zap.Int("count", len(logs)),
 		zap.Int("stdout_bytes", stdout.Len()),
 		zap.Int("stderr_bytes", stderr.Len()),
+	)
+
+	return logs, nil
+}
+
+// getNginxLogsFromLocalFile reads nginx logs directly from the local filesystem
+// This is used in all-in-one mode where nginx runs in the same container as the backend
+func (h *Handler) getNginxLogsFromLocalFile(logFile, logType string, tail int) ([]LogEntry, error) {
+	file, err := os.Open(logFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open log file: %w", err)
+	}
+	defer file.Close()
+
+	// Read all lines then take the last N (tail)
+	var allLines []string
+	scanner := bufio.NewScanner(file)
+	// Increase buffer size for long log lines
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line != "" {
+			allLines = append(allLines, line)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read log file: %w", err)
+	}
+
+	// Get the last N lines
+	startIdx := 0
+	if len(allLines) > tail {
+		startIdx = len(allLines) - tail
+	}
+	tailLines := allLines[startIdx:]
+
+	var logs []LogEntry
+	for _, line := range tailLines {
+		entry := LogEntry{
+			Timestamp:     time.Now(),
+			Source:        "nginx",
+			ContainerName: "nginx-local",
+			Stream:        logType,
+			Level:         "info",
+			Message:       line,
+		}
+
+		// Parse nginx log format to extract timestamp and level
+		if logType == "access" {
+			// Try to parse timestamp from nginx combined log format
+			// Format: 192.168.1.1 - - [02/Jan/2006:15:04:05 +0000] "GET / HTTP/1.1" 200 ...
+			if idx := strings.Index(line, "["); idx != -1 {
+				if endIdx := strings.Index(line[idx:], "]"); endIdx != -1 {
+					timeStr := line[idx+1 : idx+endIdx]
+					// Parse nginx time format: 02/Jan/2006:15:04:05 +0000
+					if t, err := time.Parse("02/Jan/2006:15:04:05 -0700", timeStr); err == nil {
+						entry.Timestamp = t
+					}
+				}
+			}
+			// Detect error status codes (4xx, 5xx)
+			if strings.Contains(line, "\" 4") || strings.Contains(line, "\" 5") {
+				entry.Level = "warn"
+			}
+		} else {
+			// Error log format: 2006/01/02 15:04:05 [error] ...
+			if len(line) >= 19 {
+				timeStr := line[:19]
+				if t, err := time.Parse("2006/01/02 15:04:05", timeStr); err == nil {
+					entry.Timestamp = t
+				}
+			}
+			// Detect log level from nginx error log
+			if strings.Contains(line, "[error]") || strings.Contains(line, "[emerg]") || strings.Contains(line, "[crit]") {
+				entry.Level = "error"
+			} else if strings.Contains(line, "[warn]") {
+				entry.Level = "warn"
+			}
+		}
+
+		logs = append(logs, entry)
+	}
+
+	h.logger.Debug("Read logs from local file",
+		zap.String("file", logFile),
+		zap.Int("total_lines", len(allLines)),
+		zap.Int("returned", len(logs)),
 	)
 
 	return logs, nil
