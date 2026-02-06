@@ -731,7 +731,7 @@ export default function TrafficLogsPage() {
             </Badge>
           )}
           {ipFilter && (
-            <Badge color="cyan" size="sm" className="gap-1">
+            <Badge color="gray" size="sm" className="gap-1">
               IP: {ipFilter}
               <button onClick={() => setIpFilter("")}>
                 <X className="h-3 w-3" />
