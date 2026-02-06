@@ -112,7 +112,7 @@ LABEL org.opencontainers.image.revision=$VCS_REF
 
 
 
-# Install runtime dependencies (including TimescaleDB for nginx log analytics)
+# Install runtime dependencies (including PostgreSQL 17 + TimescaleDB for nginx log analytics)
 RUN apk add --no-cache \
     ca-certificates \
     tzdata \
@@ -121,8 +121,9 @@ RUN apk add --no-cache \
     npm \
     docker-cli \
     supervisor \
-    postgresql16 \
-    postgresql16-contrib \
+    postgresql17 \
+    postgresql17-contrib \
+    postgresql-timescaledb \
     redis \
     curl \
     wget \
@@ -130,15 +131,6 @@ RUN apk add --no-cache \
     su-exec \
     apache2-utils \
     && rm -rf /var/cache/apk/*
-
-# Install TimescaleDB for time-series nginx log analytics
-# Using the official TimescaleDB Alpine packages
-RUN apk add --no-cache --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community \
-    timescaledb \
-    || echo "TimescaleDB package not found in community repo, trying alternative..." \
-    && (wget -q https://packagecloud.io/timescale/timescaledb/packages/alpine/v3.21/timescaledb-2-postgresql-16-2.16.1-r0.apk/download.apk -O /tmp/timescaledb.apk \
-    && apk add --allow-untrusted /tmp/timescaledb.apk \
-    && rm -f /tmp/timescaledb.apk) || echo "TimescaleDB will be loaded as extension if available"
 
 # Install Trivy for vulnerability scanning
 RUN wget -q -O /tmp/install-trivy.sh https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh && \

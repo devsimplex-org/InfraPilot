@@ -29,7 +29,7 @@ const LOG_LEVEL_OPTIONS: ToggleOption[] = [
   { value: "error", label: "Errors", color: "red" },
   { value: "warn", label: "Warnings", color: "yellow" },
   { value: "info", label: "Info", color: "blue" },
-  { value: "debug", label: "Debug", color: "gray" },
+  { value: "debug", label: "Debug" },
 ];
 
 // Lines selector options
@@ -217,7 +217,6 @@ export default function DockerLogsPage() {
         showAutoRefresh={true}
         autoRefresh={autoRefresh}
         onAutoRefreshChange={setAutoRefresh}
-        autoRefreshInterval={5000}
         showRefresh={true}
         onRefresh={handleRefresh}
         showExport={true}
@@ -302,80 +301,78 @@ export default function DockerLogsPage() {
           )}
         </div>
 
-            {/* Log Entries */}
-            <div className="h-[calc(100vh-480px)] min-h-[400px] overflow-auto">
-              {isLoading ? (
-                <div className="flex items-center justify-center h-64">
-                  <Spinner size="lg" label="Loading logs..." />
-                </div>
-              ) : filteredLogs && filteredLogs.length > 0 ? (
-                <div className="divide-y divide-gray-100 dark:divide-gray-800">
-                  {filteredLogs.map((log, index) => (
-                    <div
-                      key={`${log.timestamp}-${index}`}
-                      onClick={() => setSelectedLog(log)}
-                      className={cn(
-                        "group flex items-start gap-4 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer",
-                        log.level === "error" && "bg-red-50/50 dark:bg-red-900/10",
-                        log.level === "warn" && "bg-amber-50/50 dark:bg-amber-900/10"
-                      )}
-                    >
-                      {/* Level Icon */}
-                      <div className="flex-shrink-0 pt-0.5">
-                        {getLevelIcon(log.level)}
-                      </div>
-
-                      {/* Timestamp */}
-                      <div className="flex-shrink-0 w-24 text-right">
-                        <div className="text-xs font-mono text-gray-500 dark:text-gray-400">
-                          {formatTimestamp(log.timestamp)}
-                        </div>
-                      </div>
-
-                      {/* Level Badge */}
-                      <div className="flex-shrink-0 w-16">
-                        <Badge color={getLevelBadgeColor(log.level)} size="sm">
-                          {log.level.toUpperCase()}
-                        </Badge>
-                      </div>
-
-                      {/* Container */}
-                      <div className="flex-shrink-0 w-32">
-                        {log.container_name ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-xs font-medium rounded truncate max-w-full">
-                            <Container className="h-3 w-3 flex-shrink-0" />
-                            <span className="truncate">{log.container_name}</span>
-                          </span>
-                        ) : (
-                          <span className="text-xs text-gray-400">-</span>
-                        )}
-                      </div>
-
-                      {/* Message */}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-gray-900 dark:text-gray-100 font-mono break-all line-clamp-2 group-hover:line-clamp-none transition-all">
-                          {log.message}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                  <div ref={logsEndRef} />
-                </div>
-              ) : (
-                <div className="py-16">
-                  <EmptyState
-                    icon={FileText}
-                    title="No logs found"
-                    description={
-                      search || selectedContainer !== "all"
-                        ? "Try adjusting your filters"
-                        : "No log entries available"
-                    }
-                  />
-                </div>
-              )}
+        {/* Log Entries */}
+        <div className="h-[calc(100vh-420px)] min-h-[400px] overflow-auto">
+          {isLoading ? (
+            <div className="flex items-center justify-center h-64">
+              <Spinner size="lg" label="Loading logs..." />
             </div>
-          </div>
+          ) : filteredLogs && filteredLogs.length > 0 ? (
+            <div className="divide-y divide-gray-100 dark:divide-gray-800">
+              {filteredLogs.map((log, index) => (
+                <div
+                  key={`${log.timestamp}-${index}`}
+                  onClick={() => setSelectedLog(log)}
+                  className={cn(
+                    "group flex items-start gap-4 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer",
+                    log.level === "error" && "bg-red-50/50 dark:bg-red-900/10",
+                    log.level === "warn" && "bg-amber-50/50 dark:bg-amber-900/10"
+                  )}
+                >
+                  {/* Level Icon */}
+                  <div className="flex-shrink-0 pt-0.5">
+                    {getLevelIcon(log.level)}
+                  </div>
+
+                  {/* Timestamp */}
+                  <div className="flex-shrink-0 w-24 text-right">
+                    <div className="text-xs font-mono text-gray-500 dark:text-gray-400">
+                      {formatTimestamp(log.timestamp)}
+                    </div>
+                  </div>
+
+                  {/* Level Badge */}
+                  <div className="flex-shrink-0 w-16">
+                    <Badge color={getLevelBadgeColor(log.level)} size="sm">
+                      {log.level.toUpperCase()}
+                    </Badge>
+                  </div>
+
+                  {/* Container */}
+                  <div className="flex-shrink-0 w-32">
+                    {log.container_name ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-xs font-medium rounded truncate max-w-full">
+                        <Container className="h-3 w-3 flex-shrink-0" />
+                        <span className="truncate">{log.container_name}</span>
+                      </span>
+                    ) : (
+                      <span className="text-xs text-gray-400">-</span>
+                    )}
+                  </div>
+
+                  {/* Message */}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-gray-900 dark:text-gray-100 font-mono break-all line-clamp-2 group-hover:line-clamp-none transition-all">
+                      {log.message}
+                    </p>
+                  </div>
+                </div>
+              ))}
+              <div ref={logsEndRef} />
+            </div>
+          ) : (
+            <div className="py-16">
+              <EmptyState
+                icon={FileText}
+                title="No logs found"
+                description={
+                  search || selectedContainer !== "all"
+                    ? "Try adjusting your filters"
+                    : "No log entries available"
+                }
+              />
+            </div>
+          )}
         </div>
       </div>
 
