@@ -444,7 +444,46 @@ func (h *Handler) getNginxLogsReal(c *gin.Context) {
 	}
 
 	logType := c.DefaultQuery("type", "access") // access or error
+	domain := c.Query("domain")
 
+	// Check if running in all-in-one mode (nginx running locally, not in a container)
+	// by checking if local nginx log file exists
+	var localLogFile string
+	if domain != "" {
+		if logType == "error" {
+			localLogFile = fmt.Sprintf("/var/log/nginx/domains/%s.error.log", domain)
+		} else {
+			localLogFile = fmt.Sprintf("/var/log/nginx/domains/%s.access.log", domain)
+		}
+	} else {
+		if logType == "error" {
+			localLogFile = "/var/log/nginx/error.log"
+		} else {
+			localLogFile = "/var/log/nginx/access.log"
+		}
+	}
+
+	// Try to read from local filesystem first (all-in-one mode)
+	if _, err := os.Stat(localLogFile); err == nil {
+		h.logger.Debug("Reading nginx logs from local filesystem (all-in-one mode)",
+			zap.String("file", localLogFile))
+
+		logs, err := h.getNginxLogsFromLocalFile(localLogFile, logType, tail)
+		if err != nil {
+			h.logger.Error("Failed to read local nginx logs", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read logs"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"logs":  logs,
+			"type":  logType,
+			"count": len(logs),
+		})
+		return
+	}
+
+	// Fall back to Docker container mode
 	// Create Docker client
 	docker, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
@@ -456,7 +495,7 @@ func (h *Handler) getNginxLogsReal(c *gin.Context) {
 
 	ctx := context.Background()
 
-	// Find nginx container
+	// Find nginx container - prefer "infrapilot" container over dev containers
 	containers, err := docker.ContainerList(ctx, container.ListOptions{})
 	if err != nil {
 		h.logger.Error("Failed to list containers", zap.Error(err))
@@ -468,7 +507,11 @@ func (h *Handler) getNginxLogsReal(c *gin.Context) {
 	var nginxContainerName string
 	for _, cont := range containers {
 		for _, name := range cont.Names {
-			if strings.Contains(name, "nginx") {
+			// Skip dev nginx containers when looking for production nginx
+			if strings.Contains(name, "infrapilot-nginx") || strings.Contains(name, "-dev-") {
+				continue
+			}
+			if strings.Contains(name, "nginx") || strings.Contains(name, "infrapilot") {
 				nginxContainerID = cont.ID
 				nginxContainerName = strings.TrimPrefix(name, "/")
 				break
@@ -476,6 +519,22 @@ func (h *Handler) getNginxLogsReal(c *gin.Context) {
 		}
 		if nginxContainerID != "" {
 			break
+		}
+	}
+
+	// If no production nginx found, try any nginx container
+	if nginxContainerID == "" {
+		for _, cont := range containers {
+			for _, name := range cont.Names {
+				if strings.Contains(name, "nginx") {
+					nginxContainerID = cont.ID
+					nginxContainerName = strings.TrimPrefix(name, "/")
+					break
+				}
+			}
+			if nginxContainerID != "" {
+				break
+			}
 		}
 	}
 
