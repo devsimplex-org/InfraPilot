@@ -681,6 +681,9 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 
 		// Log ingestion (agents push logs)
 		v1.POST("/logs/ingest", h.IngestLogs)
+
+		// Nginx log ingestion (agents push nginx access logs)
+		v1.POST("/logs/nginx/ingest", h.IngestNginxLogs)
 	}
 
 	// Protected log routes (require auth)
@@ -694,6 +697,17 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 		logs.PUT("/retention", h.RequireRole(auth.RoleSuperAdmin), h.UpdateLogRetentionConfig)
 		logs.GET("/stats", h.GetLogStats)
 		logs.POST("/cleanup", h.RequireRole(auth.RoleSuperAdmin), h.RunLogCleanup)
+	}
+
+	// Traffic analytics routes (protected, require auth)
+	analytics := v1.Group("/traffic/analytics")
+	analytics.Use(h.AuthMiddleware())
+	analytics.Use(h.OrgMiddleware())
+	{
+		analytics.GET("", h.GetTrafficAnalytics)
+		analytics.GET("/summary", h.GetTrafficAnalyticsSummary)
+		analytics.GET("/top-paths", h.GetTopPaths)
+		analytics.GET("/status-codes", h.GetStatusCodeDistribution)
 	}
 }
 
