@@ -117,11 +117,14 @@ interface StatusCodeDistribution {
 // =============================================================================
 
 const TIME_RANGES = [
-  { label: "1h", value: 1, interval: "1m" },
-  { label: "6h", value: 6, interval: "5m" },
-  { label: "24h", value: 24, interval: "1h" },
-  { label: "7d", value: 168, interval: "1h" },
-  { label: "30d", value: 720, interval: "1d" },
+  { label: "5m", value: 5, unit: "minutes", interval: "1m" },
+  { label: "15m", value: 15, unit: "minutes", interval: "1m" },
+  { label: "30m", value: 30, unit: "minutes", interval: "1m" },
+  { label: "1h", value: 1, unit: "hours", interval: "1m" },
+  { label: "6h", value: 6, unit: "hours", interval: "5m" },
+  { label: "24h", value: 24, unit: "hours", interval: "1h" },
+  { label: "7d", value: 168, unit: "hours", interval: "1h" },
+  { label: "30d", value: 720, unit: "hours", interval: "1d" },
 ];
 
 const STATUS_COLORS = {
