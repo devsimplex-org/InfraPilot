@@ -5,20 +5,11 @@ import { useQuery } from "@tanstack/react-query";
 import {
   FileText,
   AlertTriangle,
-  RefreshCw,
-  Download,
-  Search,
-  Clock,
-  Globe,
   AlertCircle,
   CheckCircle,
-  Filter,
-  ChevronDown,
   X,
   Copy,
   Check,
-  Play,
-  Pause,
   Terminal,
   ArrowDown,
   FileJson,
@@ -33,13 +24,46 @@ import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
-import { Input, Button } from "@/components/ui/page-layout";
 import { SlideOver } from "@/components/ui/SlideOver";
 import { cn } from "@/lib/utils";
+import {
+  FilterToolbar,
+  SelectOption,
+  ToggleOption,
+  DEFAULT_LINE_OPTIONS,
+} from "@/components/ui/FilterToolbar";
 
 type LogType = "access" | "error";
 type LogLevel = "all" | "info" | "warn" | "error";
-type ExportFormat = "txt" | "json" | "csv";
+
+// Toggle options for log type
+const LOG_TYPE_OPTIONS: ToggleOption[] = [
+  { value: "access", label: "Access Logs" },
+  { value: "error", label: "Error Logs" },
+];
+
+// Status filter options for access logs
+const ACCESS_STATUS_OPTIONS: ToggleOption[] = [
+  { value: "all", label: "All" },
+  { value: "info", label: "2xx/3xx", color: "green" },
+  { value: "warn", label: "4xx", color: "yellow" },
+  { value: "error", label: "5xx", color: "red" },
+];
+
+// Status filter options for error logs
+const ERROR_STATUS_OPTIONS: ToggleOption[] = [
+  { value: "all", label: "All" },
+  { value: "info", label: "Info", color: "green" },
+  { value: "warn", label: "Warn", color: "yellow" },
+  { value: "error", label: "Error", color: "red" },
+];
+
+// Custom export options for logs
+const LOG_EXPORT_OPTIONS = [
+  { format: "txt", label: "Plain Text (.log)", icon: <Terminal className="h-4 w-4" /> },
+  { format: "json", label: "JSON (.json)", icon: <FileJson className="h-4 w-4" /> },
+  { format: "csv", label: "CSV (.csv)", icon: <FileSpreadsheet className="h-4 w-4" /> },
+];
 
 interface NginxLogEntry {
   timestamp: string;
@@ -241,14 +265,12 @@ export default function TrafficLogsPage() {
   const [logType, setLogType] = useState<LogType>("access");
   const [searchQuery, setSearchQuery] = useState("");
   const [autoRefresh, setAutoRefresh] = useState(false);
-  const [lines, setLines] = useState(100);
+  const [lines, setLines] = useState("100");
   const [selectedDomain, setSelectedDomain] = useState<string>("");
   const [levelFilter, setLevelFilter] = useState<LogLevel>("all");
   const [selectedLog, setSelectedLog] = useState<NginxLogEntry | null>(null);
-  const [showExportMenu, setShowExportMenu] = useState(false);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const logContainerRef = useRef<HTMLDivElement>(null);
-  const exportMenuRef = useRef<HTMLDivElement>(null);
 
   // Fetch agents
   const { data: agents } = useQuery({
@@ -257,6 +279,15 @@ export default function TrafficLogsPage() {
   });
 
   const activeAgents = agents?.filter((a) => a.status === "active") || [];
+
+  // Build agent options for FilterToolbar
+  const agentOptions: SelectOption[] = agents
+    ? agents.map((a) => ({
+        value: a.id,
+        label: a.name,
+        disabled: a.status !== "active",
+      }))
+    : [];
 
   // Auto-select first active agent
   useEffect(() => {
@@ -290,7 +321,7 @@ export default function TrafficLogsPage() {
       if (!selectedAgent) return { logs: [] };
       const params = new URLSearchParams({
         type: logType,
-        lines: lines.toString(),
+        lines: lines,
       });
       if (selectedDomain) {
         params.append("domain", selectedDomain);
@@ -380,19 +411,8 @@ export default function TrafficLogsPage() {
     }
   }, [logs, autoRefresh]);
 
-  // Close export menu on outside click
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
-        setShowExportMenu(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  // Export functions
-  const exportLogs = (format: ExportFormat) => {
+  // Export function
+  const exportLogs = (format: string) => {
     let content: string;
     let mimeType: string;
     let extension: string;
@@ -450,7 +470,6 @@ export default function TrafficLogsPage() {
     a.download = `nginx-${logType}${domainStr}_${dateStr}.${extension}`;
     a.click();
     URL.revokeObjectURL(url);
-    setShowExportMenu(false);
   };
 
   // Copy log to clipboard
@@ -502,262 +521,93 @@ export default function TrafficLogsPage() {
         />
       </MetricsGrid>
 
-      {/* Controls Card */}
-      <Card>
-        <CardBody className="space-y-4">
-          {/* Top row: Agent, Domain, Log Type */}
-          <div className="flex flex-wrap items-center gap-4">
-            {/* Agent Selector */}
-            <div className="flex items-center gap-2">
-              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                Agent
-              </label>
-              <select
-                value={selectedAgent || ""}
-                onChange={(e) => setSelectedAgent(e.target.value || null)}
-                className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500"
-              >
-                <option value="">Select agent...</option>
-                {agents?.map((agent) => (
-                  <option key={agent.id} value={agent.id} disabled={agent.status !== "active"}>
-                    {agent.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+      {/* Filter Toolbar */}
+      <FilterToolbar
+        // Agent selector
+        agents={agentOptions}
+        selectedAgent={selectedAgent}
+        onAgentChange={setSelectedAgent}
+        showAgentFilter={true}
+        // Domain selector
+        domains={domains}
+        selectedDomain={selectedDomain}
+        onDomainChange={setSelectedDomain}
+        showDomainFilter={true}
+        // Log type toggle
+        primaryToggle={{
+          options: LOG_TYPE_OPTIONS,
+          value: logType,
+          onChange: (v) => setLogType(v as LogType),
+        }}
+        // Lines dropdown
+        dropdownSelector={{
+          options: DEFAULT_LINE_OPTIONS,
+          value: lines,
+          onChange: setLines,
+        }}
+        // Search
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        searchPlaceholder="Search logs..."
+        showSearch={true}
+        // Status filter - changes based on log type
+        statusFilter={{
+          options: logType === "access" ? ACCESS_STATUS_OPTIONS : ERROR_STATUS_OPTIONS,
+          value: levelFilter,
+          onChange: (v) => setLevelFilter(v as LogLevel),
+        }}
+        // Auto-refresh
+        autoRefresh={autoRefresh}
+        onAutoRefreshChange={setAutoRefresh}
+        showAutoRefresh={true}
+        autoRefreshLabel={{ active: "Live", inactive: "Paused" }}
+        // Refresh
+        onRefresh={() => refetch()}
+        isRefreshing={isFetching}
+        showRefresh={true}
+        // Export
+        exportOptions={LOG_EXPORT_OPTIONS}
+        onExport={exportLogs}
+        showExport={true}
+      />
 
-            {/* Domain Selector */}
-            <div className="flex items-center gap-2">
-              <Globe className="h-4 w-4 text-gray-400" />
-              <select
-                value={selectedDomain}
-                onChange={(e) => setSelectedDomain(e.target.value)}
-                className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500"
-              >
-                <option value="">All Domains</option>
-                {domains.map((domain) => (
-                  <option key={domain} value={domain}>
-                    {domain}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Log Type Toggle */}
-            <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
-              <button
-                onClick={() => setLogType("access")}
-                className={cn(
-                  "px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
-                  logType === "access"
-                    ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow"
-                    : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
-                )}
-              >
-                Access Logs
+      {/* Active filters display */}
+      {(searchQuery || selectedDomain || levelFilter !== "all") && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+          <span className="text-xs text-gray-500">Active filters:</span>
+          {selectedDomain && (
+            <Badge color="blue" size="sm" className="gap-1">
+              {selectedDomain}
+              <button onClick={() => setSelectedDomain("")}>
+                <X className="h-3 w-3" />
               </button>
-              <button
-                onClick={() => setLogType("error")}
-                className={cn(
-                  "px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
-                  logType === "error"
-                    ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow"
-                    : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
-                )}
-              >
-                Error Logs
-              </button>
-            </div>
-
-            {/* Lines selector */}
-            <select
-              value={lines}
-              onChange={(e) => setLines(parseInt(e.target.value))}
-              className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-sm text-gray-900 dark:text-white"
-            >
-              <option value={50}>Last 50</option>
-              <option value={100}>Last 100</option>
-              <option value={250}>Last 250</option>
-              <option value={500}>Last 500</option>
-            </select>
-          </div>
-
-          {/* Bottom row: Search, Level Filter, Actions */}
-          <div className="flex flex-wrap items-center gap-4">
-            {/* Search */}
-            <div className="relative flex-1 min-w-[200px] max-w-md">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <Input
-                placeholder="Search logs..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10 w-full"
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery("")}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              )}
-            </div>
-
-            {/* Level Filter */}
-            <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
-              <button
-                onClick={() => setLevelFilter("all")}
-                className={cn(
-                  "px-2.5 py-1 rounded text-xs font-medium transition-colors",
-                  levelFilter === "all"
-                    ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow"
-                    : "text-gray-600 dark:text-gray-400"
-                )}
-              >
-                All
-              </button>
-              <button
-                onClick={() => setLevelFilter("info")}
-                className={cn(
-                  "px-2.5 py-1 rounded text-xs font-medium transition-colors",
-                  levelFilter === "info"
-                    ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300"
-                    : "text-gray-600 dark:text-gray-400"
-                )}
-              >
-                {logType === "access" ? "2xx/3xx" : "Info"}
-              </button>
-              <button
-                onClick={() => setLevelFilter("warn")}
-                className={cn(
-                  "px-2.5 py-1 rounded text-xs font-medium transition-colors",
-                  levelFilter === "warn"
-                    ? "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300"
-                    : "text-gray-600 dark:text-gray-400"
-                )}
-              >
-                {logType === "access" ? "4xx" : "Warn"}
-              </button>
-              <button
-                onClick={() => setLevelFilter("error")}
-                className={cn(
-                  "px-2.5 py-1 rounded text-xs font-medium transition-colors",
-                  levelFilter === "error"
-                    ? "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300"
-                    : "text-gray-600 dark:text-gray-400"
-                )}
-              >
-                {logType === "access" ? "5xx" : "Error"}
-              </button>
-            </div>
-
-            <div className="flex items-center gap-2 ml-auto">
-              {/* Auto-refresh toggle */}
-              <button
-                onClick={() => setAutoRefresh(!autoRefresh)}
-                className={cn(
-                  "inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors",
-                  autoRefresh
-                    ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 border border-green-300 dark:border-green-800"
-                    : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"
-                )}
-              >
-                {autoRefresh ? (
-                  <Pause className="h-4 w-4" />
-                ) : (
-                  <Play className="h-4 w-4" />
-                )}
-                {autoRefresh ? "Live" : "Paused"}
-              </button>
-
-              {/* Manual refresh */}
-              <button
-                onClick={() => refetch()}
-                disabled={isFetching}
-                className="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
-              >
-                <RefreshCw className={cn("h-4 w-4", isFetching && "animate-spin")} />
-                Refresh
-              </button>
-
-              {/* Export dropdown */}
-              <div className="relative" ref={exportMenuRef}>
-                <button
-                  onClick={() => setShowExportMenu(!showExportMenu)}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-lg text-sm font-medium transition-colors"
-                >
-                  <Download className="h-4 w-4" />
-                  Export
-                  <ChevronDown className="h-3 w-3" />
-                </button>
-                {showExportMenu && (
-                  <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-10">
-                    <button
-                      onClick={() => exportLogs("txt")}
-                      className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 first:rounded-t-lg"
-                    >
-                      <Terminal className="h-4 w-4" />
-                      Plain Text (.log)
-                    </button>
-                    <button
-                      onClick={() => exportLogs("json")}
-                      className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
-                    >
-                      <FileJson className="h-4 w-4" />
-                      JSON (.json)
-                    </button>
-                    <button
-                      onClick={() => exportLogs("csv")}
-                      className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 last:rounded-b-lg"
-                    >
-                      <FileSpreadsheet className="h-4 w-4" />
-                      CSV (.csv)
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Active filters display */}
-          {(searchQuery || selectedDomain || levelFilter !== "all") && (
-            <div className="flex items-center gap-2 pt-2 border-t border-gray-200 dark:border-gray-700">
-              <span className="text-xs text-gray-500">Active filters:</span>
-              {selectedDomain && (
-                <Badge color="blue" size="sm" className="gap-1">
-                  {selectedDomain}
-                  <button onClick={() => setSelectedDomain("")}>
-                    <X className="h-3 w-3" />
-                  </button>
-                </Badge>
-              )}
-              {searchQuery && (
-                <Badge color="purple" size="sm" className="gap-1">
-                  "{searchQuery}"
-                  <button onClick={() => setSearchQuery("")}>
-                    <X className="h-3 w-3" />
-                  </button>
-                </Badge>
-              )}
-              {levelFilter !== "all" && (
-                <Badge
-                  color={levelFilter === "error" ? "red" : levelFilter === "warn" ? "yellow" : "green"}
-                  size="sm"
-                  className="gap-1"
-                >
-                  {levelFilter}
-                  <button onClick={() => setLevelFilter("all")}>
-                    <X className="h-3 w-3" />
-                  </button>
-                </Badge>
-              )}
-              <span className="text-xs text-gray-500 ml-2">
-                Showing {filteredLogs.length} of {logs.length} entries
-              </span>
-            </div>
+            </Badge>
           )}
-        </CardBody>
-      </Card>
+          {searchQuery && (
+            <Badge color="purple" size="sm" className="gap-1">
+              &quot;{searchQuery}&quot;
+              <button onClick={() => setSearchQuery("")}>
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+          )}
+          {levelFilter !== "all" && (
+            <Badge
+              color={levelFilter === "error" ? "red" : levelFilter === "warn" ? "yellow" : "green"}
+              size="sm"
+              className="gap-1"
+            >
+              {levelFilter}
+              <button onClick={() => setLevelFilter("all")}>
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+          )}
+          <span className="text-xs text-gray-500 ml-2">
+            Showing {filteredLogs.length} of {logs.length} entries
+          </span>
+        </div>
+      )}
 
       {/* Logs Display */}
       {!selectedAgent ? (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
@@ -9,11 +9,6 @@ import {
   Globe,
   Users,
   Zap,
-  RefreshCw,
-  ArrowUpRight,
-  ArrowDownRight,
-  TrendingUp,
-  Database,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -24,6 +19,7 @@ import { Table } from "@/components/ui/Table";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Spinner } from "@/components/ui/Spinner";
+import { FilterToolbar, DEFAULT_TIME_RANGES, DEFAULT_EXPORT_OPTIONS, SelectOption, TimeRangeOption, ToggleOption } from "@/components/ui/FilterToolbar";
 import {
   AreaChart,
   Area,
@@ -41,6 +37,16 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
+
+// =============================================================================
+// Filter Options
+// =============================================================================
+
+const ANALYTICS_STATUS_OPTIONS: ToggleOption[] = [
+  { value: "all", label: "All" },
+  { value: "success", label: "2xx/3xx", color: "green" },
+  { value: "errors", label: "4xx/5xx", color: "red" },
+];
 
 // =============================================================================
 // Types
@@ -116,17 +122,6 @@ interface StatusCodeDistribution {
 // Constants
 // =============================================================================
 
-const TIME_RANGES = [
-  { label: "5m", value: 5, unit: "minutes", interval: "1m" },
-  { label: "15m", value: 15, unit: "minutes", interval: "1m" },
-  { label: "30m", value: 30, unit: "minutes", interval: "1m" },
-  { label: "1h", value: 1, unit: "hours", interval: "1m" },
-  { label: "6h", value: 6, unit: "hours", interval: "5m" },
-  { label: "24h", value: 24, unit: "hours", interval: "1h" },
-  { label: "7d", value: 168, unit: "hours", interval: "1h" },
-  { label: "30d", value: 720, unit: "hours", interval: "1d" },
-];
-
 const STATUS_COLORS = {
   "2xx": "#22c55e", // green
   "3xx": "#3b82f6", // blue
@@ -173,9 +168,11 @@ export default function TrafficAnalyticsPage() {
   const queryClient = useQueryClient();
 
   // State
-  const [selectedRange, setSelectedRange] = useState(TIME_RANGES[2]); // Default 24h
+  const [selectedRange, setSelectedRange] = useState<TimeRangeOption>(DEFAULT_TIME_RANGES[2]); // Default 30m
   const [autoRefresh, setAutoRefresh] = useState(false);
-  const [selectedAgent, setSelectedAgent] = useState<string>("");
+  const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
+  const [selectedDomain, setSelectedDomain] = useState<string>("");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
 
   // Fetch agents
   const { data: agents } = useQuery({
@@ -183,16 +180,40 @@ export default function TrafficAnalyticsPage() {
     queryFn: () => api.getAgents(),
   });
 
+  // Fetch proxies for domain list
+  const { data: proxies } = useQuery({
+    queryKey: ["proxies", selectedAgent],
+    queryFn: () => (selectedAgent ? api.getProxyHosts(selectedAgent) : Promise.resolve([])),
+    enabled: !!selectedAgent,
+  });
+
+  // Get unique domains from proxies
+  const domains = useMemo(() => {
+    if (!proxies) return [];
+    return [...new Set(proxies.map((p) => p.domain))].sort();
+  }, [proxies]);
+
+  // Helper to build time params based on unit (minutes or hours)
+  const getTimeParams = (): Record<string, string> => {
+    if (selectedRange.unit === "minutes") {
+      return { minutes: selectedRange.value.toString() };
+    }
+    return { hours: selectedRange.value.toString() };
+  };
+
   // Fetch analytics data
-  const { data: analytics, isLoading: isLoadingAnalytics } = useQuery({
-    queryKey: ["traffic-analytics", selectedRange.value, selectedRange.interval, selectedAgent],
+  const { data: analytics, isLoading: isLoadingAnalytics, isFetching: isFetchingAnalytics } = useQuery({
+    queryKey: ["traffic-analytics", selectedRange.value, selectedRange.unit, selectedRange.interval, selectedAgent, selectedDomain],
     queryFn: async () => {
       const params = new URLSearchParams({
-        hours: selectedRange.value.toString(),
-        interval: selectedRange.interval,
+        ...getTimeParams(),
+        interval: selectedRange.interval || "1m",
       });
       if (selectedAgent) {
         params.append("agent_id", selectedAgent);
+      }
+      if (selectedDomain) {
+        params.append("host", selectedDomain);
       }
       return api.fetchAPI<NginxAnalyticsResponse>(`/traffic/analytics?${params}`);
     },
@@ -201,13 +222,14 @@ export default function TrafficAnalyticsPage() {
 
   // Fetch summary
   const { data: summary, isLoading: isLoadingSummary } = useQuery({
-    queryKey: ["traffic-analytics-summary", selectedRange.value, selectedAgent],
+    queryKey: ["traffic-analytics-summary", selectedRange.value, selectedRange.unit, selectedAgent, selectedDomain],
     queryFn: async () => {
-      const params = new URLSearchParams({
-        hours: selectedRange.value.toString(),
-      });
+      const params = new URLSearchParams(getTimeParams());
       if (selectedAgent) {
         params.append("agent_id", selectedAgent);
+      }
+      if (selectedDomain) {
+        params.append("host", selectedDomain);
       }
       return api.fetchAPI<NginxAnalyticsSummary>(`/traffic/analytics/summary?${params}`);
     },
@@ -216,14 +238,17 @@ export default function TrafficAnalyticsPage() {
 
   // Fetch top paths
   const { data: topPathsResponse, isLoading: isLoadingTopPaths } = useQuery({
-    queryKey: ["traffic-top-paths", selectedRange.value, selectedAgent],
+    queryKey: ["traffic-top-paths", selectedRange.value, selectedRange.unit, selectedAgent, selectedDomain],
     queryFn: async () => {
       const params = new URLSearchParams({
-        hours: selectedRange.value.toString(),
+        ...getTimeParams(),
         limit: "15",
       });
       if (selectedAgent) {
         params.append("agent_id", selectedAgent);
+      }
+      if (selectedDomain) {
+        params.append("host", selectedDomain);
       }
       return api.fetchAPI<{ paths: NginxTopPath[] }>(`/traffic/analytics/top-paths?${params}`);
     },
@@ -232,13 +257,14 @@ export default function TrafficAnalyticsPage() {
 
   // Fetch status codes
   const { data: statusCodes, isLoading: isLoadingStatusCodes } = useQuery({
-    queryKey: ["traffic-status-codes", selectedRange.value, selectedAgent],
+    queryKey: ["traffic-status-codes", selectedRange.value, selectedRange.unit, selectedAgent, selectedDomain],
     queryFn: async () => {
-      const params = new URLSearchParams({
-        hours: selectedRange.value.toString(),
-      });
+      const params = new URLSearchParams(getTimeParams());
       if (selectedAgent) {
         params.append("agent_id", selectedAgent);
+      }
+      if (selectedDomain) {
+        params.append("host", selectedDomain);
       }
       return api.fetchAPI<StatusCodeDistribution>(`/traffic/analytics/status-codes?${params}`);
     },
@@ -360,6 +386,79 @@ export default function TrafficAnalyticsPage() {
     );
   }
 
+  // Build agent options for FilterToolbar
+  const agentOptions: SelectOption[] = agents
+    ? agents
+        .filter((a) => a.status === "active")
+        .map((a) => ({ value: a.id, label: a.name }))
+    : [];
+
+  const handleRefresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["traffic-analytics"] });
+    queryClient.invalidateQueries({ queryKey: ["traffic-analytics-summary"] });
+    queryClient.invalidateQueries({ queryKey: ["traffic-top-paths"] });
+    queryClient.invalidateQueries({ queryKey: ["traffic-status-codes"] });
+  };
+
+  const handleExport = (format: string) => {
+    if (!summary || !topPathsResponse?.paths) return;
+
+    const exportData = {
+      timeRange: selectedRange.label,
+      summary: summary,
+      topPaths: topPathsResponse.paths,
+      statusCodes: statusCodes,
+      chartData: chartData,
+    };
+
+    let content: string;
+    let mimeType: string;
+    let extension: string;
+
+    switch (format) {
+      case "json":
+        content = JSON.stringify(exportData, null, 2);
+        mimeType = "application/json";
+        extension = "json";
+        break;
+      case "csv":
+        // Export top paths as CSV
+        const headers = "path,requests,avg_latency,p95_latency,bandwidth,error_rate\n";
+        const rows = topPathsResponse.paths
+          .map((p) => `"${p.path}",${p.request_count},${p.avg_response_time},${p.p95_response_time},${p.total_bytes},${p.error_rate}`)
+          .join("\n");
+        content = headers + rows;
+        mimeType = "text/csv";
+        extension = "csv";
+        break;
+      default:
+        // Plain text summary
+        content = `Traffic Analytics Report - ${selectedRange.label}\n`;
+        content += `Generated: ${new Date().toISOString()}\n\n`;
+        content += `Summary:\n`;
+        content += `  Total Requests: ${summary.total_requests}\n`;
+        content += `  Error Rate: ${summary.error_rate.toFixed(2)}%\n`;
+        content += `  Avg Latency: ${(summary.avg_response_time * 1000).toFixed(1)}ms\n`;
+        content += `  P95 Latency: ${(summary.p95_response_time * 1000).toFixed(1)}ms\n`;
+        content += `  Unique Visitors: ${summary.unique_visitors}\n\n`;
+        content += `Top Paths:\n`;
+        topPathsResponse.paths.forEach((p, i) => {
+          content += `  ${i + 1}. ${p.path} - ${p.request_count} requests\n`;
+        });
+        mimeType = "text/plain";
+        extension = "txt";
+    }
+
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const dateStr = new Date().toISOString().split("T")[0];
+    a.download = `traffic-analytics_${selectedRange.label}_${dateStr}.${extension}`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   // No data state
   if (!isLoading && (!summary || summary.total_requests === 0)) {
     return (
@@ -376,14 +475,37 @@ export default function TrafficAnalyticsPage() {
               ]}
             />
           }
-          action={
-            <div className="flex items-center gap-3">
-              <TimeRangeSelector
-                selected={selectedRange}
-                onChange={setSelectedRange}
-              />
-            </div>
-          }
+        />
+        <FilterToolbar
+          agents={agentOptions}
+          selectedAgent={selectedAgent}
+          onAgentChange={setSelectedAgent}
+          showAgentFilter={agentOptions.length > 1}
+          domains={domains}
+          selectedDomain={selectedDomain}
+          onDomainChange={setSelectedDomain}
+          showDomainFilter={true}
+          timeRange={{
+            options: DEFAULT_TIME_RANGES,
+            value: selectedRange,
+            onChange: setSelectedRange,
+          }}
+          statusFilter={{
+            options: ANALYTICS_STATUS_OPTIONS,
+            value: statusFilter,
+            onChange: setStatusFilter,
+          }}
+          showSearch={false}
+          showAutoRefresh={true}
+          autoRefresh={autoRefresh}
+          onAutoRefreshChange={setAutoRefresh}
+          autoRefreshLabel={{ active: "Live", inactive: "Auto" }}
+          showRefresh={true}
+          onRefresh={handleRefresh}
+          isRefreshing={isFetchingAnalytics}
+          exportOptions={DEFAULT_EXPORT_OPTIONS}
+          onExport={handleExport}
+          showExport={true}
         />
         <EmptyState
           icon={Activity}
@@ -409,43 +531,39 @@ export default function TrafficAnalyticsPage() {
             ]}
           />
         }
-        action={
-          <div className="flex items-center gap-3">
-            {agents && agents.length > 1 && (
-              <select
-                value={selectedAgent}
-                onChange={(e) => setSelectedAgent(e.target.value)}
-                className="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm"
-              >
-                <option value="">All Agents</option>
-                {agents.filter((a) => a.status === "active").map((agent) => (
-                  <option key={agent.id} value={agent.id}>
-                    {agent.name}
-                  </option>
-                ))}
-              </select>
-            )}
-            <TimeRangeSelector selected={selectedRange} onChange={setSelectedRange} />
-            <button
-              onClick={() => setAutoRefresh(!autoRefresh)}
-              className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                autoRefresh
-                  ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                  : "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
-              }`}
-            >
-              <RefreshCw className={`w-4 h-4 ${autoRefresh ? "animate-spin" : ""}`} />
-              {autoRefresh ? "Live" : "Auto"}
-            </button>
-            <button
-              onClick={() => queryClient.invalidateQueries({ queryKey: ["traffic"] })}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-900 dark:text-white rounded-lg transition-colors text-sm font-medium"
-            >
-              <RefreshCw className="w-4 h-4" />
-              Refresh
-            </button>
-          </div>
-        }
+      />
+
+      {/* Filter Toolbar */}
+      <FilterToolbar
+        agents={agentOptions}
+        selectedAgent={selectedAgent}
+        onAgentChange={setSelectedAgent}
+        showAgentFilter={agentOptions.length > 1}
+        domains={domains}
+        selectedDomain={selectedDomain}
+        onDomainChange={setSelectedDomain}
+        showDomainFilter={true}
+        timeRange={{
+          options: DEFAULT_TIME_RANGES,
+          value: selectedRange,
+          onChange: setSelectedRange,
+        }}
+        statusFilter={{
+          options: ANALYTICS_STATUS_OPTIONS,
+          value: statusFilter,
+          onChange: setStatusFilter,
+        }}
+        showSearch={false}
+        showAutoRefresh={true}
+        autoRefresh={autoRefresh}
+        onAutoRefreshChange={setAutoRefresh}
+        autoRefreshLabel={{ active: "Live", inactive: "Auto" }}
+        showRefresh={true}
+        onRefresh={handleRefresh}
+        isRefreshing={isFetchingAnalytics}
+        exportOptions={DEFAULT_EXPORT_OPTIONS}
+        onExport={handleExport}
+        showExport={true}
       />
 
       {/* Summary Stats */}
@@ -713,7 +831,7 @@ export default function TrafficAnalyticsPage() {
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
               Top Endpoints
             </h3>
-            <Badge variant="secondary" size="sm">
+            <Badge color="gray" size="sm">
               {topPathsResponse?.paths?.length || 0} paths
             </Badge>
           </div>
@@ -735,35 +853,6 @@ export default function TrafficAnalyticsPage() {
           />
         </Card.Body>
       </Card>
-    </div>
-  );
-}
-
-// =============================================================================
-// Sub-components
-// =============================================================================
-
-interface TimeRangeSelectorProps {
-  selected: typeof TIME_RANGES[number];
-  onChange: (range: typeof TIME_RANGES[number]) => void;
-}
-
-function TimeRangeSelector({ selected, onChange }: TimeRangeSelectorProps) {
-  return (
-    <div className="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 overflow-hidden">
-      {TIME_RANGES.map((range) => (
-        <button
-          key={range.label}
-          onClick={() => onChange(range)}
-          className={`px-3 py-2 text-sm font-medium transition-colors ${
-            selected.label === range.label
-              ? "bg-primary-600 text-white"
-              : "bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
-          }`}
-        >
-          {range.label}
-        </button>
-      ))}
     </div>
   );
 }
