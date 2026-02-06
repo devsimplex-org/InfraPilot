@@ -22,8 +22,9 @@ import { Table } from "@/components/ui/Table";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Spinner } from "@/components/ui/Spinner";
-import { Button, Input } from "@/components/ui/page-layout";
+import { Button } from "@/components/ui/page-layout";
 import { cn } from "@/lib/utils";
+import { FilterToolbar } from "@/components/ui/FilterToolbar";
 
 export default function DockerImagesPage() {
   const queryClient = useQueryClient();
@@ -194,13 +195,16 @@ export default function DockerImagesPage() {
         <StatCard label="Unused" value={metrics.unused} icon={Shield} iconColor="text-orange-600 dark:text-orange-400" />
       </MetricsGrid>
 
-      {/* Filters */}
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-2">
-          <Input placeholder="Search images..." value={searchFilter} onChange={(e) => setSearchFilter(e.target.value)} className="w-64" />
-          {searchFilter && <button onClick={() => setSearchFilter("")} className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400">Reset</button>}
-        </div>
-      </div>
+      {/* Filter Toolbar */}
+      <FilterToolbar
+        searchQuery={searchFilter}
+        onSearchChange={setSearchFilter}
+        searchPlaceholder="Search images..."
+        showSearch={true}
+        showRefresh={true}
+        onRefresh={() => queryClient.invalidateQueries({ queryKey: ["docker-images", selectedAgent] })}
+        singleRow={true}
+      />
 
       {/* Selection Bar */}
       {images && images.length > 0 && (

@@ -11,7 +11,6 @@ import {
   Clock,
   AlertTriangle,
   RefreshCw,
-  Search,
 } from "lucide-react";
 import Link from "next/link";
 import { api, TrafficResource } from "@/lib/api";
@@ -19,12 +18,26 @@ import { api, TrafficResource } from "@/lib/api";
 // Component library imports
 import { Table } from "@/components/ui/Table";
 import { SlideOver } from "@/components/ui/SlideOver";
-import { FilterPanel } from "@/components/ui/FilterPanel";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Spinner } from "@/components/ui/Spinner";
-import { Input } from "@/components/ui/page-layout";
-import { cn } from "@/lib/utils";
+import { FilterToolbar, ToggleOption } from "@/components/ui/FilterToolbar";
+
+// Filter options
+const STATUS_OPTIONS: ToggleOption[] = [
+  { value: "", label: "All" },
+  { value: "active", label: "Active", color: "green" },
+  { value: "draft", label: "Draft" },
+  { value: "pending", label: "Pending", color: "yellow" },
+  { value: "disabled", label: "Disabled" },
+  { value: "error", label: "Error", color: "red" },
+];
+
+const TYPE_OPTIONS: ToggleOption[] = [
+  { value: "", label: "All Types" },
+  { value: "system", label: "System", color: "blue" },
+  { value: "application", label: "Application" },
+];
 
 export default function TrafficResourcesPage() {
   const [selectedResource, setSelectedResource] = useState<TrafficResource | null>(null);
@@ -202,38 +215,11 @@ export default function TrafficResourcesPage() {
     },
   ];
 
-  // Filter configuration
-  const filterGroups = [
-    {
-      id: "status",
-      label: "Status",
-      type: "radio" as const,
-      value: filters.status,
-      onChange: (value: string | string[]) =>
-        setFilters({ ...filters, status: value as string }),
-      options: [
-        { label: "All Status", value: "" },
-        { label: "Active", value: "active" },
-        { label: "Draft", value: "draft" },
-        { label: "Pending", value: "pending" },
-        { label: "Disabled", value: "disabled" },
-        { label: "Error", value: "error" },
-      ],
-    },
-    {
-      id: "gateway_type",
-      label: "Gateway Type",
-      type: "radio" as const,
-      value: filters.gateway_type,
-      onChange: (value: string | string[]) =>
-        setFilters({ ...filters, gateway_type: value as string }),
-      options: [
-        { label: "All Types", value: "" },
-        { label: "System", value: "system" },
-        { label: "Application", value: "application" },
-      ],
-    },
-  ];
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const handleRefresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["traffic-resources"] });
+  };
 
   if (isLoading) {
     return <Spinner.LogoPage label="Loading traffic resources..." />;
@@ -241,50 +227,26 @@ export default function TrafficResourcesPage() {
 
   return (
     <div className="space-y-6">
-      {/* Filters */}
-      <div className="flex items-center gap-4 flex-wrap">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-          <Input
-            placeholder="Search resources..."
-            className="pl-10"
-          />
-        </div>
-
-        <div className="flex items-center gap-2">
-          {filterGroups[0].options.slice(1).map((option) => (
-            <button
-              key={option.value}
-              onClick={() => setFilters({ ...filters, status: filters.status === option.value ? "" : option.value })}
-              className={cn(
-                "px-3 py-1.5 rounded-lg text-sm font-medium transition-colors",
-                filters.status === option.value
-                  ? "bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300"
-                  : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"
-              )}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="flex items-center gap-2">
-          {filterGroups[1].options.slice(1).map((option) => (
-            <button
-              key={option.value}
-              onClick={() => setFilters({ ...filters, gateway_type: filters.gateway_type === option.value ? "" : option.value })}
-              className={cn(
-                "px-3 py-1.5 rounded-lg text-sm font-medium transition-colors",
-                filters.gateway_type === option.value
-                  ? "bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300"
-                  : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"
-              )}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-      </div>
+      {/* Filter Toolbar */}
+      <FilterToolbar
+        primaryToggle={{
+          options: STATUS_OPTIONS,
+          value: filters.status,
+          onChange: (v) => setFilters({ ...filters, status: v }),
+        }}
+        statusFilter={{
+          options: TYPE_OPTIONS,
+          value: filters.gateway_type,
+          onChange: (v) => setFilters({ ...filters, gateway_type: v }),
+        }}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        searchPlaceholder="Search resources..."
+        showSearch={true}
+        showRefresh={true}
+        onRefresh={handleRefresh}
+        singleRow={true}
+      />
 
       {/* Resources Table */}
       {resourcesData?.resources && resourcesData.resources.length > 0 ? (
