@@ -13,6 +13,7 @@ import {
   Activity,
   Settings,
   Layers,
+  BarChart3,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -41,6 +42,7 @@ const tabGroups = [
     label: "Reverse Proxy",
     tabs: [
       { id: "proxies", label: "Proxy Hosts", href: "/traffic/proxies", icon: Globe },
+      { id: "analytics", label: "Analytics", href: "/traffic/analytics", icon: BarChart3 },
       { id: "logs", label: "Nginx Logs", href: "/traffic/logs", icon: FileText },
     ],
   },
@@ -74,6 +76,7 @@ export default function TrafficLayout({ children }: { children: ReactNode }) {
   const getActiveTab = () => {
     if (pathname === "/traffic") return "overview";
     if (pathname === "/traffic/proxies" || pathname.startsWith("/traffic/proxies/")) return "proxies";
+    if (pathname === "/traffic/analytics" || pathname.startsWith("/traffic/analytics/")) return "analytics";
     if (pathname === "/traffic/logs" || pathname.startsWith("/traffic/logs/")) return "logs";
     const segment = pathname.split("/")[2];
     return segment || "overview";

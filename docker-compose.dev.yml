@@ -11,10 +11,10 @@
 
 services:
   # =============================================================
-  # PostgreSQL Database
+  # PostgreSQL Database with TimescaleDB for nginx log analytics
   # =============================================================
   postgres:
-    image: postgres:16-alpine
+    image: timescale/timescaledb:latest-pg16
     container_name: infrapilot-dev-postgres
     environment:
       POSTGRES_USER: infrapilot
@@ -117,13 +117,19 @@ services:
       BACKEND_HTTP_URL: http://backend:8080
       DATA_DIR: /var/lib/infrapilot-agent
       LOG_PERSISTENCE: "true"
+      # Nginx log analytics - streams access logs to backend
+      NGINX_LOG_ANALYTICS: "true"
+      NGINX_ACCESS_LOG_PATH: /var/log/nginx/access.log
     volumes:
       - ./agent:/app
       - /var/run/docker.sock:/var/run/docker.sock
       - go_mod_cache:/go/pkg/mod
       - agent_dev_data:/var/lib/infrapilot-agent
+      # Mount nginx logs from the nginx container for analytics
+      - nginx_dev_logs:/var/log/nginx:ro
     depends_on:
       - backend
+      - nginx
     networks:
       - infrapilot-dev
 
@@ -135,9 +141,17 @@ services:
     container_name: infrapilot-nginx
     # No ports exposed - external nginx on host handles traffic
     # This container is for agent to manage network attachments
+    # Remove default stdout symlinks and create actual log files for analytics
+    command: >
+      sh -c "rm -f /var/log/nginx/access.log /var/log/nginx/error.log &&
+             touch /var/log/nginx/access.log /var/log/nginx/error.log &&
+             chmod 644 /var/log/nginx/access.log /var/log/nginx/error.log &&
+             nginx -g 'daemon off;'"
     volumes:
+      - ./deployments/nginx-dev.conf:/etc/nginx/nginx.conf:ro
       - nginx_dev_conf:/etc/nginx/sites
       - nginx_dev_certs:/etc/letsencrypt
+      - nginx_dev_logs:/var/log/nginx
     networks:
       - infrapilot-dev
 
@@ -152,3 +166,4 @@ volumes:
   agent_dev_data:
   nginx_dev_conf:
   nginx_dev_certs:
+  nginx_dev_logs:

@@ -103,6 +103,13 @@ if [ "$EMBEDDED_DB" = "true" ]; then
         sed -i "s/#listen_addresses = 'localhost'/listen_addresses = 'localhost'/" "$DATA_DIR/postgres/postgresql.conf"
         echo "unix_socket_directories = '/run/postgresql'" >> "$DATA_DIR/postgres/postgresql.conf"
 
+        # Enable TimescaleDB extension for nginx log analytics
+        # This allows time-series optimizations for access log storage
+        if [ -f /usr/lib/postgresql16/timescaledb*.so ] || [ -d /usr/share/postgresql/16/extension/timescaledb* ]; then
+            echo "[*] Enabling TimescaleDB extension..."
+            echo "shared_preload_libraries = 'timescaledb'" >> "$DATA_DIR/postgres/postgresql.conf"
+        fi
+
         # Start PostgreSQL temporarily
         echo "[*] Starting PostgreSQL for initial setup..."
         su-exec postgres pg_ctl -D "$DATA_DIR/postgres" -o "-k /run/postgresql" start -w -t 60
@@ -177,11 +184,17 @@ http {
     include /etc/nginx/mime.types;
     default_type application/octet-stream;
 
-    log_format main '$remote_addr - $remote_user [$time_local] "$request" '
-                    '$status $body_bytes_sent "$http_referer" '
-                    '"$http_user_agent" "$http_x_forwarded_for"';
+    # Standard combined log format
+    log_format main '\$remote_addr - \$remote_user [\$time_local] "\$request" '
+                    '\$status \$body_bytes_sent "\$http_referer" '
+                    '"\$http_user_agent" "\$http_x_forwarded_for"';
 
-    access_log /var/log/nginx/access.log main;
+    # Extended log format for InfraPilot analytics (includes request_time and host)
+    log_format infrapilot_analytics '\$remote_addr - \$remote_user [\$time_local] "\$request" '
+                                    '\$status \$body_bytes_sent "\$http_referer" '
+                                    '"\$http_user_agent" \$request_time "\$host" "\$upstream_addr"';
+
+    access_log /var/log/nginx/access.log infrapilot_analytics;
 
     sendfile on;
     tcp_nopush on;

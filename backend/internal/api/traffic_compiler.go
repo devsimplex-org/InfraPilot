@@ -365,8 +365,8 @@ func (h *Handler) generateServerBlock(
 	config.WriteString("    listen [::]:80;\n")
 	config.WriteString(fmt.Sprintf("    server_name %s;\n\n", domains))
 
-	// Per-domain logging
-	config.WriteString(fmt.Sprintf("    access_log /var/log/nginx/domains/%s.access.log combined;\n", primaryDomain))
+	// Per-domain logging with extended format (includes response time for analytics)
+	config.WriteString(fmt.Sprintf("    access_log /var/log/nginx/domains/%s.access.log infrapilot_analytics;\n", primaryDomain))
 	config.WriteString(fmt.Sprintf("    error_log /var/log/nginx/domains/%s.error.log warn;\n\n", primaryDomain))
 
 	if sslEnabled {
@@ -392,8 +392,8 @@ func (h *Handler) generateServerBlock(
 		config.WriteString("    http2 on;\n")
 		config.WriteString(fmt.Sprintf("    server_name %s;\n\n", domains))
 
-		// Per-domain logging
-		config.WriteString(fmt.Sprintf("    access_log /var/log/nginx/domains/%s.access.log combined;\n", primaryDomain))
+		// Per-domain logging with extended format (includes response time for analytics)
+		config.WriteString(fmt.Sprintf("    access_log /var/log/nginx/domains/%s.access.log infrapilot_analytics;\n", primaryDomain))
 		config.WriteString(fmt.Sprintf("    error_log /var/log/nginx/domains/%s.error.log warn;\n\n", primaryDomain))
 
 		// SSL certificate paths
