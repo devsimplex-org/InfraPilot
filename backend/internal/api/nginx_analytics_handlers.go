@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -293,21 +294,6 @@ func (h *Handler) GetTrafficAnalytics(c *gin.Context) {
 	endTime := time.Now()
 	startTime := endTime.Add(-duration)
 
-	// Select the appropriate materialized view based on interval
-	var viewName string
-	switch interval {
-	case "1m", "5m":
-		viewName = "nginx_stats_1m"
-	case "1h":
-		// Use 1m aggregate for real-time data, it will just have more granular buckets
-		// The 1h aggregate may not be refreshed yet for recent data
-		viewName = "nginx_stats_1m"
-	case "1d":
-		viewName = "nginx_stats_daily"
-	default:
-		viewName = "nginx_stats_1m"
-	}
-
 	// Build query
 	var rows pgx.Rows
 	var err error
@@ -371,45 +357,45 @@ func (h *Handler) GetTrafficAnalytics(c *gin.Context) {
 			`, timeBucket), orgID, startTime, endTime, domain)
 		}
 	} else if agentID != nil {
-		// Note: Materialized views don't have p95/p99 columns (requires TSL license features)
-		// We query max_response_time as a proxy for high latency spikes
+		// Query raw table for all domains with agent filter
 		rows, err = h.db.Query(ctx, fmt.Sprintf(`
 			SELECT
-				bucket,
-				COALESCE(SUM(total_requests), 0),
-				COALESCE(SUM(count_2xx), 0),
-				COALESCE(SUM(count_3xx), 0),
-				COALESCE(SUM(count_4xx), 0),
-				COALESCE(SUM(count_5xx), 0),
-				COALESCE(SUM(total_bytes), 0),
-				COALESCE(AVG(avg_response_time), 0),
-				COALESCE(MAX(max_response_time), 0),
-				COALESCE(MIN(min_response_time), 0),
-				COALESCE(SUM(unique_visitors), 0)
-			FROM %s
-			WHERE org_id = $1 AND agent_id = $2 AND bucket >= $3 AND bucket <= $4
+				time_bucket('%s', time) AS bucket,
+				COUNT(*) AS total_requests,
+				COUNT(*) FILTER (WHERE status_code >= 200 AND status_code < 300) AS count_2xx,
+				COUNT(*) FILTER (WHERE status_code >= 300 AND status_code < 400) AS count_3xx,
+				COUNT(*) FILTER (WHERE status_code >= 400 AND status_code < 500) AS count_4xx,
+				COUNT(*) FILTER (WHERE status_code >= 500) AS count_5xx,
+				COALESCE(SUM(response_bytes), 0) AS total_bytes,
+				COALESCE(AVG(response_time), 0) AS avg_response_time,
+				COALESCE(MAX(response_time), 0) AS max_response_time,
+				COALESCE(MIN(response_time), 0) AS min_response_time,
+				COUNT(DISTINCT client_ip) AS unique_visitors
+			FROM nginx_access_logs
+			WHERE org_id = $1 AND agent_id = $2 AND time >= $3 AND time <= $4
 			GROUP BY bucket
 			ORDER BY bucket ASC
-		`, viewName), orgID, agentID, startTime, endTime)
+		`, timeBucket), orgID, agentID, startTime, endTime)
 	} else {
+		// Query raw table for all domains (no domain filter, no agent filter)
 		rows, err = h.db.Query(ctx, fmt.Sprintf(`
 			SELECT
-				bucket,
-				COALESCE(SUM(total_requests), 0),
-				COALESCE(SUM(count_2xx), 0),
-				COALESCE(SUM(count_3xx), 0),
-				COALESCE(SUM(count_4xx), 0),
-				COALESCE(SUM(count_5xx), 0),
-				COALESCE(SUM(total_bytes), 0),
-				COALESCE(AVG(avg_response_time), 0),
-				COALESCE(MAX(max_response_time), 0),
-				COALESCE(MIN(min_response_time), 0),
-				COALESCE(SUM(unique_visitors), 0)
-			FROM %s
-			WHERE org_id = $1 AND bucket >= $2 AND bucket <= $3
+				time_bucket('%s', time) AS bucket,
+				COUNT(*) AS total_requests,
+				COUNT(*) FILTER (WHERE status_code >= 200 AND status_code < 300) AS count_2xx,
+				COUNT(*) FILTER (WHERE status_code >= 300 AND status_code < 400) AS count_3xx,
+				COUNT(*) FILTER (WHERE status_code >= 400 AND status_code < 500) AS count_4xx,
+				COUNT(*) FILTER (WHERE status_code >= 500) AS count_5xx,
+				COALESCE(SUM(response_bytes), 0) AS total_bytes,
+				COALESCE(AVG(response_time), 0) AS avg_response_time,
+				COALESCE(MAX(response_time), 0) AS max_response_time,
+				COALESCE(MIN(response_time), 0) AS min_response_time,
+				COUNT(DISTINCT client_ip) AS unique_visitors
+			FROM nginx_access_logs
+			WHERE org_id = $1 AND time >= $2 AND time <= $3
 			GROUP BY bucket
 			ORDER BY bucket ASC
-		`, viewName), orgID, startTime, endTime)
+		`, timeBucket), orgID, startTime, endTime)
 	}
 
 	if err != nil {
@@ -679,6 +665,9 @@ func (h *Handler) GetTopPaths(c *gin.Context) {
 		}
 	}
 
+	// Domain filtering
+	domain := c.Query("domain")
+
 	endTime := time.Now()
 	startTime := endTime.Add(-duration)
 
@@ -688,7 +677,44 @@ func (h *Handler) GetTopPaths(c *gin.Context) {
 	var err error
 
 	// Query raw table for real-time data (aggregate may not be refreshed for current hour)
-	if agentID != nil {
+	if domain != "" {
+		// Filter by domain
+		if agentID != nil {
+			rows, err = h.db.Query(ctx, `
+				SELECT
+					path,
+					COUNT(*) as total_requests,
+					COALESCE(SUM(response_bytes), 0) as total_bytes,
+					COALESCE(AVG(response_time), 0) as avg_response_time,
+					COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY response_time), 0) as p95_response_time,
+					SUM(CASE WHEN status_code >= 400 AND status_code < 500 THEN 1 ELSE 0 END) as count_4xx,
+					SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END) as count_5xx,
+					COUNT(DISTINCT client_ip) as unique_visitors
+				FROM nginx_access_logs
+				WHERE org_id = $1 AND agent_id = $2 AND time >= $3 AND time <= $4 AND host = $5
+				GROUP BY path
+				ORDER BY total_requests DESC
+				LIMIT $6
+			`, orgID, agentID, startTime, endTime, domain, limit)
+		} else {
+			rows, err = h.db.Query(ctx, `
+				SELECT
+					path,
+					COUNT(*) as total_requests,
+					COALESCE(SUM(response_bytes), 0) as total_bytes,
+					COALESCE(AVG(response_time), 0) as avg_response_time,
+					COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY response_time), 0) as p95_response_time,
+					SUM(CASE WHEN status_code >= 400 AND status_code < 500 THEN 1 ELSE 0 END) as count_4xx,
+					SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END) as count_5xx,
+					COUNT(DISTINCT client_ip) as unique_visitors
+				FROM nginx_access_logs
+				WHERE org_id = $1 AND time >= $2 AND time <= $3 AND host = $4
+				GROUP BY path
+				ORDER BY total_requests DESC
+				LIMIT $5
+			`, orgID, startTime, endTime, domain, limit)
+		}
+	} else if agentID != nil {
 		rows, err = h.db.Query(ctx, `
 			SELECT
 				path,
@@ -794,6 +820,9 @@ func (h *Handler) GetStatusCodeDistribution(c *gin.Context) {
 		}
 	}
 
+	// Domain filtering
+	domain := c.Query("domain")
+
 	endTime := time.Now()
 	startTime := endTime.Add(-duration)
 
@@ -803,7 +832,30 @@ func (h *Handler) GetStatusCodeDistribution(c *gin.Context) {
 	var err error
 
 	// Query raw logs for status code distribution
-	if agentID != nil {
+	if domain != "" {
+		// Filter by domain
+		if agentID != nil {
+			rows, err = h.db.Query(ctx, `
+				SELECT
+					status_code,
+					COUNT(*) as count
+				FROM nginx_access_logs
+				WHERE org_id = $1 AND agent_id = $2 AND time >= $3 AND time <= $4 AND host = $5
+				GROUP BY status_code
+				ORDER BY count DESC
+			`, orgID, agentID, startTime, endTime, domain)
+		} else {
+			rows, err = h.db.Query(ctx, `
+				SELECT
+					status_code,
+					COUNT(*) as count
+				FROM nginx_access_logs
+				WHERE org_id = $1 AND time >= $2 AND time <= $3 AND host = $4
+				GROUP BY status_code
+				ORDER BY count DESC
+			`, orgID, startTime, endTime, domain)
+		}
+	} else if agentID != nil {
 		rows, err = h.db.Query(ctx, `
 			SELECT
 				status_code,
@@ -879,6 +931,471 @@ func (h *Handler) GetStatusCodeDistribution(c *gin.Context) {
 		"total":        total,
 		"start_time":   startTime,
 		"end_time":     endTime,
+	})
+}
+
+// GetLogDomains returns unique domains from nginx access logs
+// GET /api/v1/traffic/analytics/domains
+func (h *Handler) GetLogDomains(c *gin.Context) {
+	// Get org_id - middleware stores it as uuid.UUID
+	orgUUIDVal, _ := c.Get("org_id")
+	orgID := orgUUIDVal.(uuid.UUID)
+
+	// Default to last 24 hours of data
+	hours, _ := strconv.Atoi(c.DefaultQuery("hours", "24"))
+	if hours < 1 {
+		hours = 24
+	}
+	if hours > 720 {
+		hours = 720
+	}
+
+	endTime := time.Now()
+	startTime := endTime.Add(-time.Duration(hours) * time.Hour)
+
+	ctx := c.Request.Context()
+
+	rows, err := h.db.Query(ctx, `
+		SELECT DISTINCT host, COUNT(*) as request_count
+		FROM nginx_access_logs
+		WHERE org_id = $1 AND time >= $2 AND time <= $3 AND host IS NOT NULL AND host != ''
+		GROUP BY host
+		ORDER BY request_count DESC
+		LIMIT 100
+	`, orgID, startTime, endTime)
+
+	if err != nil {
+		h.logger.Error("Failed to query log domains", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve domains"})
+		return
+	}
+	defer rows.Close()
+
+	type DomainInfo struct {
+		Domain       string `json:"domain"`
+		RequestCount int64  `json:"request_count"`
+	}
+
+	var domains []DomainInfo
+	for rows.Next() {
+		var d DomainInfo
+		if err := rows.Scan(&d.Domain, &d.RequestCount); err != nil {
+			h.logger.Warn("Failed to scan domain row", zap.Error(err))
+			continue
+		}
+		domains = append(domains, d)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"domains": domains,
+	})
+}
+
+// GetMethodDistribution returns request method breakdown
+// GET /api/v1/traffic/analytics/methods
+func (h *Handler) GetMethodDistribution(c *gin.Context) {
+	orgUUIDVal, _ := c.Get("org_id")
+	orgID := orgUUIDVal.(uuid.UUID)
+
+	var duration time.Duration
+	if minutesStr := c.Query("minutes"); minutesStr != "" {
+		minutes, _ := strconv.Atoi(minutesStr)
+		if minutes < 1 {
+			minutes = 5
+		}
+		duration = time.Duration(minutes) * time.Minute
+	} else {
+		hours, _ := strconv.Atoi(c.DefaultQuery("hours", "24"))
+		if hours < 1 {
+			hours = 24
+		}
+		duration = time.Duration(hours) * time.Hour
+	}
+
+	domain := c.Query("domain")
+	endTime := time.Now()
+	startTime := endTime.Add(-duration)
+	ctx := c.Request.Context()
+
+	var rows pgx.Rows
+	var err error
+
+	if domain != "" {
+		rows, err = h.db.Query(ctx, `
+			SELECT method, COUNT(*) as count,
+				   SUM(response_bytes) as total_bytes,
+				   AVG(response_time) as avg_response_time
+			FROM nginx_access_logs
+			WHERE org_id = $1 AND time >= $2 AND time <= $3 AND host = $4
+			GROUP BY method
+			ORDER BY count DESC
+		`, orgID, startTime, endTime, domain)
+	} else {
+		rows, err = h.db.Query(ctx, `
+			SELECT method, COUNT(*) as count,
+				   SUM(response_bytes) as total_bytes,
+				   AVG(response_time) as avg_response_time
+			FROM nginx_access_logs
+			WHERE org_id = $1 AND time >= $2 AND time <= $3
+			GROUP BY method
+			ORDER BY count DESC
+		`, orgID, startTime, endTime)
+	}
+
+	if err != nil {
+		h.logger.Error("Failed to query method distribution", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve method distribution"})
+		return
+	}
+	defer rows.Close()
+
+	type MethodStats struct {
+		Method          string  `json:"method"`
+		Count           int64   `json:"count"`
+		TotalBytes      int64   `json:"total_bytes"`
+		AvgResponseTime float64 `json:"avg_response_time"`
+		Percentage      float64 `json:"percentage"`
+	}
+
+	var methods []MethodStats
+	var total int64
+
+	for rows.Next() {
+		var m MethodStats
+		var avgTime *float64
+		if err := rows.Scan(&m.Method, &m.Count, &m.TotalBytes, &avgTime); err != nil {
+			continue
+		}
+		if avgTime != nil {
+			m.AvgResponseTime = *avgTime
+		}
+		total += m.Count
+		methods = append(methods, m)
+	}
+
+	// Calculate percentages
+	for i := range methods {
+		if total > 0 {
+			methods[i].Percentage = float64(methods[i].Count) / float64(total) * 100
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"methods":    methods,
+		"total":      total,
+		"start_time": startTime,
+		"end_time":   endTime,
+	})
+}
+
+// GetTopClients returns top client IPs by request count
+// GET /api/v1/traffic/analytics/clients
+func (h *Handler) GetTopClients(c *gin.Context) {
+	orgUUIDVal, _ := c.Get("org_id")
+	orgID := orgUUIDVal.(uuid.UUID)
+
+	var duration time.Duration
+	if minutesStr := c.Query("minutes"); minutesStr != "" {
+		minutes, _ := strconv.Atoi(minutesStr)
+		if minutes < 1 {
+			minutes = 5
+		}
+		duration = time.Duration(minutes) * time.Minute
+	} else {
+		hours, _ := strconv.Atoi(c.DefaultQuery("hours", "24"))
+		if hours < 1 {
+			hours = 24
+		}
+		duration = time.Duration(hours) * time.Hour
+	}
+
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if limit < 1 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	domain := c.Query("domain")
+	endTime := time.Now()
+	startTime := endTime.Add(-duration)
+	ctx := c.Request.Context()
+
+	var rows pgx.Rows
+	var err error
+
+	if domain != "" {
+		rows, err = h.db.Query(ctx, `
+			SELECT client_ip::text,
+				   COUNT(*) as request_count,
+				   SUM(response_bytes) as total_bytes,
+				   AVG(response_time) as avg_response_time,
+				   SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) as error_count,
+				   MAX(time) as last_seen
+			FROM nginx_access_logs
+			WHERE org_id = $1 AND time >= $2 AND time <= $3 AND host = $4
+			GROUP BY client_ip
+			ORDER BY request_count DESC
+			LIMIT $5
+		`, orgID, startTime, endTime, domain, limit)
+	} else {
+		rows, err = h.db.Query(ctx, `
+			SELECT client_ip::text,
+				   COUNT(*) as request_count,
+				   SUM(response_bytes) as total_bytes,
+				   AVG(response_time) as avg_response_time,
+				   SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) as error_count,
+				   MAX(time) as last_seen
+			FROM nginx_access_logs
+			WHERE org_id = $1 AND time >= $2 AND time <= $3
+			GROUP BY client_ip
+			ORDER BY request_count DESC
+			LIMIT $4
+		`, orgID, startTime, endTime, limit)
+	}
+
+	if err != nil {
+		h.logger.Error("Failed to query top clients", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve top clients"})
+		return
+	}
+	defer rows.Close()
+
+	type ClientStats struct {
+		ClientIP        string    `json:"client_ip"`
+		RequestCount    int64     `json:"request_count"`
+		TotalBytes      int64     `json:"total_bytes"`
+		AvgResponseTime float64   `json:"avg_response_time"`
+		ErrorCount      int64     `json:"error_count"`
+		ErrorRate       float64   `json:"error_rate"`
+		LastSeen        time.Time `json:"last_seen"`
+	}
+
+	var clients []ClientStats
+
+	for rows.Next() {
+		var c ClientStats
+		var avgTime *float64
+		if err := rows.Scan(&c.ClientIP, &c.RequestCount, &c.TotalBytes, &avgTime, &c.ErrorCount, &c.LastSeen); err != nil {
+			continue
+		}
+		if avgTime != nil {
+			c.AvgResponseTime = *avgTime
+		}
+		if c.RequestCount > 0 {
+			c.ErrorRate = float64(c.ErrorCount) / float64(c.RequestCount) * 100
+		}
+		clients = append(clients, c)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"clients":    clients,
+		"start_time": startTime,
+		"end_time":   endTime,
+		"limit":      limit,
+	})
+}
+
+// GetUserAgentStats returns user agent classification
+// GET /api/v1/traffic/analytics/user-agents
+func (h *Handler) GetUserAgentStats(c *gin.Context) {
+	orgUUIDVal, _ := c.Get("org_id")
+	orgID := orgUUIDVal.(uuid.UUID)
+
+	var duration time.Duration
+	if minutesStr := c.Query("minutes"); minutesStr != "" {
+		minutes, _ := strconv.Atoi(minutesStr)
+		if minutes < 1 {
+			minutes = 5
+		}
+		duration = time.Duration(minutes) * time.Minute
+	} else {
+		hours, _ := strconv.Atoi(c.DefaultQuery("hours", "24"))
+		if hours < 1 {
+			hours = 24
+		}
+		duration = time.Duration(hours) * time.Hour
+	}
+
+	domain := c.Query("domain")
+	endTime := time.Now()
+	startTime := endTime.Add(-duration)
+	ctx := c.Request.Context()
+
+	var rows pgx.Rows
+	var err error
+
+	// Query to classify user agents
+	query := `
+		SELECT
+			user_agent,
+			COUNT(*) as count
+		FROM nginx_access_logs
+		WHERE org_id = $1 AND time >= $2 AND time <= $3
+	`
+	args := []interface{}{orgID, startTime, endTime}
+
+	if domain != "" {
+		query += ` AND host = $4`
+		args = append(args, domain)
+	}
+
+	query += ` GROUP BY user_agent ORDER BY count DESC LIMIT 500`
+
+	rows, err = h.db.Query(ctx, query, args...)
+	if err != nil {
+		h.logger.Error("Failed to query user agents", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve user agent stats"})
+		return
+	}
+	defer rows.Close()
+
+	// Classification buckets
+	browsers := map[string]int64{
+		"Chrome":  0,
+		"Firefox": 0,
+		"Safari":  0,
+		"Edge":    0,
+		"Opera":   0,
+		"IE":      0,
+		"Other":   0,
+	}
+
+	devices := map[string]int64{
+		"Desktop": 0,
+		"Mobile":  0,
+		"Tablet":  0,
+		"Bot":     0,
+		"Other":   0,
+	}
+
+	// Bot patterns
+	botPatterns := []string{
+		"bot", "crawler", "spider", "scraper", "curl", "wget", "python",
+		"go-http", "java", "axios", "node-fetch", "postman", "insomnia",
+		"googlebot", "bingbot", "yandex", "baidu", "duckduck", "facebook",
+		"twitter", "linkedin", "slack", "discord", "telegram", "whatsapp",
+	}
+
+	type TopAgent struct {
+		UserAgent string `json:"user_agent"`
+		Count     int64  `json:"count"`
+		Type      string `json:"type"`
+	}
+	var topAgents []TopAgent
+	var total int64
+
+	for rows.Next() {
+		var ua string
+		var count int64
+		if err := rows.Scan(&ua, &count); err != nil {
+			continue
+		}
+		total += count
+		uaLower := strings.ToLower(ua)
+
+		// Classify device/type
+		isBot := false
+		for _, pattern := range botPatterns {
+			if strings.Contains(uaLower, pattern) {
+				isBot = true
+				devices["Bot"] += count
+				break
+			}
+		}
+
+		if !isBot {
+			if strings.Contains(uaLower, "mobile") || strings.Contains(uaLower, "android") || strings.Contains(uaLower, "iphone") {
+				if strings.Contains(uaLower, "tablet") || strings.Contains(uaLower, "ipad") {
+					devices["Tablet"] += count
+				} else {
+					devices["Mobile"] += count
+				}
+			} else {
+				devices["Desktop"] += count
+			}
+		}
+
+		// Classify browser
+		agentType := "Other"
+		switch {
+		case isBot:
+			agentType = "Bot"
+		case strings.Contains(uaLower, "edg"):
+			browsers["Edge"] += count
+			agentType = "Edge"
+		case strings.Contains(uaLower, "chrome") && !strings.Contains(uaLower, "edg"):
+			browsers["Chrome"] += count
+			agentType = "Chrome"
+		case strings.Contains(uaLower, "firefox"):
+			browsers["Firefox"] += count
+			agentType = "Firefox"
+		case strings.Contains(uaLower, "safari") && !strings.Contains(uaLower, "chrome"):
+			browsers["Safari"] += count
+			agentType = "Safari"
+		case strings.Contains(uaLower, "opera") || strings.Contains(uaLower, "opr"):
+			browsers["Opera"] += count
+			agentType = "Opera"
+		case strings.Contains(uaLower, "msie") || strings.Contains(uaLower, "trident"):
+			browsers["IE"] += count
+			agentType = "IE"
+		default:
+			if !isBot {
+				browsers["Other"] += count
+			}
+		}
+
+		// Keep top 10 user agents
+		if len(topAgents) < 10 {
+			topAgents = append(topAgents, TopAgent{
+				UserAgent: ua,
+				Count:     count,
+				Type:      agentType,
+			})
+		}
+	}
+
+	// Convert maps to sorted slices
+	type CategoryCount struct {
+		Name       string  `json:"name"`
+		Count      int64   `json:"count"`
+		Percentage float64 `json:"percentage"`
+	}
+
+	var browserStats []CategoryCount
+	for name, count := range browsers {
+		if count > 0 {
+			pct := float64(0)
+			if total > 0 {
+				pct = float64(count) / float64(total) * 100
+			}
+			browserStats = append(browserStats, CategoryCount{Name: name, Count: count, Percentage: pct})
+		}
+	}
+
+	var deviceStats []CategoryCount
+	for name, count := range devices {
+		if count > 0 {
+			pct := float64(0)
+			if total > 0 {
+				pct = float64(count) / float64(total) * 100
+			}
+			deviceStats = append(deviceStats, CategoryCount{Name: name, Count: count, Percentage: pct})
+		}
+	}
+
+	// Sort by count descending
+	sort.Slice(browserStats, func(i, j int) bool { return browserStats[i].Count > browserStats[j].Count })
+	sort.Slice(deviceStats, func(i, j int) bool { return deviceStats[i].Count > deviceStats[j].Count })
+
+	c.JSON(http.StatusOK, gin.H{
+		"browsers":    browserStats,
+		"devices":     deviceStats,
+		"top_agents":  topAgents,
+		"total":       total,
+		"start_time":  startTime,
+		"end_time":    endTime,
 	})
 }
 

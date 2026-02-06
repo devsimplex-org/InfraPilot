@@ -50,6 +50,15 @@ const ACCESS_STATUS_OPTIONS: ToggleOption[] = [
   { value: "error", label: "5xx", color: "red" },
 ];
 
+// Method filter options
+const METHOD_OPTIONS: ToggleOption[] = [
+  { value: "all", label: "All" },
+  { value: "GET", label: "GET", color: "green" },
+  { value: "POST", label: "POST", color: "blue" },
+  { value: "PUT", label: "PUT", color: "yellow" },
+  { value: "DELETE", label: "DELETE", color: "red" },
+];
+
 // Status filter options for error logs
 const ERROR_STATUS_OPTIONS: ToggleOption[] = [
   { value: "all", label: "All" },
@@ -118,7 +127,19 @@ function LogEntryRow({
   onClick: () => void;
   searchQuery: string;
 }) {
-  const parsed = logType === "access" ? parseAccessLog(log.message) : null;
+  // Use structured fields if available, otherwise parse from message
+  const parsedFromMessage = logType === "access" ? parseAccessLog(log.message) : null;
+  const parsed = logType === "access" ? (log.status_code ? {
+    ip: log.client_ip || log.ip || "-",
+    method: log.method || "GET",
+    path: log.path || "/",
+    status: log.status_code,
+    bytes: log.response_bytes || log.bytes || 0,
+    referer: "",
+    userAgent: "",
+    timestamp: "",
+    protocol: "",
+  } : parsedFromMessage) : null;
   const errorLevel = logType === "error" ? parseErrorLevel(log.message) : null;
 
   const getStatusColor = (status: number | undefined): "green" | "yellow" | "red" | "blue" | "gray" => {
@@ -144,19 +165,38 @@ function LogEntryRow({
     );
   };
 
+  // Format timestamp for display
+  const formatTimestamp = (ts: string) => {
+    if (!ts) return "-";
+    try {
+      const date = new Date(ts);
+      return date.toLocaleTimeString("en-US", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false
+      });
+    } catch {
+      return "-";
+    }
+  };
+
   if (logType === "access" && parsed) {
     return (
       <div
         onClick={onClick}
         className={cn(
-          "group flex items-center gap-3 py-2 px-3 rounded-md cursor-pointer transition-colors",
+          "group flex items-center gap-2 py-2 px-3 rounded-md cursor-pointer transition-colors",
           isSelected
             ? "bg-primary-500/20 border border-primary-500/50"
             : "hover:bg-gray-800/50"
         )}
       >
-        <span className="text-gray-600 text-xs font-mono w-8 text-right shrink-0">
+        <span className="text-gray-600 text-xs font-mono w-6 text-right shrink-0">
           {index + 1}
+        </span>
+        <span className="text-gray-500 text-xs font-mono shrink-0 w-[70px]">
+          {formatTimestamp(log.timestamp)}
         </span>
         <Badge
           color={getStatusColor(parsed.status)}
@@ -165,7 +205,7 @@ function LogEntryRow({
           {parsed.status}
         </Badge>
         <span className={cn(
-          "text-xs font-medium w-12 shrink-0",
+          "text-xs font-medium w-10 shrink-0",
           parsed.method === "GET" && "text-green-400",
           parsed.method === "POST" && "text-blue-400",
           parsed.method === "PUT" && "text-yellow-400",
@@ -174,13 +214,18 @@ function LogEntryRow({
         )}>
           {parsed.method}
         </span>
+        {log.host && (
+          <span className="text-cyan-400 text-xs font-mono shrink-0 max-w-[120px] truncate" title={log.host}>
+            {log.host}
+          </span>
+        )}
         <span className="text-white flex-1 truncate font-mono text-sm">
           {highlightText(parsed.path, searchQuery)}
         </span>
-        <span className="text-gray-500 text-xs shrink-0 hidden md:block">
+        <span className="text-gray-500 text-xs shrink-0 hidden lg:block">
           {parsed.bytes > 0 ? `${(parsed.bytes / 1024).toFixed(1)}KB` : "-"}
         </span>
-        <span className="text-gray-500 text-xs font-mono shrink-0">
+        <span className="text-gray-500 text-xs font-mono shrink-0 hidden md:block">
           {highlightText(parsed.ip, searchQuery)}
         </span>
       </div>
@@ -201,9 +246,12 @@ function LogEntryRow({
         errorLevel === "warn" && "bg-yellow-900/20"
       )}
     >
-      <div className="flex items-start gap-3">
-        <span className="text-gray-600 text-xs font-mono w-8 text-right shrink-0 pt-0.5">
+      <div className="flex items-start gap-2">
+        <span className="text-gray-600 text-xs font-mono w-6 text-right shrink-0 pt-0.5">
           {index + 1}
+        </span>
+        <span className="text-gray-500 text-xs font-mono shrink-0 w-[70px] pt-0.5">
+          {formatTimestamp(log.timestamp)}
         </span>
         {errorLevel && (
           <Badge
@@ -274,6 +322,8 @@ export default function TrafficLogsPage() {
   const [lines, setLines] = useState("100");
   const [selectedDomain, setSelectedDomain] = useState<string>("");
   const [levelFilter, setLevelFilter] = useState<LogLevel>("all");
+  const [methodFilter, setMethodFilter] = useState<string>("all");
+  const [ipFilter, setIpFilter] = useState<string>("");
   const [selectedLog, setSelectedLog] = useState<NginxLogEntry | null>(null);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const logContainerRef = useRef<HTMLDivElement>(null);
@@ -385,9 +435,21 @@ export default function TrafficLogsPage() {
         }
       }
 
+      // Method filter for access logs
+      if (logType === "access" && methodFilter !== "all") {
+        const method = log.method || parseAccessLog(log.message)?.method;
+        if (method !== methodFilter) return false;
+      }
+
+      // IP filter
+      if (ipFilter) {
+        const clientIp = log.client_ip || log.ip || "";
+        if (!clientIp.includes(ipFilter)) return false;
+      }
+
       return true;
     });
-  }, [logs, searchQuery, levelFilter, logType]);
+  }, [logs, searchQuery, levelFilter, logType, methodFilter, ipFilter]);
 
   // Calculate metrics
   const metrics = useMemo(() => {
@@ -587,8 +649,57 @@ export default function TrafficLogsPage() {
         showExport={true}
       />
 
+      {/* Secondary Filters: Method and IP */}
+      {logType === "access" && (
+        <div className="flex flex-wrap items-center gap-4 px-4 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+          {/* Method Filter */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500 font-medium">Method:</span>
+            <div className="flex gap-1">
+              {METHOD_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => setMethodFilter(opt.value)}
+                  className={cn(
+                    "px-2 py-1 text-xs font-medium rounded transition-colors",
+                    methodFilter === opt.value
+                      ? opt.value === "GET" ? "bg-green-500 text-white" :
+                        opt.value === "POST" ? "bg-blue-500 text-white" :
+                        opt.value === "PUT" ? "bg-yellow-500 text-white" :
+                        opt.value === "DELETE" ? "bg-red-500 text-white" :
+                        "bg-gray-600 text-white"
+                      : "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600"
+                  )}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {/* IP Filter */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500 font-medium">IP:</span>
+            <input
+              type="text"
+              value={ipFilter}
+              onChange={(e) => setIpFilter(e.target.value)}
+              placeholder="Filter by IP..."
+              className="px-2 py-1 text-xs bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded w-32 focus:outline-none focus:ring-1 focus:ring-primary-500"
+            />
+            {ipFilter && (
+              <button
+                onClick={() => setIpFilter("")}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Active filters display */}
-      {(searchQuery || selectedDomain || levelFilter !== "all") && (
+      {(searchQuery || selectedDomain || levelFilter !== "all" || methodFilter !== "all" || ipFilter) && (
         <div className="flex items-center gap-2 px-4 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
           <span className="text-xs text-gray-500">Active filters:</span>
           {selectedDomain && (
@@ -603,6 +714,26 @@ export default function TrafficLogsPage() {
             <Badge color="purple" size="sm" className="gap-1">
               &quot;{searchQuery}&quot;
               <button onClick={() => setSearchQuery("")}>
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+          )}
+          {methodFilter !== "all" && (
+            <Badge
+              color={methodFilter === "GET" ? "green" : methodFilter === "POST" ? "blue" : methodFilter === "DELETE" ? "red" : "yellow"}
+              size="sm"
+              className="gap-1"
+            >
+              {methodFilter}
+              <button onClick={() => setMethodFilter("all")}>
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+          )}
+          {ipFilter && (
+            <Badge color="gray" size="sm" className="gap-1">
+              IP: {ipFilter}
+              <button onClick={() => setIpFilter("")}>
                 <X className="h-3 w-3" />
               </button>
             </Badge>
