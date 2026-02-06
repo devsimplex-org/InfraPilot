@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,9 +23,17 @@ type NginxLogBatch struct {
 	Entries []NginxLogEntry `json:"entries"`
 }
 
+// trackedFile represents a log file being watched
+type trackedFile struct {
+	path   string
+	file   *os.File
+	offset int64
+}
+
 // NginxCollector collects nginx access logs and sends them to the backend
 type NginxCollector struct {
-	logPath       string
+	logPath       string // Primary log path (for config)
+	logDirs       []string // Directories to watch for log files
 	backendURL    string
 	agentID       string
 	httpClient    *http.Client
@@ -36,9 +46,9 @@ type NginxCollector struct {
 	bufferSize    int
 	flushInterval time.Duration
 
-	// File tracking
-	file          *os.File
-	fileOffset    int64
+	// Multi-file tracking
+	files    map[string]*trackedFile
+	filesMu  sync.RWMutex
 
 	// Configuration
 	skipHealthChecks bool
@@ -81,6 +91,7 @@ func NewNginxCollector(config NginxCollectorConfig, logger *zap.Logger) *NginxCo
 
 	return &NginxCollector{
 		logPath:          config.LogPath,
+		logDirs:          []string{"/var/log/nginx", "/var/log/nginx/domains"},
 		backendURL:       config.BackendURL,
 		agentID:          config.AgentID,
 		httpClient:       &http.Client{Timeout: 30 * time.Second},
@@ -89,6 +100,7 @@ func NewNginxCollector(config NginxCollectorConfig, logger *zap.Logger) *NginxCo
 		buffer:           make([]NginxLogEntry, 0, config.BufferSize),
 		bufferSize:       config.BufferSize,
 		flushInterval:    config.FlushInterval,
+		files:            make(map[string]*trackedFile),
 		skipHealthChecks: config.SkipHealthChecks,
 		normalizePaths:   config.NormalizePaths,
 	}
@@ -108,7 +120,7 @@ func (c *NginxCollector) Start(ctx context.Context) error {
 	go c.flushLoop(ctx)
 
 	// Start file watcher
-	return c.watchFile(ctx)
+	return c.watchFiles(ctx)
 }
 
 // flushLoop periodically flushes buffered logs to the backend
@@ -129,8 +141,8 @@ func (c *NginxCollector) flushLoop(ctx context.Context) {
 	}
 }
 
-// watchFile watches the nginx access log file for new entries
-func (c *NginxCollector) watchFile(ctx context.Context) error {
+// watchFiles watches all nginx log files for new entries
+func (c *NginxCollector) watchFiles(ctx context.Context) error {
 	// Create file watcher
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -138,67 +150,36 @@ func (c *NginxCollector) watchFile(ctx context.Context) error {
 	}
 	defer watcher.Close()
 
-	// Open the log file
-	if err := c.openLogFile(); err != nil {
-		c.logger.Warn("Failed to open nginx log file, will retry",
-			zap.String("path", c.logPath),
-			zap.Error(err),
-		)
+	// Watch log directories
+	for _, dir := range c.logDirs {
+		if err := watcher.Add(dir); err != nil {
+			c.logger.Debug("Could not watch directory, may not exist yet",
+				zap.String("dir", dir),
+				zap.Error(err),
+			)
+		} else {
+			c.logger.Info("Watching directory for log files", zap.String("dir", dir))
+		}
 	}
 
-	// Watch the log file
-	if err := watcher.Add(c.logPath); err != nil {
-		// File doesn't exist yet, watch parent directory
-		c.logger.Debug("Log file doesn't exist yet, watching for creation",
-			zap.String("path", c.logPath),
-		)
-	}
+	// Scan for existing log files
+	c.scanExistingLogFiles()
 
-	// Also watch /var/log/nginx for file recreation (log rotation)
-	watcher.Add("/var/log/nginx")
-
-	// Read any existing content
-	if c.file != nil {
-		c.readNewLines()
-	}
-
-	// Periodic check for file changes (backup for missed events)
+	// Periodic scan for new files and changes (backup for missed events)
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			if c.file != nil {
-				c.file.Close()
-			}
+			c.closeAllFiles()
 			return nil
 
 		case event, ok := <-watcher.Events:
 			if !ok {
 				return nil
 			}
-
-			if event.Name == c.logPath {
-				switch {
-				case event.Op&fsnotify.Write == fsnotify.Write:
-					// File was written to
-					c.readNewLines()
-
-				case event.Op&fsnotify.Create == fsnotify.Create:
-					// File was created (after rotation)
-					c.logger.Info("Log file recreated, reopening")
-					c.reopenLogFile()
-
-				case event.Op&fsnotify.Remove == fsnotify.Remove:
-					// File was removed (log rotation)
-					c.logger.Info("Log file removed, waiting for recreation")
-					if c.file != nil {
-						c.file.Close()
-						c.file = nil
-					}
-				}
-			}
+			c.handleFileEvent(event, watcher)
 
 		case err, ok := <-watcher.Errors:
 			if !ok {
@@ -207,92 +188,179 @@ func (c *NginxCollector) watchFile(ctx context.Context) error {
 			c.logger.Error("File watcher error", zap.Error(err))
 
 		case <-ticker.C:
-			// Periodic check for file changes
-			if c.file == nil {
-				if err := c.openLogFile(); err == nil {
-					c.logger.Info("Log file now available")
-					watcher.Add(c.logPath)
-				}
+			// Periodic scan for changes
+			c.readAllFiles()
+			// Also try to watch directories that may now exist
+			for _, dir := range c.logDirs {
+				watcher.Add(dir)
 			}
-			c.readNewLines()
 		}
 	}
 }
 
-// openLogFile opens the nginx access log file
-func (c *NginxCollector) openLogFile() error {
-	file, err := os.Open(c.logPath)
+// scanExistingLogFiles scans for existing nginx log files
+func (c *NginxCollector) scanExistingLogFiles() {
+	for _, dir := range c.logDirs {
+		// Look for access log files
+		patterns := []string{
+			filepath.Join(dir, "access.log"),
+			filepath.Join(dir, "*.access.log"),
+		}
+
+		for _, pattern := range patterns {
+			matches, err := filepath.Glob(pattern)
+			if err != nil {
+				continue
+			}
+
+			for _, path := range matches {
+				c.trackFile(path)
+			}
+		}
+	}
+}
+
+// trackFile starts tracking a log file
+func (c *NginxCollector) trackFile(path string) {
+	c.filesMu.Lock()
+	defer c.filesMu.Unlock()
+
+	// Skip if already tracking
+	if _, exists := c.files[path]; exists {
+		return
+	}
+
+	file, err := os.Open(path)
 	if err != nil {
-		return err
+		c.logger.Debug("Could not open log file",
+			zap.String("path", path),
+			zap.Error(err),
+		)
+		return
 	}
 
 	// Seek to end to only read new entries
 	offset, err := file.Seek(0, io.SeekEnd)
 	if err != nil {
 		file.Close()
-		return err
+		c.logger.Debug("Could not seek in log file",
+			zap.String("path", path),
+			zap.Error(err),
+		)
+		return
 	}
 
-	c.file = file
-	c.fileOffset = offset
-	return nil
+	c.files[path] = &trackedFile{
+		path:   path,
+		file:   file,
+		offset: offset,
+	}
+
+	c.logger.Info("Now tracking log file", zap.String("path", path), zap.Int64("offset", offset))
 }
 
-// reopenLogFile closes and reopens the log file (after rotation)
-func (c *NginxCollector) reopenLogFile() {
-	if c.file != nil {
-		c.file.Close()
-		c.file = nil
-	}
+// untrackFile stops tracking a log file
+func (c *NginxCollector) untrackFile(path string) {
+	c.filesMu.Lock()
+	defer c.filesMu.Unlock()
 
-	if err := c.openLogFile(); err != nil {
-		c.logger.Warn("Failed to reopen log file", zap.Error(err))
-	}
-
-	// Reset offset to read from beginning of new file
-	if c.file != nil {
-		c.file.Seek(0, io.SeekStart)
-		c.fileOffset = 0
+	if tf, exists := c.files[path]; exists {
+		if tf.file != nil {
+			tf.file.Close()
+		}
+		delete(c.files, path)
+		c.logger.Info("Stopped tracking log file", zap.String("path", path))
 	}
 }
 
-// readNewLines reads new lines from the log file
-func (c *NginxCollector) readNewLines() {
-	if c.file == nil {
+// handleFileEvent handles fsnotify events
+func (c *NginxCollector) handleFileEvent(event fsnotify.Event, watcher *fsnotify.Watcher) {
+	path := event.Name
+
+	// Only process access log files
+	if !strings.HasSuffix(path, "access.log") && !strings.HasSuffix(path, ".access.log") {
+		return
+	}
+
+	switch {
+	case event.Op&fsnotify.Write == fsnotify.Write:
+		// File was written to - read new lines
+		c.readFile(path)
+
+	case event.Op&fsnotify.Create == fsnotify.Create:
+		// New file created
+		c.logger.Info("Log file created", zap.String("path", path))
+		c.trackFile(path)
+		// Also watch the file directly
+		watcher.Add(path)
+
+	case event.Op&fsnotify.Remove == fsnotify.Remove:
+		// File was removed (log rotation)
+		c.logger.Info("Log file removed", zap.String("path", path))
+		c.untrackFile(path)
+	}
+}
+
+// readAllFiles reads new lines from all tracked files
+func (c *NginxCollector) readAllFiles() {
+	c.filesMu.RLock()
+	paths := make([]string, 0, len(c.files))
+	for path := range c.files {
+		paths = append(paths, path)
+	}
+	c.filesMu.RUnlock()
+
+	for _, path := range paths {
+		c.readFile(path)
+	}
+}
+
+// readFile reads new lines from a specific log file
+func (c *NginxCollector) readFile(path string) {
+	c.filesMu.Lock()
+	tf, exists := c.files[path]
+	if !exists || tf.file == nil {
+		c.filesMu.Unlock()
+		// Try to track the file if it exists
+		c.trackFile(path)
 		return
 	}
 
 	// Get current file size
-	info, err := c.file.Stat()
+	info, err := tf.file.Stat()
 	if err != nil {
-		c.logger.Debug("Failed to stat file", zap.Error(err))
+		c.filesMu.Unlock()
+		c.logger.Debug("Failed to stat file", zap.String("path", path), zap.Error(err))
 		return
 	}
 
 	currentSize := info.Size()
 
 	// Check if file was truncated (log rotation)
-	if currentSize < c.fileOffset {
-		c.logger.Info("Log file was truncated, reading from beginning")
-		c.file.Seek(0, io.SeekStart)
-		c.fileOffset = 0
+	if currentSize < tf.offset {
+		c.logger.Info("Log file was truncated, reading from beginning", zap.String("path", path))
+		tf.file.Seek(0, io.SeekStart)
+		tf.offset = 0
 	}
 
 	// Check if there's new content
-	if currentSize <= c.fileOffset {
+	if currentSize <= tf.offset {
+		c.filesMu.Unlock()
 		return
 	}
 
 	// Seek to last position
-	c.file.Seek(c.fileOffset, io.SeekStart)
+	tf.file.Seek(tf.offset, io.SeekStart)
 
 	// Read new lines
-	reader := bufio.NewReader(c.file)
+	reader := bufio.NewReader(tf.file)
+	c.filesMu.Unlock()
+
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err != io.EOF {
-				c.logger.Debug("Error reading line", zap.Error(err))
+				c.logger.Debug("Error reading line", zap.String("path", path), zap.Error(err))
 			}
 			break
 		}
@@ -301,6 +369,7 @@ func (c *NginxCollector) readNewLines() {
 		entry, err := c.parser.Parse(line)
 		if err != nil {
 			c.logger.Debug("Failed to parse nginx log line",
+				zap.String("path", path),
 				zap.String("line", line),
 				zap.Error(err),
 			)
@@ -325,8 +394,25 @@ func (c *NginxCollector) readNewLines() {
 	}
 
 	// Update offset
-	newOffset, _ := c.file.Seek(0, io.SeekCurrent)
-	c.fileOffset = newOffset
+	c.filesMu.Lock()
+	if tf, exists := c.files[path]; exists && tf.file != nil {
+		newOffset, _ := tf.file.Seek(0, io.SeekCurrent)
+		tf.offset = newOffset
+	}
+	c.filesMu.Unlock()
+}
+
+// closeAllFiles closes all tracked files
+func (c *NginxCollector) closeAllFiles() {
+	c.filesMu.Lock()
+	defer c.filesMu.Unlock()
+
+	for path, tf := range c.files {
+		if tf.file != nil {
+			tf.file.Close()
+		}
+		delete(c.files, path)
+	}
 }
 
 // addEntry adds a log entry to the buffer
@@ -393,10 +479,7 @@ func (c *NginxCollector) flush() {
 
 // Stop stops the nginx log collector
 func (c *NginxCollector) Stop() {
-	if c.file != nil {
-		c.file.Close()
-		c.file = nil
-	}
+	c.closeAllFiles()
 
 	// Final flush
 	c.flush()
