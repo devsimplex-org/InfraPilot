@@ -431,6 +431,12 @@ func (h *Handler) getNginxLogsReal(c *gin.Context) {
 			tail = parsed
 		}
 	}
+	// Also support "lines" param from frontend
+	if t := c.Query("lines"); t != "" {
+		if parsed, err := strconv.Atoi(t); err == nil && parsed > 0 {
+			tail = parsed
+		}
+	}
 	if tail > 500 {
 		tail = 500
 	}
@@ -451,15 +457,18 @@ func (h *Handler) getNginxLogsReal(c *gin.Context) {
 	// Find nginx container
 	containers, err := docker.ContainerList(ctx, container.ListOptions{})
 	if err != nil {
+		h.logger.Error("Failed to list containers", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list containers"})
 		return
 	}
 
 	var nginxContainerID string
+	var nginxContainerName string
 	for _, cont := range containers {
 		for _, name := range cont.Names {
 			if strings.Contains(name, "nginx") {
 				nginxContainerID = cont.ID
+				nginxContainerName = strings.TrimPrefix(name, "/")
 				break
 			}
 		}
@@ -473,59 +482,172 @@ func (h *Handler) getNginxLogsReal(c *gin.Context) {
 		return
 	}
 
-	// Execute command to read log file
+	h.logger.Debug("Found nginx container", zap.String("id", nginxContainerID), zap.String("name", nginxContainerName))
+
 	// Support per-domain log files if domain is specified
 	domain := c.Query("domain")
-	var logFile string
+	var logs []LogEntry
 
 	if domain != "" {
-		// Use per-domain log file
+		// Use per-domain log file via exec tail
+		var logFile string
 		if logType == "error" {
 			logFile = fmt.Sprintf("/var/log/nginx/domains/%s.error.log", domain)
 		} else {
 			logFile = fmt.Sprintf("/var/log/nginx/domains/%s.access.log", domain)
 		}
+
+		logs, err = h.getNginxLogsFromFile(ctx, docker, nginxContainerID, logFile, logType, tail)
+		if err != nil {
+			h.logger.Warn("Failed to get per-domain logs, trying container logs",
+				zap.String("domain", domain),
+				zap.Error(err))
+			// Fall back to container logs
+			logs, err = h.getNginxLogsFromContainer(ctx, docker, nginxContainerID, logType, tail)
+			if err != nil {
+				h.logger.Error("Failed to get container logs", zap.Error(err))
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get logs"})
+				return
+			}
+		}
 	} else {
-		// Fall back to global log file
-		if logType == "error" {
-			logFile = "/var/log/nginx/error.log"
+		// For global logs, use Docker container logs API
+		// (nginx access.log/error.log are symlinked to stdout/stderr in container)
+		logs, err = h.getNginxLogsFromContainer(ctx, docker, nginxContainerID, logType, tail)
+		if err != nil {
+			h.logger.Error("Failed to get container logs", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get logs"})
+			return
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"logs":  logs,
+		"type":  logType,
+		"count": len(logs),
+	})
+}
+
+// getNginxLogsFromContainer gets logs using Docker container logs API
+func (h *Handler) getNginxLogsFromContainer(ctx context.Context, docker *client.Client, containerID, logType string, tail int) ([]LogEntry, error) {
+	opts := container.LogsOptions{
+		ShowStdout: logType == "access",
+		ShowStderr: logType == "error",
+		Tail:       strconv.Itoa(tail),
+		Timestamps: true,
+	}
+
+	reader, err := docker.ContainerLogs(ctx, containerID, opts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get container logs: %w", err)
+	}
+	defer reader.Close()
+
+	var logs []LogEntry
+	scanner := bufio.NewScanner(reader)
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+
+		var msg []byte
+		// Check for Docker multiplexed stream header
+		if len(line) > 8 && (line[0] == 1 || line[0] == 2) {
+			msg = line[8:]
 		} else {
-			logFile = "/var/log/nginx/access.log"
+			msg = line
 		}
+
+		msgStr := string(msg)
+		timestamp := time.Now()
+
+		// Parse timestamp if present (format: 2006-01-02T15:04:05.999999999Z)
+		if len(msgStr) > 30 && msgStr[4] == '-' {
+			if t, err := time.Parse(time.RFC3339Nano, msgStr[:30]); err == nil {
+				timestamp = t
+				msgStr = strings.TrimSpace(msgStr[31:])
+			}
+		}
+
+		entry := LogEntry{
+			Timestamp:     timestamp,
+			Source:        "nginx",
+			ContainerName: "nginx",
+			Stream:        logType,
+			Level:         "info",
+			Message:       msgStr,
+		}
+
+		// Detect log level
+		if logType == "access" {
+			if strings.Contains(msgStr, "\" 4") || strings.Contains(msgStr, "\" 5") {
+				entry.Level = "warn"
+			}
+		} else {
+			if strings.Contains(msgStr, "[error]") || strings.Contains(msgStr, "[emerg]") {
+				entry.Level = "error"
+			} else if strings.Contains(msgStr, "[warn]") {
+				entry.Level = "warn"
+			}
+		}
+
+		logs = append(logs, entry)
 	}
 
-	// First, ensure the domains log directory exists
-	if domain != "" {
-		mkdirConfig := container.ExecOptions{
-			Cmd: []string{"mkdir", "-p", "/var/log/nginx/domains"},
-		}
-		mkdirResp, _ := docker.ContainerExecCreate(ctx, nginxContainerID, mkdirConfig)
-		if mkdirResp.ID != "" {
-			docker.ContainerExecStart(ctx, mkdirResp.ID, container.ExecStartOptions{})
-		}
+	return logs, nil
+}
+
+// getNginxLogsFromFile gets logs from a specific file using exec tail
+func (h *Handler) getNginxLogsFromFile(ctx context.Context, docker *client.Client, containerID, logFile, logType string, tail int) ([]LogEntry, error) {
+	// First check if file exists
+	checkConfig := container.ExecOptions{
+		Cmd:          []string{"test", "-f", logFile},
+		AttachStdout: true,
+		AttachStderr: true,
 	}
 
+	checkResp, err := docker.ContainerExecCreate(ctx, containerID, checkConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create check exec: %w", err)
+	}
+
+	if err := docker.ContainerExecStart(ctx, checkResp.ID, container.ExecStartOptions{}); err != nil {
+		return nil, fmt.Errorf("failed to start check exec: %w", err)
+	}
+
+	// Wait for exec to complete and check exit code
+	inspect, err := docker.ContainerExecInspect(ctx, checkResp.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect check exec: %w", err)
+	}
+
+	if inspect.ExitCode != 0 {
+		return nil, fmt.Errorf("log file does not exist: %s", logFile)
+	}
+
+	// Now tail the file
 	execConfig := container.ExecOptions{
 		Cmd:          []string{"tail", "-n", strconv.Itoa(tail), logFile},
 		AttachStdout: true,
 		AttachStderr: true,
 	}
 
-	execResp, err := docker.ContainerExecCreate(ctx, nginxContainerID, execConfig)
+	execResp, err := docker.ContainerExecCreate(ctx, containerID, execConfig)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create exec"})
-		return
+		return nil, fmt.Errorf("failed to create exec: %w", err)
 	}
 
 	attachResp, err := docker.ContainerExecAttach(ctx, execResp.ID, container.ExecAttachOptions{})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to attach exec"})
-		return
+		return nil, fmt.Errorf("failed to attach exec: %w", err)
 	}
 	defer attachResp.Close()
 
 	var logs []LogEntry
 	scanner := bufio.NewScanner(attachResp.Reader)
+
 	for scanner.Scan() {
 		line := scanner.Text()
 		if len(line) == 0 {
@@ -546,30 +668,21 @@ func (h *Handler) getNginxLogsReal(c *gin.Context) {
 			Message:       line,
 		}
 
-		// Parse nginx log format for better data
+		// Detect log level
 		if logType == "access" {
-			entry.Level = "info"
-			// Check for error status codes
 			if strings.Contains(line, "\" 4") || strings.Contains(line, "\" 5") {
 				entry.Level = "warn"
 			}
 		} else {
-			// Error log level detection
-			if strings.Contains(line, "[error]") {
+			if strings.Contains(line, "[error]") || strings.Contains(line, "[emerg]") {
 				entry.Level = "error"
 			} else if strings.Contains(line, "[warn]") {
 				entry.Level = "warn"
-			} else if strings.Contains(line, "[notice]") {
-				entry.Level = "info"
 			}
 		}
 
 		logs = append(logs, entry)
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"logs":  logs,
-		"type":  logType,
-		"count": len(logs),
-	})
+	return logs, nil
 }
