@@ -464,6 +464,9 @@ func generateInfraPilotNginxConfig(domain string, forceSSL, http2, sslEnabled bo
 	config.WriteString("    listen 80;\n")
 	config.WriteString("    listen [::]:80;\n")
 	config.WriteString(fmt.Sprintf("    server_name %s;\n\n", domain))
+	// Per-domain logging for analytics
+	config.WriteString(fmt.Sprintf("    access_log /var/log/nginx/domains/%s.access.log infrapilot_analytics;\n", domain))
+	config.WriteString(fmt.Sprintf("    error_log /var/log/nginx/domains/%s.error.log warn;\n\n", domain))
 
 	if sslEnabled && forceSSL {
 		// ACME challenge must always be accessible for certificate renewals
@@ -490,6 +493,9 @@ func generateInfraPilotNginxConfig(domain string, forceSSL, http2, sslEnabled bo
 			config.WriteString("    http2 on;\n")
 		}
 		config.WriteString(fmt.Sprintf("    server_name %s;\n\n", domain))
+		// Per-domain logging for analytics
+		config.WriteString(fmt.Sprintf("    access_log /var/log/nginx/domains/%s.access.log infrapilot_analytics;\n", domain))
+		config.WriteString(fmt.Sprintf("    error_log /var/log/nginx/domains/%s.error.log warn;\n\n", domain))
 
 		// SSL configuration - use effective paths (custom, wildcard, or exact domain)
 		config.WriteString(fmt.Sprintf("    ssl_certificate %s;\n", effectiveCertPath))

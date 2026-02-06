@@ -25,8 +25,17 @@ import { Spinner } from "@/components/ui/Spinner";
 import { StatusIndicator } from "@/components/ui/StatusIndicator";
 import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
 import { RedeployWizard } from "@/components/RedeployWizard";
-import { Button, Input } from "@/components/ui/page-layout";
+import { Button } from "@/components/ui/page-layout";
+import { FilterToolbar, ToggleOption } from "@/components/ui/FilterToolbar";
 import { cn } from "@/lib/utils";
+
+// Filter options
+const DEPLOYMENT_STATUS_OPTIONS: ToggleOption[] = [
+  { value: "all", label: "All" },
+  { value: "running", label: "Running", color: "green" },
+  { value: "failed", label: "Failed", color: "red" },
+  { value: "pending", label: "Pending", color: "yellow" },
+];
 
 type StatusFilter = "all" | "running" | "failed" | "pending" | "scanning";
 
@@ -330,39 +339,21 @@ export default function DeploymentsPage() {
         <StatCard label="Blocked" value={metrics.blocked} icon={Shield} iconColor="text-red-600 dark:text-red-400" />
       </MetricsGrid>
 
-      {/* Filters */}
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-gray-500 dark:text-gray-400">Status:</span>
-          <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
-            {([
-              { value: "all", label: `All (${metrics.total})` },
-              { value: "running", label: `Running (${metrics.running})` },
-              { value: "failed", label: `Failed (${metrics.failed})` },
-              { value: "pending", label: `Pending (${metrics.pending})` },
-            ] as { value: StatusFilter; label: string }[]).map((opt) => (
-              <button
-                key={opt.value}
-                onClick={() => setStatusFilter(opt.value)}
-                className={cn(
-                  "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
-                  statusFilter === opt.value
-                    ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
-                    : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
-                )}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Input placeholder="Search deployments..." value={searchFilter} onChange={(e) => setSearchFilter(e.target.value)} className="w-64" />
-          {(statusFilter !== "all" || searchFilter) && (
-            <button onClick={() => { setStatusFilter("all"); setSearchFilter(""); }} className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white">Reset</button>
-          )}
-        </div>
-      </div>
+      {/* Filter Toolbar */}
+      <FilterToolbar
+        primaryToggle={{
+          options: DEPLOYMENT_STATUS_OPTIONS,
+          value: statusFilter,
+          onChange: (v) => setStatusFilter(v as StatusFilter),
+        }}
+        searchQuery={searchFilter}
+        onSearchChange={setSearchFilter}
+        searchPlaceholder="Search deployments..."
+        showSearch={true}
+        showRefresh={true}
+        onRefresh={() => queryClient.invalidateQueries({ queryKey: ["deployments", selectedAgent] })}
+        singleRow={true}
+      />
 
       {/* Selection Bar */}
       {deployments && deployments.length > 0 && (

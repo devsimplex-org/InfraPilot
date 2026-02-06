@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -16,6 +18,7 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
 )
@@ -29,6 +32,14 @@ type LogEntry struct {
 	Stream        string    `json:"stream"` // stdout, stderr, access, error
 	Level         string    `json:"level"`  // info, warn, error, debug
 	Message       string    `json:"message"`
+	// Nginx-specific fields
+	StatusCode    int    `json:"status_code,omitempty"`
+	Method        string `json:"method,omitempty"`
+	Path          string `json:"path,omitempty"`
+	ResponseBytes int64  `json:"response_bytes,omitempty"`
+	ResponseTime  float64 `json:"response_time,omitempty"`
+	ClientIP      string `json:"client_ip,omitempty"`
+	Host          string `json:"host,omitempty"`
 }
 
 // UnifiedLogsRequest represents query parameters for log fetching
@@ -426,6 +437,7 @@ func (h *Handler) streamContainerToWS(ctx context.Context, docker *client.Client
 }
 
 // getNginxLogsReal returns nginx access and error logs
+// Supports source=db to read from persistent database, otherwise reads from files
 func (h *Handler) getNginxLogsReal(c *gin.Context) {
 	tail := 100
 	if t := c.Query("tail"); t != "" {
@@ -444,7 +456,90 @@ func (h *Handler) getNginxLogsReal(c *gin.Context) {
 	}
 
 	logType := c.DefaultQuery("type", "access") // access or error
+	domain := c.Query("domain")
+	source := c.DefaultQuery("source", "db") // "db" (persistent) or "file" (real-time)
 
+	// If source=db, read from the database (persistent)
+	if source == "db" && logType == "access" {
+		h.getNginxLogsFromDB(c, domain, tail)
+		return
+	}
+
+	// Check if running in all-in-one mode (nginx running locally, not in a container)
+	// by checking if local nginx log directory exists
+	domainsLogDir := "/var/log/nginx/domains"
+
+	if domain != "" {
+		// Specific domain requested - read from domain-specific log file
+		var localLogFile string
+		if logType == "error" {
+			localLogFile = fmt.Sprintf("%s/%s.error.log", domainsLogDir, domain)
+		} else {
+			localLogFile = fmt.Sprintf("%s/%s.access.log", domainsLogDir, domain)
+		}
+
+		if _, err := os.Stat(localLogFile); err == nil {
+			h.logger.Debug("Reading domain-specific nginx logs from local filesystem",
+				zap.String("file", localLogFile),
+				zap.String("domain", domain))
+
+			logs, err := h.getNginxLogsFromLocalFile(localLogFile, logType, tail)
+			if err != nil {
+				h.logger.Error("Failed to read local nginx logs", zap.Error(err))
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read logs"})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"logs":  logs,
+				"type":  logType,
+				"count": len(logs),
+			})
+			return
+		}
+	} else {
+		// All domains - read from all per-domain log files in all-in-one mode
+		if entries, err := os.ReadDir(domainsLogDir); err == nil {
+			h.logger.Debug("Reading all domain nginx logs from local filesystem (all-in-one mode)",
+				zap.String("dir", domainsLogDir))
+
+			var allLogs []LogEntry
+			suffix := ".access.log"
+			if logType == "error" {
+				suffix = ".error.log"
+			}
+
+			for _, entry := range entries {
+				if !entry.IsDir() && strings.HasSuffix(entry.Name(), suffix) {
+					logFile := filepath.Join(domainsLogDir, entry.Name())
+					logs, err := h.getNginxLogsFromLocalFile(logFile, logType, tail)
+					if err != nil {
+						h.logger.Warn("Failed to read log file", zap.String("file", logFile), zap.Error(err))
+						continue
+					}
+					allLogs = append(allLogs, logs...)
+				}
+			}
+
+			// Sort by timestamp descending and limit to tail
+			sort.Slice(allLogs, func(i, j int) bool {
+				return allLogs[i].Timestamp.After(allLogs[j].Timestamp)
+			})
+
+			if len(allLogs) > tail {
+				allLogs = allLogs[:tail]
+			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"logs":  allLogs,
+				"type":  logType,
+				"count": len(allLogs),
+			})
+			return
+		}
+	}
+
+	// Fall back to Docker container mode
 	// Create Docker client
 	docker, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
@@ -456,7 +551,7 @@ func (h *Handler) getNginxLogsReal(c *gin.Context) {
 
 	ctx := context.Background()
 
-	// Find nginx container
+	// Find nginx container - prefer "infrapilot" container over dev containers
 	containers, err := docker.ContainerList(ctx, container.ListOptions{})
 	if err != nil {
 		h.logger.Error("Failed to list containers", zap.Error(err))
@@ -468,7 +563,11 @@ func (h *Handler) getNginxLogsReal(c *gin.Context) {
 	var nginxContainerName string
 	for _, cont := range containers {
 		for _, name := range cont.Names {
-			if strings.Contains(name, "nginx") {
+			// Skip dev nginx containers when looking for production nginx
+			if strings.Contains(name, "infrapilot-nginx") || strings.Contains(name, "-dev-") {
+				continue
+			}
+			if strings.Contains(name, "nginx") || strings.Contains(name, "infrapilot") {
 				nginxContainerID = cont.ID
 				nginxContainerName = strings.TrimPrefix(name, "/")
 				break
@@ -476,6 +575,22 @@ func (h *Handler) getNginxLogsReal(c *gin.Context) {
 		}
 		if nginxContainerID != "" {
 			break
+		}
+	}
+
+	// If no production nginx found, try any nginx container
+	if nginxContainerID == "" {
+		for _, cont := range containers {
+			for _, name := range cont.Names {
+				if strings.Contains(name, "nginx") {
+					nginxContainerID = cont.ID
+					nginxContainerName = strings.TrimPrefix(name, "/")
+					break
+				}
+			}
+			if nginxContainerID != "" {
+				break
+			}
 		}
 	}
 
@@ -487,7 +602,6 @@ func (h *Handler) getNginxLogsReal(c *gin.Context) {
 	h.logger.Debug("Found nginx container", zap.String("id", nginxContainerID), zap.String("name", nginxContainerName))
 
 	// Support per-domain log files if domain is specified
-	domain := c.Query("domain")
 	var logs []LogEntry
 
 	if domain != "" {
@@ -719,4 +833,246 @@ func (h *Handler) getNginxLogsFromFile(ctx context.Context, docker *client.Clien
 	)
 
 	return logs, nil
+}
+
+// getNginxLogsFromLocalFile reads nginx logs directly from the local filesystem
+// This is used in all-in-one mode where nginx runs in the same container as the backend
+func (h *Handler) getNginxLogsFromLocalFile(logFile, logType string, tail int) ([]LogEntry, error) {
+	file, err := os.Open(logFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open log file: %w", err)
+	}
+	defer file.Close()
+
+	// Read all lines then take the last N (tail)
+	var allLines []string
+	scanner := bufio.NewScanner(file)
+	// Increase buffer size for long log lines
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line != "" {
+			allLines = append(allLines, line)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read log file: %w", err)
+	}
+
+	// Get the last N lines
+	startIdx := 0
+	if len(allLines) > tail {
+		startIdx = len(allLines) - tail
+	}
+	tailLines := allLines[startIdx:]
+
+	var logs []LogEntry
+	for _, line := range tailLines {
+		entry := LogEntry{
+			Timestamp:     time.Now(),
+			Source:        "nginx",
+			ContainerName: "nginx-local",
+			Stream:        logType,
+			Level:         "info",
+			Message:       line,
+		}
+
+		// Parse nginx log format to extract timestamp and level
+		if logType == "access" {
+			// Try to parse timestamp from nginx combined log format
+			// Format: 192.168.1.1 - - [02/Jan/2006:15:04:05 +0000] "GET / HTTP/1.1" 200 ...
+			if idx := strings.Index(line, "["); idx != -1 {
+				if endIdx := strings.Index(line[idx:], "]"); endIdx != -1 {
+					timeStr := line[idx+1 : idx+endIdx]
+					// Parse nginx time format: 02/Jan/2006:15:04:05 +0000
+					if t, err := time.Parse("02/Jan/2006:15:04:05 -0700", timeStr); err == nil {
+						entry.Timestamp = t
+					}
+				}
+			}
+			// Detect error status codes (4xx, 5xx)
+			if strings.Contains(line, "\" 4") || strings.Contains(line, "\" 5") {
+				entry.Level = "warn"
+			}
+		} else {
+			// Error log format: 2006/01/02 15:04:05 [error] ...
+			if len(line) >= 19 {
+				timeStr := line[:19]
+				if t, err := time.Parse("2006/01/02 15:04:05", timeStr); err == nil {
+					entry.Timestamp = t
+				}
+			}
+			// Detect log level from nginx error log
+			if strings.Contains(line, "[error]") || strings.Contains(line, "[emerg]") || strings.Contains(line, "[crit]") {
+				entry.Level = "error"
+			} else if strings.Contains(line, "[warn]") {
+				entry.Level = "warn"
+			}
+		}
+
+		logs = append(logs, entry)
+	}
+
+	h.logger.Debug("Read logs from local file",
+		zap.String("file", logFile),
+		zap.Int("total_lines", len(allLines)),
+		zap.Int("returned", len(logs)),
+	)
+
+	return logs, nil
+}
+
+// getNginxLogsFromDB retrieves nginx access logs from the persistent database
+func (h *Handler) getNginxLogsFromDB(c *gin.Context, domain string, limit int) {
+	// Get org_id from context or agent
+	var orgID uuid.UUID
+
+	orgUUIDVal, exists := c.Get("org_id")
+	if exists {
+		orgID = orgUUIDVal.(uuid.UUID)
+	} else {
+		// Fallback: Get org_id from agent ID in URL
+		agentIDStr := c.Param("id")
+		if agentIDStr != "" {
+			agentID, err := uuid.Parse(agentIDStr)
+			if err == nil {
+				err = h.db.QueryRow(c.Request.Context(),
+					"SELECT org_id FROM agents WHERE id = $1", agentID).Scan(&orgID)
+				if err != nil {
+					h.logger.Error("Failed to get org_id from agent", zap.Error(err))
+					// Use default org for internal service calls
+					orgID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
+				}
+			}
+		} else {
+			// Default org for internal service calls
+			orgID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
+		}
+	}
+
+	ctx := c.Request.Context()
+
+	// Build query
+	var query string
+	var args []interface{}
+
+	if domain != "" {
+		query = `
+			SELECT time, client_ip::text, method, path, query_string, protocol,
+			       status_code, response_bytes, response_time, host,
+			       referer, user_agent, upstream
+			FROM nginx_access_logs
+			WHERE org_id = $1 AND host = $2
+			ORDER BY time DESC
+			LIMIT $3
+		`
+		args = []interface{}{orgID, domain, limit}
+	} else {
+		query = `
+			SELECT time, client_ip::text, method, path, query_string, protocol,
+			       status_code, response_bytes, response_time, host,
+			       referer, user_agent, upstream
+			FROM nginx_access_logs
+			WHERE org_id = $1
+			ORDER BY time DESC
+			LIMIT $2
+		`
+		args = []interface{}{orgID, limit}
+	}
+
+	rows, err := h.db.Query(ctx, query, args...)
+	if err != nil {
+		h.logger.Error("Failed to query nginx logs from database", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query logs"})
+		return
+	}
+	defer rows.Close()
+
+	var logs []LogEntry
+	for rows.Next() {
+		var (
+			logTime       time.Time
+			clientIP      string
+			method        string
+			path          string
+			queryString   *string
+			protocol      *string
+			statusCode    int
+			responseBytes int64
+			responseTime  *float64
+			host          *string
+			referer       *string
+			userAgent     *string
+			upstream      *string
+		)
+
+		err := rows.Scan(
+			&logTime, &clientIP, &method, &path, &queryString, &protocol,
+			&statusCode, &responseBytes, &responseTime, &host,
+			&referer, &userAgent, &upstream,
+		)
+		if err != nil {
+			h.logger.Warn("Failed to scan nginx log row", zap.Error(err))
+			continue
+		}
+
+		// Build message similar to nginx combined log format
+		qs := ""
+		if queryString != nil && *queryString != "" {
+			qs = "?" + *queryString
+		}
+		proto := "HTTP/1.1"
+		if protocol != nil {
+			proto = *protocol
+		}
+		hostStr := "-"
+		if host != nil {
+			hostStr = *host
+		}
+		respTime := 0.0
+		if responseTime != nil {
+			respTime = *responseTime
+		}
+
+		message := fmt.Sprintf("%s - - [%s] \"%s %s%s %s\" %d %d %.3fs \"%s\"",
+			clientIP,
+			logTime.Format("02/Jan/2006:15:04:05 -0700"),
+			method, path, qs, proto,
+			statusCode, responseBytes, respTime, hostStr,
+		)
+
+		level := "info"
+		if statusCode >= 400 && statusCode < 500 {
+			level = "warn"
+		} else if statusCode >= 500 {
+			level = "error"
+		}
+
+		logs = append(logs, LogEntry{
+			Timestamp:     logTime,
+			Source:        "nginx",
+			ContainerName: "nginx-db",
+			Stream:        "access",
+			Level:         level,
+			Message:       message,
+			// Structured fields for filtering/stats
+			StatusCode:    statusCode,
+			Method:        method,
+			Path:          path,
+			ResponseBytes: responseBytes,
+			ResponseTime:  respTime,
+			ClientIP:      clientIP,
+			Host:          hostStr,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"logs":   logs,
+		"type":   "access",
+		"count":  len(logs),
+		"source": "database",
+	})
 }
