@@ -22,10 +22,18 @@ import { Badge } from "@/components/ui/Badge";
 import { StatusIndicator } from "@/components/ui/StatusIndicator";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Spinner } from "@/components/ui/Spinner";
-import { Button, Input } from "@/components/ui/page-layout";
+import { Button } from "@/components/ui/page-layout";
 import { cn } from "@/lib/utils";
+import { FilterToolbar, ToggleOption } from "@/components/ui/FilterToolbar";
 
 type StatusFilter = "all" | "running" | "exited";
+
+// Status filter options
+const CONTAINER_STATUS_OPTIONS: ToggleOption[] = [
+  { value: "all", label: "All" },
+  { value: "running", label: "Running", color: "green" },
+  { value: "exited", label: "Stopped", color: "red" },
+];
 
 export default function DockerContainersPage() {
   const queryClient = useQueryClient();
@@ -208,34 +216,21 @@ export default function DockerContainersPage() {
         <StatCard label="Memory Usage" value={`${metrics.memoryUsage.toFixed(0)} MB`} icon={MemoryStick} iconColor="text-purple-600 dark:text-purple-400" />
       </MetricsGrid>
 
-      {/* Filters */}
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-gray-500 dark:text-gray-400">Status:</span>
-          <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
-            {(["all", "running", "exited"] as StatusFilter[]).map((status) => (
-              <button
-                key={status}
-                onClick={() => setStatusFilter(status)}
-                className={cn(
-                  "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
-                  statusFilter === status
-                    ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
-                    : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
-                )}
-              >
-                {status === "all" ? `All (${metrics.total})` : status === "running" ? `Running (${metrics.running})` : `Stopped (${metrics.stopped})`}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Input placeholder="Search containers..." value={searchFilter} onChange={(e) => setSearchFilter(e.target.value)} className="w-64" />
-          {(statusFilter !== "all" || searchFilter) && (
-            <button onClick={() => { setStatusFilter("all"); setSearchFilter(""); }} className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white">Reset</button>
-          )}
-        </div>
-      </div>
+      {/* Filter Toolbar */}
+      <FilterToolbar
+        primaryToggle={{
+          options: CONTAINER_STATUS_OPTIONS,
+          value: statusFilter,
+          onChange: (v) => setStatusFilter(v as StatusFilter),
+        }}
+        searchQuery={searchFilter}
+        onSearchChange={setSearchFilter}
+        searchPlaceholder="Search containers..."
+        showSearch={true}
+        showRefresh={true}
+        onRefresh={() => queryClient.invalidateQueries({ queryKey: ["containers", selectedAgent] })}
+        singleRow={true}
+      />
 
       {/* Selection Bar */}
       {containers && containers.length > 0 && (

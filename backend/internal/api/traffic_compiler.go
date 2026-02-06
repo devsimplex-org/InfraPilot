@@ -354,6 +354,7 @@ func (h *Handler) generateServerBlock(
 ) string {
 	var config strings.Builder
 	domains := strings.Join(resource.Domains, " ")
+	primaryDomain := resource.Domains[0]
 
 	// Determine if SSL is enabled
 	sslEnabled := tlsConfig != nil
@@ -363,6 +364,10 @@ func (h *Handler) generateServerBlock(
 	config.WriteString("    listen 80;\n")
 	config.WriteString("    listen [::]:80;\n")
 	config.WriteString(fmt.Sprintf("    server_name %s;\n\n", domains))
+
+	// Per-domain logging with extended format (includes response time for analytics)
+	config.WriteString(fmt.Sprintf("    access_log /var/log/nginx/domains/%s.access.log infrapilot_analytics;\n", primaryDomain))
+	config.WriteString(fmt.Sprintf("    error_log /var/log/nginx/domains/%s.error.log warn;\n\n", primaryDomain))
 
 	if sslEnabled {
 		// ACME challenge location
@@ -387,8 +392,11 @@ func (h *Handler) generateServerBlock(
 		config.WriteString("    http2 on;\n")
 		config.WriteString(fmt.Sprintf("    server_name %s;\n\n", domains))
 
+		// Per-domain logging with extended format (includes response time for analytics)
+		config.WriteString(fmt.Sprintf("    access_log /var/log/nginx/domains/%s.access.log infrapilot_analytics;\n", primaryDomain))
+		config.WriteString(fmt.Sprintf("    error_log /var/log/nginx/domains/%s.error.log warn;\n\n", primaryDomain))
+
 		// SSL certificate paths
-		primaryDomain := resource.Domains[0]
 		certPath := fmt.Sprintf("/etc/letsencrypt/live/%s/fullchain.pem", primaryDomain)
 		keyPath := fmt.Sprintf("/etc/letsencrypt/live/%s/privkey.pem", primaryDomain)
 

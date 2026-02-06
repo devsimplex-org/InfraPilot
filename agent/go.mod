@@ -4,6 +4,8 @@ go 1.24.0
 
 require (
 	github.com/docker/docker v28.5.2+incompatible
+	github.com/docker/go-connections v0.6.0
+	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-acme/lego/v4 v4.30.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/shirou/gopsutil/v3 v3.23.12
@@ -19,7 +21,6 @@ require (
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
-	github.com/docker/go-connections v0.6.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.3 // indirect
