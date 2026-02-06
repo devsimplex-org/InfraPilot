@@ -32,6 +32,14 @@ type LogEntry struct {
 	Stream        string    `json:"stream"` // stdout, stderr, access, error
 	Level         string    `json:"level"`  // info, warn, error, debug
 	Message       string    `json:"message"`
+	// Nginx-specific fields
+	StatusCode    int    `json:"status_code,omitempty"`
+	Method        string `json:"method,omitempty"`
+	Path          string `json:"path,omitempty"`
+	ResponseBytes int64  `json:"response_bytes,omitempty"`
+	ResponseTime  float64 `json:"response_time,omitempty"`
+	ClientIP      string `json:"client_ip,omitempty"`
+	Host          string `json:"host,omitempty"`
 }
 
 // UnifiedLogsRequest represents query parameters for log fetching
@@ -1050,6 +1058,14 @@ func (h *Handler) getNginxLogsFromDB(c *gin.Context, domain string, limit int) {
 			Stream:        "access",
 			Level:         level,
 			Message:       message,
+			// Structured fields for filtering/stats
+			StatusCode:    statusCode,
+			Method:        method,
+			Path:          path,
+			ResponseBytes: responseBytes,
+			ResponseTime:  respTime,
+			ClientIP:      clientIP,
+			Host:          hostStr,
 		})
 	}
 
