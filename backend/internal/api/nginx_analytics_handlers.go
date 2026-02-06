@@ -280,11 +280,13 @@ func (h *Handler) GetTrafficAnalytics(c *gin.Context) {
 	case "1m", "5m":
 		viewName = "nginx_stats_1m"
 	case "1h":
-		viewName = "nginx_stats_1h"
+		// Use 1m aggregate for real-time data, it will just have more granular buckets
+		// The 1h aggregate may not be refreshed yet for recent data
+		viewName = "nginx_stats_1m"
 	case "1d":
 		viewName = "nginx_stats_daily"
 	default:
-		viewName = "nginx_stats_1h"
+		viewName = "nginx_stats_1m"
 	}
 
 	// Build query
@@ -405,6 +407,7 @@ func (h *Handler) GetTrafficAnalyticsSummary(c *gin.Context) {
 	var summary NginxAnalyticsSummary
 	var err error
 
+	// Use nginx_stats_1m for better real-time data (1h aggregate may not be refreshed yet)
 	if agentID != nil {
 		err = h.db.QueryRow(ctx, `
 			SELECT
@@ -418,7 +421,7 @@ func (h *Handler) GetTrafficAnalyticsSummary(c *gin.Context) {
 				COALESCE(SUM(count_3xx), 0),
 				COALESCE(SUM(count_4xx), 0),
 				COALESCE(SUM(count_5xx), 0)
-			FROM nginx_stats_1h
+			FROM nginx_stats_1m
 			WHERE org_id = $1 AND agent_id = $2 AND bucket >= $3 AND bucket <= $4
 		`, orgUUID, agentID, startTime, endTime).Scan(
 			&summary.TotalRequests,
@@ -445,7 +448,7 @@ func (h *Handler) GetTrafficAnalyticsSummary(c *gin.Context) {
 				COALESCE(SUM(count_3xx), 0),
 				COALESCE(SUM(count_4xx), 0),
 				COALESCE(SUM(count_5xx), 0)
-			FROM nginx_stats_1h
+			FROM nginx_stats_1m
 			WHERE org_id = $1 AND bucket >= $2 AND bucket <= $3
 		`, orgUUID, startTime, endTime).Scan(
 			&summary.TotalRequests,
@@ -517,19 +520,20 @@ func (h *Handler) GetTopPaths(c *gin.Context) {
 	var rows pgx.Rows
 	var err error
 
+	// Query raw table for real-time data (aggregate may not be refreshed for current hour)
 	if agentID != nil {
 		rows, err = h.db.Query(ctx, `
 			SELECT
 				path,
-				SUM(request_count) as total_requests,
-				SUM(total_bytes) as total_bytes,
-				AVG(avg_response_time) as avg_response_time,
-				MAX(p95_response_time) as p95_response_time,
-				SUM(count_4xx) as count_4xx,
-				SUM(count_5xx) as count_5xx,
-				SUM(unique_visitors) as unique_visitors
-			FROM nginx_top_paths_1h
-			WHERE org_id = $1 AND agent_id = $2 AND bucket >= $3 AND bucket <= $4
+				COUNT(*) as total_requests,
+				COALESCE(SUM(response_bytes), 0) as total_bytes,
+				COALESCE(AVG(response_time), 0) as avg_response_time,
+				COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY response_time), 0) as p95_response_time,
+				SUM(CASE WHEN status_code >= 400 AND status_code < 500 THEN 1 ELSE 0 END) as count_4xx,
+				SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END) as count_5xx,
+				COUNT(DISTINCT client_ip) as unique_visitors
+			FROM nginx_access_logs
+			WHERE org_id = $1 AND agent_id = $2 AND time >= $3 AND time <= $4
 			GROUP BY path
 			ORDER BY total_requests DESC
 			LIMIT $5
@@ -538,15 +542,15 @@ func (h *Handler) GetTopPaths(c *gin.Context) {
 		rows, err = h.db.Query(ctx, `
 			SELECT
 				path,
-				SUM(request_count) as total_requests,
-				SUM(total_bytes) as total_bytes,
-				AVG(avg_response_time) as avg_response_time,
-				MAX(p95_response_time) as p95_response_time,
-				SUM(count_4xx) as count_4xx,
-				SUM(count_5xx) as count_5xx,
-				SUM(unique_visitors) as unique_visitors
-			FROM nginx_top_paths_1h
-			WHERE org_id = $1 AND bucket >= $2 AND bucket <= $3
+				COUNT(*) as total_requests,
+				COALESCE(SUM(response_bytes), 0) as total_bytes,
+				COALESCE(AVG(response_time), 0) as avg_response_time,
+				COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY response_time), 0) as p95_response_time,
+				SUM(CASE WHEN status_code >= 400 AND status_code < 500 THEN 1 ELSE 0 END) as count_4xx,
+				SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END) as count_5xx,
+				COUNT(DISTINCT client_ip) as unique_visitors
+			FROM nginx_access_logs
+			WHERE org_id = $1 AND time >= $2 AND time <= $3
 			GROUP BY path
 			ORDER BY total_requests DESC
 			LIMIT $4
