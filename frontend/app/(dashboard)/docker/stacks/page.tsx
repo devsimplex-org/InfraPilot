@@ -23,9 +23,18 @@ import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Spinner } from "@/components/ui/Spinner";
-import { Button, Input } from "@/components/ui/page-layout";
+import { Button } from "@/components/ui/page-layout";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { FilterToolbar, ToggleOption } from "@/components/ui/FilterToolbar";
 import { cn } from "@/lib/utils";
+
+// Filter options
+const STACK_STATUS_OPTIONS: ToggleOption[] = [
+  { value: "all", label: "All" },
+  { value: "running", label: "Running", color: "green" },
+  { value: "partial", label: "Partial", color: "yellow" },
+  { value: "stopped", label: "Stopped" },
+];
 
 type StackStatus = "running" | "partial" | "stopped";
 type StatusFilter = "all" | StackStatus;
@@ -220,36 +229,24 @@ export default function DockerStacksPage() {
         />
       </MetricsGrid>
 
-      {/* Filters */}
-      <div className="flex items-center gap-4 flex-wrap">
-        <Input
-          placeholder="Search stacks..."
-          value={searchFilter}
-          onChange={(e) => setSearchFilter(e.target.value)}
-          className="w-64"
-        />
-        <div className="flex gap-2">
-          {(["all", "running", "partial", "stopped"] as StatusFilter[]).map((status) => (
-            <button
-              key={status}
-              onClick={() => setStatusFilter(status)}
-              className={cn(
-                "px-3 py-1.5 text-sm rounded-lg transition-colors",
-                statusFilter === status
-                  ? "bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300"
-                  : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
-              )}
-            >
-              {status.charAt(0).toUpperCase() + status.slice(1)}
-              {status !== "all" && (
-                <span className="ml-1 text-xs opacity-60">
-                  ({unifiedStacks.filter((s) => s.status === status).length})
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-      </div>
+      {/* Filter Toolbar */}
+      <FilterToolbar
+        primaryToggle={{
+          options: STACK_STATUS_OPTIONS,
+          value: statusFilter,
+          onChange: (v) => setStatusFilter(v as StatusFilter),
+        }}
+        searchQuery={searchFilter}
+        onSearchChange={setSearchFilter}
+        searchPlaceholder="Search stacks..."
+        showSearch={true}
+        showRefresh={true}
+        onRefresh={() => {
+          queryClient.invalidateQueries({ queryKey: ["stacks", selectedAgent] });
+          queryClient.invalidateQueries({ queryKey: ["managed-stacks", selectedAgent] });
+        }}
+        singleRow={true}
+      />
 
       {/* Stacks List */}
       {filteredStacks.length === 0 ? (

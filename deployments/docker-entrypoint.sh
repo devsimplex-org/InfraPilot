@@ -106,7 +106,7 @@ if [ "$EMBEDDED_DB" = "true" ]; then
 
         # Enable TimescaleDB extension for nginx log analytics
         # This allows time-series optimizations for access log storage
-        if [ -f /usr/lib/postgresql16/timescaledb*.so ] || [ -d /usr/share/postgresql/16/extension/timescaledb* ]; then
+        if [ -f /usr/lib/postgresql17/timescaledb*.so ] || [ -d /usr/share/postgresql17/extension/timescaledb* ]; then
             echo "[*] Enabling TimescaleDB extension..."
             echo "shared_preload_libraries = 'timescaledb'" >> "$DATA_DIR/postgres/postgresql.conf"
         fi

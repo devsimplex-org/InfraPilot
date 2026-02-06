@@ -35,7 +35,7 @@ import { cn } from "@/lib/utils";
 const VOLUME_STATUS_OPTIONS: ToggleOption[] = [
   { value: "all", label: "All" },
   { value: "used", label: "In Use", color: "green" },
-  { value: "unused", label: "Unused", color: "gray" },
+  { value: "unused", label: "Unused" },
 ];
 
 export default function DockerVolumesPage() {

@@ -33,7 +33,7 @@ import { cn } from "@/lib/utils";
 const NETWORK_STATUS_OPTIONS: ToggleOption[] = [
   { value: "all", label: "All" },
   { value: "in-use", label: "In Use", color: "green" },
-  { value: "unused", label: "Unused", color: "gray" },
+  { value: "unused", label: "Unused" },
 ];
 
 // Default Docker networks that should not be deleted
