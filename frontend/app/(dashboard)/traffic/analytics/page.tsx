@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
@@ -179,6 +179,15 @@ export default function TrafficAnalyticsPage() {
     queryKey: ["agents"],
     queryFn: () => api.getAgents(),
   });
+
+  const activeAgents = agents?.filter((a) => a.status === "active") || [];
+
+  // Auto-select first active agent
+  useEffect(() => {
+    if (!selectedAgent && activeAgents.length > 0) {
+      setSelectedAgent(activeAgents[0].id);
+    }
+  }, [activeAgents, selectedAgent]);
 
   // Fetch proxies for domain list
   const { data: proxies } = useQuery({

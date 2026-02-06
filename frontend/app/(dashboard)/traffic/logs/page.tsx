@@ -156,19 +156,38 @@ function LogEntryRow({
     );
   };
 
+  // Format timestamp for display
+  const formatTimestamp = (ts: string) => {
+    if (!ts) return "-";
+    try {
+      const date = new Date(ts);
+      return date.toLocaleTimeString("en-US", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false
+      });
+    } catch {
+      return "-";
+    }
+  };
+
   if (logType === "access" && parsed) {
     return (
       <div
         onClick={onClick}
         className={cn(
-          "group flex items-center gap-3 py-2 px-3 rounded-md cursor-pointer transition-colors",
+          "group flex items-center gap-2 py-2 px-3 rounded-md cursor-pointer transition-colors",
           isSelected
             ? "bg-primary-500/20 border border-primary-500/50"
             : "hover:bg-gray-800/50"
         )}
       >
-        <span className="text-gray-600 text-xs font-mono w-8 text-right shrink-0">
+        <span className="text-gray-600 text-xs font-mono w-6 text-right shrink-0">
           {index + 1}
+        </span>
+        <span className="text-gray-500 text-xs font-mono shrink-0 w-[70px]">
+          {formatTimestamp(log.timestamp)}
         </span>
         <Badge
           color={getStatusColor(parsed.status)}
@@ -177,7 +196,7 @@ function LogEntryRow({
           {parsed.status}
         </Badge>
         <span className={cn(
-          "text-xs font-medium w-12 shrink-0",
+          "text-xs font-medium w-10 shrink-0",
           parsed.method === "GET" && "text-green-400",
           parsed.method === "POST" && "text-blue-400",
           parsed.method === "PUT" && "text-yellow-400",
@@ -186,13 +205,18 @@ function LogEntryRow({
         )}>
           {parsed.method}
         </span>
+        {log.host && (
+          <span className="text-cyan-400 text-xs font-mono shrink-0 max-w-[120px] truncate" title={log.host}>
+            {log.host}
+          </span>
+        )}
         <span className="text-white flex-1 truncate font-mono text-sm">
           {highlightText(parsed.path, searchQuery)}
         </span>
-        <span className="text-gray-500 text-xs shrink-0 hidden md:block">
+        <span className="text-gray-500 text-xs shrink-0 hidden lg:block">
           {parsed.bytes > 0 ? `${(parsed.bytes / 1024).toFixed(1)}KB` : "-"}
         </span>
-        <span className="text-gray-500 text-xs font-mono shrink-0">
+        <span className="text-gray-500 text-xs font-mono shrink-0 hidden md:block">
           {highlightText(parsed.ip, searchQuery)}
         </span>
       </div>
@@ -213,9 +237,12 @@ function LogEntryRow({
         errorLevel === "warn" && "bg-yellow-900/20"
       )}
     >
-      <div className="flex items-start gap-3">
-        <span className="text-gray-600 text-xs font-mono w-8 text-right shrink-0 pt-0.5">
+      <div className="flex items-start gap-2">
+        <span className="text-gray-600 text-xs font-mono w-6 text-right shrink-0 pt-0.5">
           {index + 1}
+        </span>
+        <span className="text-gray-500 text-xs font-mono shrink-0 w-[70px] pt-0.5">
+          {formatTimestamp(log.timestamp)}
         </span>
         {errorLevel && (
           <Badge
