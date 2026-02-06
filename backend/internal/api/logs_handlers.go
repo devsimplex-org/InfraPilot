@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -448,40 +449,77 @@ func (h *Handler) getNginxLogsReal(c *gin.Context) {
 	domain := c.Query("domain")
 
 	// Check if running in all-in-one mode (nginx running locally, not in a container)
-	// by checking if local nginx log file exists
-	var localLogFile string
+	// by checking if local nginx log directory exists
+	domainsLogDir := "/var/log/nginx/domains"
+
 	if domain != "" {
+		// Specific domain requested - read from domain-specific log file
+		var localLogFile string
 		if logType == "error" {
-			localLogFile = fmt.Sprintf("/var/log/nginx/domains/%s.error.log", domain)
+			localLogFile = fmt.Sprintf("%s/%s.error.log", domainsLogDir, domain)
 		} else {
-			localLogFile = fmt.Sprintf("/var/log/nginx/domains/%s.access.log", domain)
+			localLogFile = fmt.Sprintf("%s/%s.access.log", domainsLogDir, domain)
 		}
-	} else {
-		if logType == "error" {
-			localLogFile = "/var/log/nginx/error.log"
-		} else {
-			localLogFile = "/var/log/nginx/access.log"
-		}
-	}
 
-	// Try to read from local filesystem first (all-in-one mode)
-	if _, err := os.Stat(localLogFile); err == nil {
-		h.logger.Debug("Reading nginx logs from local filesystem (all-in-one mode)",
-			zap.String("file", localLogFile))
+		if _, err := os.Stat(localLogFile); err == nil {
+			h.logger.Debug("Reading domain-specific nginx logs from local filesystem",
+				zap.String("file", localLogFile),
+				zap.String("domain", domain))
 
-		logs, err := h.getNginxLogsFromLocalFile(localLogFile, logType, tail)
-		if err != nil {
-			h.logger.Error("Failed to read local nginx logs", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read logs"})
+			logs, err := h.getNginxLogsFromLocalFile(localLogFile, logType, tail)
+			if err != nil {
+				h.logger.Error("Failed to read local nginx logs", zap.Error(err))
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read logs"})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"logs":  logs,
+				"type":  logType,
+				"count": len(logs),
+			})
 			return
 		}
+	} else {
+		// All domains - read from all per-domain log files in all-in-one mode
+		if entries, err := os.ReadDir(domainsLogDir); err == nil {
+			h.logger.Debug("Reading all domain nginx logs from local filesystem (all-in-one mode)",
+				zap.String("dir", domainsLogDir))
 
-		c.JSON(http.StatusOK, gin.H{
-			"logs":  logs,
-			"type":  logType,
-			"count": len(logs),
-		})
-		return
+			var allLogs []LogEntry
+			suffix := ".access.log"
+			if logType == "error" {
+				suffix = ".error.log"
+			}
+
+			for _, entry := range entries {
+				if !entry.IsDir() && strings.HasSuffix(entry.Name(), suffix) {
+					logFile := filepath.Join(domainsLogDir, entry.Name())
+					logs, err := h.getNginxLogsFromLocalFile(logFile, logType, tail)
+					if err != nil {
+						h.logger.Warn("Failed to read log file", zap.String("file", logFile), zap.Error(err))
+						continue
+					}
+					allLogs = append(allLogs, logs...)
+				}
+			}
+
+			// Sort by timestamp descending and limit to tail
+			sort.Slice(allLogs, func(i, j int) bool {
+				return allLogs[i].Timestamp.After(allLogs[j].Timestamp)
+			})
+
+			if len(allLogs) > tail {
+				allLogs = allLogs[:tail]
+			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"logs":  allLogs,
+				"type":  logType,
+				"count": len(allLogs),
+			})
+			return
+		}
 	}
 
 	// Fall back to Docker container mode
