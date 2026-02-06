@@ -702,7 +702,8 @@ func (h *Handler) GetStatusCodeDistribution(c *gin.Context) {
 // Helper functions
 
 func nullFloat64(f float64) *float64 {
-	if f == 0 {
+	// 0 is a valid response time (very fast responses), so only return nil for negative values
+	if f < 0 {
 		return nil
 	}
 	return &f
