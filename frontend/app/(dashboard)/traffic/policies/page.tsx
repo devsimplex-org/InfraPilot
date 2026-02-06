@@ -12,7 +12,6 @@ import {
   Settings,
   CheckCircle2,
   XCircle,
-  Search,
 } from "lucide-react";
 import Link from "next/link";
 import { api, TrafficPolicy, TrafficPolicyType } from "@/lib/api";
@@ -23,8 +22,18 @@ import { SlideOver } from "@/components/ui/SlideOver";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Spinner } from "@/components/ui/Spinner";
-import { Input } from "@/components/ui/page-layout";
-import { cn } from "@/lib/utils";
+import { FilterToolbar, ToggleOption } from "@/components/ui/FilterToolbar";
+
+// Filter options
+const POLICY_TYPE_OPTIONS: ToggleOption[] = [
+  { value: "", label: "All Types" },
+  { value: "rate_limit", label: "Rate Limit", color: "blue" },
+  { value: "bot_protection", label: "Bot Protection" },
+  { value: "geo_blocking", label: "Geo Blocking", color: "yellow" },
+  { value: "ip_filtering", label: "IP Filtering", color: "red" },
+  { value: "cors", label: "CORS" },
+  { value: "authentication", label: "Auth", color: "green" },
+];
 
 export default function TrafficPoliciesPage() {
   const [selectedPolicy, setSelectedPolicy] = useState<TrafficPolicy | null>(null);
@@ -201,16 +210,11 @@ export default function TrafficPoliciesPage() {
     },
   ];
 
-  // Filter options
-  const policyTypeFilters = [
-    { label: "All Types", value: "" },
-    { label: "Rate Limit", value: "rate_limit" },
-    { label: "Bot Protection", value: "bot_protection" },
-    { label: "Geo Blocking", value: "geo_blocking" },
-    { label: "IP Filtering", value: "ip_filtering" },
-    { label: "CORS", value: "cors" },
-    { label: "Authentication", value: "authentication" },
-  ];
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const handleRefresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["traffic-policies"] });
+  };
 
   if (isLoading) {
     return <Spinner.LogoPage label="Loading policies..." />;
@@ -218,33 +222,21 @@ export default function TrafficPoliciesPage() {
 
   return (
     <div className="space-y-6">
-      {/* Filters */}
-      <div className="flex items-center gap-4 flex-wrap">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-          <Input
-            placeholder="Search policies..."
-            className="pl-10"
-          />
-        </div>
-
-        <div className="flex items-center gap-2 flex-wrap">
-          {policyTypeFilters.map((option) => (
-            <button
-              key={option.value}
-              onClick={() => setFilters({ ...filters, type: filters.type === option.value ? "" : option.value as TrafficPolicyType | "" })}
-              className={cn(
-                "px-3 py-1.5 rounded-lg text-sm font-medium transition-colors",
-                (option.value === "" && filters.type === "") || filters.type === option.value
-                  ? "bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300"
-                  : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"
-              )}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-      </div>
+      {/* Filter Toolbar */}
+      <FilterToolbar
+        primaryToggle={{
+          options: POLICY_TYPE_OPTIONS,
+          value: filters.type,
+          onChange: (v) => setFilters({ ...filters, type: v as TrafficPolicyType | "" }),
+        }}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        searchPlaceholder="Search policies..."
+        showSearch={true}
+        showRefresh={true}
+        onRefresh={handleRefresh}
+        singleRow={true}
+      />
 
       {/* Policies Table */}
       {policiesData?.policies && policiesData.policies.length > 0 ? (

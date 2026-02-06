@@ -31,6 +31,7 @@ import {
   Button,
   Input,
 } from "@/components/ui/page-layout";
+import { FilterToolbar, SelectOption } from "@/components/ui/FilterToolbar";
 
 type UpstreamMode = "manual" | "container";
 type ProxyTypeMode = "upstream" | "redirect";
@@ -393,80 +394,71 @@ export default function ProxiesPage() {
         </MetricsGrid>
       )}
 
-      {/* Agent selector and actions */}
-      <div className="flex items-center gap-4">
-        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-          Select Agent
-        </label>
-        <select
-          value={selectedAgent || ""}
-          onChange={(e) => {
-            setSelectedAgent(e.target.value || null);
-          }}
-          className="px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-        >
-          <option value="">Select an agent...</option>
-          {agents?.map((agent) => (
-            <option key={agent.id} value={agent.id} disabled={agent.status !== "active"}>
-              {agent.name} ({agent.status})
-            </option>
-          ))}
-        </select>
-
-        {/* Nginx Operations */}
-        <div className="ml-auto flex items-center gap-2">
-          <button
-            onClick={() => testNginxMutation.mutate()}
-            disabled={!selectedAgent || testNginxMutation.isPending}
-            className={cn(
-              "px-3 py-2 text-sm rounded-lg transition-colors flex items-center gap-1.5",
-              testNginxMutation.isSuccess && testNginxMutation.data?.success
-                ? "bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/30"
-                : testNginxMutation.isError || (testNginxMutation.isSuccess && !testNginxMutation.data?.success)
-                ? "bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/30"
-                : "bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50"
-            )}
-            title={testNginxMutation.data?.message || "Test nginx configuration"}
-          >
-            {testNginxMutation.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : testNginxMutation.isSuccess && testNginxMutation.data?.success ? (
-              <Check className="h-4 w-4" />
-            ) : (
-              <AlertTriangle className="h-4 w-4" />
-            )}
-            {testNginxMutation.isPending ? "Testing..." : "Test Config"}
-          </button>
-          <button
-            onClick={() => reloadNginxMutation.mutate()}
-            disabled={!selectedAgent || reloadNginxMutation.isPending}
-            className={cn(
-              "px-3 py-2 text-sm rounded-lg transition-colors flex items-center gap-1.5",
-              reloadNginxMutation.isSuccess && reloadNginxMutation.data?.success
-                ? "bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/30"
-                : reloadNginxMutation.isError
-                ? "bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/30"
-                : "bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50"
-            )}
-            title={reloadNginxMutation.data?.message || "Reload nginx"}
-          >
-            {reloadNginxMutation.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4" />
-            )}
-            {reloadNginxMutation.isPending ? "Reloading..." : "Reload Nginx"}
-          </button>
-          <Button
-            variant="primary"
-            icon={Plus}
-            onClick={() => setShowCreateModal(true)}
-            disabled={!selectedAgent}
-          >
-            Add Proxy Host
-          </Button>
-        </div>
-      </div>
+      {/* Filter Toolbar */}
+      <FilterToolbar
+        agents={agentOptions}
+        selectedAgent={selectedAgent}
+        onAgentChange={setSelectedAgent}
+        showAgentFilter={true}
+        showSearch={false}
+        showRefresh={true}
+        onRefresh={() => queryClient.invalidateQueries({ queryKey: ["proxies", selectedAgent] })}
+        singleRow={true}
+        customActions={
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => testNginxMutation.mutate()}
+              disabled={!selectedAgent || testNginxMutation.isPending}
+              className={cn(
+                "px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-1.5",
+                testNginxMutation.isSuccess && testNginxMutation.data?.success
+                  ? "bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/30"
+                  : testNginxMutation.isError || (testNginxMutation.isSuccess && !testNginxMutation.data?.success)
+                  ? "bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/30"
+                  : "bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50"
+              )}
+              title={testNginxMutation.data?.message || "Test nginx configuration"}
+            >
+              {testNginxMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : testNginxMutation.isSuccess && testNginxMutation.data?.success ? (
+                <Check className="h-4 w-4" />
+              ) : (
+                <AlertTriangle className="h-4 w-4" />
+              )}
+              {testNginxMutation.isPending ? "Testing..." : "Test Config"}
+            </button>
+            <button
+              onClick={() => reloadNginxMutation.mutate()}
+              disabled={!selectedAgent || reloadNginxMutation.isPending}
+              className={cn(
+                "px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-1.5",
+                reloadNginxMutation.isSuccess && reloadNginxMutation.data?.success
+                  ? "bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/30"
+                  : reloadNginxMutation.isError
+                  ? "bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/30"
+                  : "bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50"
+              )}
+              title={reloadNginxMutation.data?.message || "Reload nginx"}
+            >
+              {reloadNginxMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              {reloadNginxMutation.isPending ? "Reloading..." : "Reload Nginx"}
+            </button>
+            <Button
+              variant="primary"
+              icon={Plus}
+              onClick={() => setShowCreateModal(true)}
+              disabled={!selectedAgent}
+            >
+              Add Proxy Host
+            </Button>
+          </div>
+        }
+      />
 
       {/* Proxies table */}
       {selectedAgent ? (
