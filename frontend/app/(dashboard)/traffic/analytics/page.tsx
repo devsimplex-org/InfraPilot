@@ -673,14 +673,14 @@ export default function TrafficAnalyticsPage() {
                   >
                     <div className="flex items-center justify-between mb-1">
                       <Badge
-                        variant={
+                        color={
                           sc.status_code >= 500
-                            ? "danger"
+                            ? "red"
                             : sc.status_code >= 400
-                            ? "warning"
+                            ? "yellow"
                             : sc.status_code >= 300
-                            ? "info"
-                            : "success"
+                            ? "blue"
+                            : "green"
                         }
                         size="sm"
                       >

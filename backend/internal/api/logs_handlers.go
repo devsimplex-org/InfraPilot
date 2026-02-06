@@ -2,6 +2,7 @@ package api
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
@@ -668,18 +670,20 @@ func (h *Handler) getNginxLogsFromFile(ctx context.Context, docker *client.Clien
 	}
 	defer attachResp.Close()
 
+	// Demultiplex the Docker stream properly
+	var stdout, stderr bytes.Buffer
+	_, err = stdcopy.StdCopy(&stdout, &stderr, attachResp.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read exec output: %w", err)
+	}
+
 	var logs []LogEntry
-	scanner := bufio.NewScanner(attachResp.Reader)
+	scanner := bufio.NewScanner(&stdout)
 
 	for scanner.Scan() {
 		line := scanner.Text()
 		if len(line) == 0 {
 			continue
-		}
-
-		// Skip Docker header if present
-		if len(line) > 8 && (line[0] == 1 || line[0] == 2) {
-			line = line[8:]
 		}
 
 		entry := LogEntry{
@@ -706,6 +710,13 @@ func (h *Handler) getNginxLogsFromFile(ctx context.Context, docker *client.Clien
 
 		logs = append(logs, entry)
 	}
+
+	h.logger.Debug("Read logs from file",
+		zap.String("file", logFile),
+		zap.Int("count", len(logs)),
+		zap.Int("stdout_bytes", stdout.Len()),
+		zap.Int("stderr_bytes", stderr.Len()),
+	)
 
 	return logs, nil
 }
