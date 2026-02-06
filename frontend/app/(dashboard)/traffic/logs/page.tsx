@@ -299,7 +299,7 @@ export default function TrafficLogsPage() {
         `/api/v1/agents/${selectedAgent}/logs/nginx?${params}`,
         {
           headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
+            Authorization: `Bearer ${localStorage.getItem("access_token")}`,
           },
         }
       );
@@ -467,7 +467,8 @@ export default function TrafficLogsPage() {
     }
   };
 
-  if (isLoading && !logs.length) {
+  // Show loading only when we have an agent selected and are actually loading
+  if (selectedAgent && isLoading && !logs.length) {
     return <Spinner.LogoPage label="Loading logs..." />;
   }
 
@@ -831,7 +832,7 @@ export default function TrafficLogsPage() {
 
       {/* Log Detail SlideOver */}
       <SlideOver
-        open={!!selectedLog}
+        isOpen={!!selectedLog}
         onClose={() => setSelectedLog(null)}
         title="Log Entry Details"
         size="md"
