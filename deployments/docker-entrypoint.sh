@@ -64,6 +64,7 @@ mkdir -p \
     "$DATA_DIR/agent" \
     /var/log/supervisor \
     /var/log/nginx \
+    /var/log/nginx/domains \
     /run/postgresql \
     /var/www/acme-challenge/.well-known/acme-challenge \
     /var/www/html

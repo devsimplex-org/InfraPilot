@@ -144,8 +144,10 @@ services:
     # Remove default stdout symlinks and create actual log files for analytics
     command: >
       sh -c "rm -f /var/log/nginx/access.log /var/log/nginx/error.log &&
+             mkdir -p /var/log/nginx/domains &&
              touch /var/log/nginx/access.log /var/log/nginx/error.log &&
              chmod 644 /var/log/nginx/access.log /var/log/nginx/error.log &&
+             chmod 755 /var/log/nginx/domains &&
              nginx -g 'daemon off;'"
     volumes:
       - ./deployments/nginx-dev.conf:/etc/nginx/nginx.conf:ro
