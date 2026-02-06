@@ -118,7 +118,19 @@ function LogEntryRow({
   onClick: () => void;
   searchQuery: string;
 }) {
-  const parsed = logType === "access" ? parseAccessLog(log.message) : null;
+  // Use structured fields if available, otherwise parse from message
+  const parsedFromMessage = logType === "access" ? parseAccessLog(log.message) : null;
+  const parsed = logType === "access" ? (log.status_code ? {
+    ip: log.client_ip || log.ip || "-",
+    method: log.method || "GET",
+    path: log.path || "/",
+    status: log.status_code,
+    bytes: log.response_bytes || log.bytes || 0,
+    referer: "",
+    userAgent: "",
+    timestamp: "",
+    protocol: "",
+  } : parsedFromMessage) : null;
   const errorLevel = logType === "error" ? parseErrorLevel(log.message) : null;
 
   const getStatusColor = (status: number | undefined): "green" | "yellow" | "red" | "blue" | "gray" => {
