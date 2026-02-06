@@ -23,6 +23,7 @@ import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Spinner } from "@/components/ui/Spinner";
 import { FilterToolbar, ToggleOption } from "@/components/ui/FilterToolbar";
+import { cn } from "@/lib/utils";
 
 // Filter options
 const POLICY_TYPE_OPTIONS: ToggleOption[] = [
