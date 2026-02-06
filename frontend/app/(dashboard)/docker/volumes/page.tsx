@@ -28,7 +28,15 @@ import { Spinner } from "@/components/ui/Spinner";
 import { Button, Input } from "@/components/ui/page-layout";
 import { SlideOver } from "@/components/ui/SlideOver";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { FilterToolbar, ToggleOption } from "@/components/ui/FilterToolbar";
 import { cn } from "@/lib/utils";
+
+// Filter options
+const VOLUME_STATUS_OPTIONS: ToggleOption[] = [
+  { value: "all", label: "All" },
+  { value: "used", label: "In Use", color: "green" },
+  { value: "unused", label: "Unused" },
+];
 
 export default function DockerVolumesPage() {
   const queryClient = useQueryClient();
@@ -246,58 +254,21 @@ export default function DockerVolumesPage() {
         <StatCard label="Orphaned" value={metrics.unused} icon={AlertTriangle} iconColor="text-orange-600 dark:text-orange-400" />
       </MetricsGrid>
 
-      {/* Horizontal Filters */}
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-gray-500 dark:text-gray-400">Status:</span>
-          <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
-            <button
-              onClick={() => setStatusFilter("all")}
-              className={cn(
-                "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
-                statusFilter === "all"
-                  ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
-                  : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
-              )}
-            >
-              All ({metrics.total})
-            </button>
-            <button
-              onClick={() => setStatusFilter("used")}
-              className={cn(
-                "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
-                statusFilter === "used"
-                  ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
-                  : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
-              )}
-            >
-              In Use ({metrics.inUse})
-            </button>
-            <button
-              onClick={() => setStatusFilter("unused")}
-              className={cn(
-                "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
-                statusFilter === "unused"
-                  ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
-                  : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
-              )}
-            >
-              Unused ({metrics.unused})
-            </button>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Input placeholder="Search volumes..." value={searchFilter} onChange={(e) => setSearchFilter(e.target.value)} className="w-64" />
-          {(statusFilter !== "all" || searchFilter) && (
-            <button
-              onClick={() => { setStatusFilter("all"); setSearchFilter(""); }}
-              className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
-            >
-              Reset
-            </button>
-          )}
-        </div>
-      </div>
+      {/* Filter Toolbar */}
+      <FilterToolbar
+        primaryToggle={{
+          options: VOLUME_STATUS_OPTIONS,
+          value: statusFilter,
+          onChange: (v) => setStatusFilter(v as "all" | "used" | "unused"),
+        }}
+        searchQuery={searchFilter}
+        onSearchChange={setSearchFilter}
+        searchPlaceholder="Search volumes..."
+        showSearch={true}
+        showRefresh={true}
+        onRefresh={() => queryClient.invalidateQueries({ queryKey: ["docker-volumes", selectedAgent] })}
+        singleRow={true}
+      />
 
       {/* Selection Action Bar */}
       {volumes && volumes.length > 0 && (

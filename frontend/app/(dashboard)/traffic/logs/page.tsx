@@ -71,10 +71,16 @@ interface NginxLogEntry {
   source: string;
   container_name: string;
   level?: string;
-  // Parsed access log fields
-  ip?: string;
+  // Structured fields from database (backend)
+  status_code?: number;
   method?: string;
   path?: string;
+  response_bytes?: number;
+  response_time?: number;
+  client_ip?: string;
+  host?: string;
+  // Legacy parsed access log fields (file-based)
+  ip?: string;
   status?: number;
   bytes?: number;
   referer?: string;
@@ -366,11 +372,16 @@ export default function TrafficLogsPage() {
 
       // Level filter for access logs (by status code)
       if (logType === "access" && levelFilter !== "all") {
-        const parsed = parseAccessLog(log.message);
-        if (parsed) {
-          if (levelFilter === "error" && parsed.status < 500) return false;
-          if (levelFilter === "warn" && (parsed.status < 400 || parsed.status >= 500)) return false;
-          if (levelFilter === "info" && parsed.status >= 400) return false;
+        // Use structured status_code if available, otherwise parse from message
+        let status = log.status_code;
+        if (!status) {
+          const parsed = parseAccessLog(log.message);
+          status = parsed?.status;
+        }
+        if (status) {
+          if (levelFilter === "error" && status < 500) return false;
+          if (levelFilter === "warn" && (status < 400 || status >= 500)) return false;
+          if (levelFilter === "info" && status >= 400) return false;
         }
       }
 
@@ -387,11 +398,16 @@ export default function TrafficLogsPage() {
 
     logs.forEach((log) => {
       if (logType === "access") {
-        const parsed = parseAccessLog(log.message);
-        if (parsed) {
-          if (parsed.status >= 500) errors++;
-          else if (parsed.status >= 400) warnings++;
-          else if (parsed.status >= 200 && parsed.status < 400) success++;
+        // Use structured status_code if available, otherwise parse from message
+        let status = log.status_code;
+        if (!status) {
+          const parsed = parseAccessLog(log.message);
+          status = parsed?.status;
+        }
+        if (status) {
+          if (status >= 500) errors++;
+          else if (status >= 400) warnings++;
+          else if (status >= 200 && status < 400) success++;
         }
       } else {
         const level = parseErrorLevel(log.message);

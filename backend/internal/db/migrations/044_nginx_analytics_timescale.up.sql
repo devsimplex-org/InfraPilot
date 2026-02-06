@@ -1,6 +1,7 @@
 -- Migration: 044_nginx_analytics_timescale
--- Description: Create TimescaleDB hypertable for nginx access logs with continuous aggregates
+-- Description: Create TimescaleDB hypertable for nginx access logs
 -- Epic: Production-Grade Nginx Log Analytics System
+-- Note: Uses Apache-licensed TimescaleDB features only (no continuous aggregates, compression, or retention policies)
 
 -- =============================================================================
 -- 1. Enable TimescaleDB Extension
@@ -66,181 +67,101 @@ CREATE INDEX IF NOT EXISTS idx_nginx_logs_client_ip
     ON nginx_access_logs (client_ip, time DESC);
 
 -- =============================================================================
--- 4. Create 1-minute continuous aggregate for real-time dashboards
+-- 4. Create regular materialized views for analytics (refreshed manually/via cron)
+-- Note: These replace continuous aggregates which require TSL license
 -- =============================================================================
-CREATE MATERIALIZED VIEW IF NOT EXISTS nginx_stats_1m
-WITH (timescaledb.continuous) AS
+
+-- 1-minute stats view
+CREATE MATERIALIZED VIEW IF NOT EXISTS nginx_stats_1m AS
 SELECT
     time_bucket('1 minute', time) AS bucket,
     org_id,
     agent_id,
-
-    -- Request counts by status code group
     COUNT(*) AS total_requests,
     COUNT(*) FILTER (WHERE status_code >= 200 AND status_code < 300) AS count_2xx,
     COUNT(*) FILTER (WHERE status_code >= 300 AND status_code < 400) AS count_3xx,
     COUNT(*) FILTER (WHERE status_code >= 400 AND status_code < 500) AS count_4xx,
     COUNT(*) FILTER (WHERE status_code >= 500) AS count_5xx,
-
-    -- Bytes transferred
     SUM(response_bytes) AS total_bytes,
-
-    -- Response time statistics
     AVG(response_time) AS avg_response_time,
-    percentile_cont(0.95) WITHIN GROUP (ORDER BY response_time) AS p95_response_time,
-    percentile_cont(0.99) WITHIN GROUP (ORDER BY response_time) AS p99_response_time,
     MAX(response_time) AS max_response_time,
     MIN(response_time) AS min_response_time,
-
-    -- Unique visitors (approximate)
     COUNT(DISTINCT client_ip) AS unique_visitors
 FROM nginx_access_logs
+WHERE time > NOW() - INTERVAL '2 hours'
 GROUP BY time_bucket('1 minute', time), org_id, agent_id
 WITH NO DATA;
 
--- Add refresh policy: refresh every 30 seconds, start from 2 hours ago
-SELECT add_continuous_aggregate_policy('nginx_stats_1m',
-    start_offset => INTERVAL '2 hours',
-    end_offset => INTERVAL '30 seconds',
-    schedule_interval => INTERVAL '30 seconds',
-    if_not_exists => TRUE
-);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_nginx_stats_1m_bucket ON nginx_stats_1m (bucket, org_id, agent_id);
 
--- =============================================================================
--- 5. Create 1-hour continuous aggregate for historical dashboards
--- =============================================================================
-CREATE MATERIALIZED VIEW IF NOT EXISTS nginx_stats_1h
-WITH (timescaledb.continuous) AS
+-- 1-hour stats view
+CREATE MATERIALIZED VIEW IF NOT EXISTS nginx_stats_1h AS
 SELECT
     time_bucket('1 hour', time) AS bucket,
     org_id,
     agent_id,
-
-    -- Request counts by status code group
     COUNT(*) AS total_requests,
     COUNT(*) FILTER (WHERE status_code >= 200 AND status_code < 300) AS count_2xx,
     COUNT(*) FILTER (WHERE status_code >= 300 AND status_code < 400) AS count_3xx,
     COUNT(*) FILTER (WHERE status_code >= 400 AND status_code < 500) AS count_4xx,
     COUNT(*) FILTER (WHERE status_code >= 500) AS count_5xx,
-
-    -- Bytes transferred
     SUM(response_bytes) AS total_bytes,
-
-    -- Response time statistics
     AVG(response_time) AS avg_response_time,
-    percentile_cont(0.95) WITHIN GROUP (ORDER BY response_time) AS p95_response_time,
-    percentile_cont(0.99) WITHIN GROUP (ORDER BY response_time) AS p99_response_time,
     MAX(response_time) AS max_response_time,
     MIN(response_time) AS min_response_time,
-
-    -- Unique visitors (approximate)
     COUNT(DISTINCT client_ip) AS unique_visitors
 FROM nginx_access_logs
+WHERE time > NOW() - INTERVAL '7 days'
 GROUP BY time_bucket('1 hour', time), org_id, agent_id
 WITH NO DATA;
 
--- Add refresh policy: refresh every 10 minutes
-SELECT add_continuous_aggregate_policy('nginx_stats_1h',
-    start_offset => INTERVAL '3 hours',
-    end_offset => INTERVAL '1 hour',
-    schedule_interval => INTERVAL '10 minutes',
-    if_not_exists => TRUE
-);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_nginx_stats_1h_bucket ON nginx_stats_1h (bucket, org_id, agent_id);
 
--- =============================================================================
--- 6. Create daily continuous aggregate for long-term trends
--- =============================================================================
-CREATE MATERIALIZED VIEW IF NOT EXISTS nginx_stats_daily
-WITH (timescaledb.continuous) AS
+-- Daily stats view
+CREATE MATERIALIZED VIEW IF NOT EXISTS nginx_stats_daily AS
 SELECT
     time_bucket('1 day', time) AS bucket,
     org_id,
     agent_id,
-
-    -- Request counts by status code group
     COUNT(*) AS total_requests,
     COUNT(*) FILTER (WHERE status_code >= 200 AND status_code < 300) AS count_2xx,
     COUNT(*) FILTER (WHERE status_code >= 300 AND status_code < 400) AS count_3xx,
     COUNT(*) FILTER (WHERE status_code >= 400 AND status_code < 500) AS count_4xx,
     COUNT(*) FILTER (WHERE status_code >= 500) AS count_5xx,
-
-    -- Bytes transferred
     SUM(response_bytes) AS total_bytes,
-
-    -- Response time statistics
     AVG(response_time) AS avg_response_time,
-    percentile_cont(0.95) WITHIN GROUP (ORDER BY response_time) AS p95_response_time,
-    percentile_cont(0.99) WITHIN GROUP (ORDER BY response_time) AS p99_response_time,
     MAX(response_time) AS max_response_time,
     MIN(response_time) AS min_response_time,
-
-    -- Unique visitors (approximate)
     COUNT(DISTINCT client_ip) AS unique_visitors
 FROM nginx_access_logs
+WHERE time > NOW() - INTERVAL '90 days'
 GROUP BY time_bucket('1 day', time), org_id, agent_id
 WITH NO DATA;
 
--- Add refresh policy: refresh daily at midnight
-SELECT add_continuous_aggregate_policy('nginx_stats_daily',
-    start_offset => INTERVAL '3 days',
-    end_offset => INTERVAL '1 day',
-    schedule_interval => INTERVAL '1 day',
-    if_not_exists => TRUE
-);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_nginx_stats_daily_bucket ON nginx_stats_daily (bucket, org_id, agent_id);
 
--- =============================================================================
--- 7. Create top paths continuous aggregate
--- =============================================================================
-CREATE MATERIALIZED VIEW IF NOT EXISTS nginx_top_paths_1h
-WITH (timescaledb.continuous) AS
+-- Top paths view
+CREATE MATERIALIZED VIEW IF NOT EXISTS nginx_top_paths_1h AS
 SELECT
     time_bucket('1 hour', time) AS bucket,
     org_id,
     agent_id,
     path,
-
-    -- Metrics per path
     COUNT(*) AS request_count,
     SUM(response_bytes) AS total_bytes,
     AVG(response_time) AS avg_response_time,
-    percentile_cont(0.95) WITHIN GROUP (ORDER BY response_time) AS p95_response_time,
-
-    -- Error counts
     COUNT(*) FILTER (WHERE status_code >= 400 AND status_code < 500) AS count_4xx,
     COUNT(*) FILTER (WHERE status_code >= 500) AS count_5xx,
-
-    -- Unique visitors to this path
     COUNT(DISTINCT client_ip) AS unique_visitors
 FROM nginx_access_logs
+WHERE time > NOW() - INTERVAL '24 hours'
 GROUP BY time_bucket('1 hour', time), org_id, agent_id, path
 WITH NO DATA;
 
--- Add refresh policy: refresh every 10 minutes
-SELECT add_continuous_aggregate_policy('nginx_top_paths_1h',
-    start_offset => INTERVAL '3 hours',
-    end_offset => INTERVAL '1 hour',
-    schedule_interval => INTERVAL '10 minutes',
-    if_not_exists => TRUE
-);
+CREATE INDEX IF NOT EXISTS idx_nginx_top_paths_1h_bucket ON nginx_top_paths_1h (bucket, org_id, agent_id);
 
 -- =============================================================================
--- 8. Add compression policy (compress chunks older than 7 days)
--- =============================================================================
-ALTER TABLE nginx_access_logs SET (
-    timescaledb.compress,
-    timescaledb.compress_segmentby = 'org_id, agent_id',
-    timescaledb.compress_orderby = 'time DESC'
-);
-
-SELECT add_compression_policy('nginx_access_logs', INTERVAL '7 days', if_not_exists => TRUE);
-
--- =============================================================================
--- 9. Add retention policy (drop data older than 90 days)
--- =============================================================================
-SELECT add_retention_policy('nginx_access_logs', INTERVAL '90 days', if_not_exists => TRUE);
-
--- =============================================================================
--- 10. Create analytics configuration table
+-- 5. Create analytics configuration table
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS nginx_analytics_config (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -276,3 +197,30 @@ CREATE TRIGGER trigger_nginx_analytics_config_updated_at
     BEFORE UPDATE ON nginx_analytics_config
     FOR EACH ROW
     EXECUTE FUNCTION update_nginx_analytics_config_updated_at();
+
+-- =============================================================================
+-- 6. Create function to refresh materialized views (call via cron/scheduler)
+-- =============================================================================
+CREATE OR REPLACE FUNCTION refresh_nginx_analytics_views()
+RETURNS void AS $$
+BEGIN
+    REFRESH MATERIALIZED VIEW CONCURRENTLY nginx_stats_1m;
+    REFRESH MATERIALIZED VIEW CONCURRENTLY nginx_stats_1h;
+    REFRESH MATERIALIZED VIEW CONCURRENTLY nginx_stats_daily;
+    REFRESH MATERIALIZED VIEW CONCURRENTLY nginx_top_paths_1h;
+END;
+$$ LANGUAGE plpgsql;
+
+-- =============================================================================
+-- 7. Create function to cleanup old data (call via cron/scheduler)
+-- =============================================================================
+CREATE OR REPLACE FUNCTION cleanup_old_nginx_logs(retention_interval INTERVAL DEFAULT INTERVAL '90 days')
+RETURNS INTEGER AS $$
+DECLARE
+    deleted_count INTEGER;
+BEGIN
+    DELETE FROM nginx_access_logs WHERE time < NOW() - retention_interval;
+    GET DIAGNOSTICS deleted_count = ROW_COUNT;
+    RETURN deleted_count;
+END;
+$$ LANGUAGE plpgsql;

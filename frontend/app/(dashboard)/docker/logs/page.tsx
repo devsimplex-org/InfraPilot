@@ -4,13 +4,9 @@ import { useState, useRef, useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   FileText,
-  RefreshCw,
   AlertTriangle,
   Info,
   Bug,
-  Pause,
-  Play,
-  Download,
   Container,
   Clock,
   Activity,
@@ -19,13 +15,31 @@ import {
 import { api, LogEntry } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useDocker } from "@/lib/docker-context";
-import { FilterPanel } from "@/components/ui/FilterPanel";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Spinner } from "@/components/ui/Spinner";
 import { SlideOver } from "@/components/ui/SlideOver";
 import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
 import { Button } from "@/components/ui/page-layout";
+import { FilterToolbar, ToggleOption, SelectOption } from "@/components/ui/FilterToolbar";
+
+// Log level filter options
+const LOG_LEVEL_OPTIONS: ToggleOption[] = [
+  { value: "all", label: "All Levels" },
+  { value: "error", label: "Errors", color: "red" },
+  { value: "warn", label: "Warnings", color: "yellow" },
+  { value: "info", label: "Info", color: "blue" },
+  { value: "debug", label: "Debug" },
+];
+
+// Lines selector options
+const LINES_OPTIONS: SelectOption[] = [
+  { value: "100", label: "100 lines" },
+  { value: "200", label: "200 lines" },
+  { value: "500", label: "500 lines" },
+  { value: "1000", label: "1000 lines" },
+  { value: "2000", label: "2000 lines" },
+];
 
 type LogLevel = "all" | "error" | "warn" | "info" | "debug";
 
@@ -171,45 +185,11 @@ export default function DockerLogsPage() {
     URL.revokeObjectURL(url);
   };
 
-  // Filter configuration
-  const filterGroups = [
-    {
-      id: "container",
-      label: "Container",
-      type: "radio" as const,
-      value: selectedContainer,
-      onChange: (value: string | string[]) => setSelectedContainer(value as string),
-      options: [
-        { label: "All Containers", value: "all", count: metrics.total },
-        ...containers.map((c) => ({
-          label: c,
-          value: c,
-          count: unifiedLogs?.logs?.filter((l) => l.container_name === c).length || 0,
-        })),
-      ],
-    },
-    {
-      id: "level",
-      label: "Log Level",
-      type: "radio" as const,
-      value: level,
-      onChange: (value: string | string[]) => setLevel(value as LogLevel),
-      options: [
-        { label: "All Levels", value: "all" },
-        { label: "Error", value: "error", count: metrics.errors },
-        { label: "Warning", value: "warn", count: metrics.warnings },
-        { label: "Info", value: "info", count: metrics.info },
-        { label: "Debug", value: "debug", count: metrics.debug },
-      ],
-    },
-    {
-      id: "search",
-      label: "Search",
-      type: "search" as const,
-      value: search,
-      onChange: (value: string | string[]) => setSearch(value as string),
-    },
-  ];
+  // Build container options for dropdown
+  const containerOptions: SelectOption[] = useMemo(() => [
+    { value: "all", label: "All Containers" },
+    ...containers.map((c) => ({ value: c, label: c })),
+  ], [containers]);
 
   if (!selectedAgent) {
     return <Spinner.LogoPage label="Selecting agent..." />;
@@ -217,51 +197,43 @@ export default function DockerLogsPage() {
 
   return (
     <div className="space-y-4">
-      {/* Controls Bar */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          {/* Lines selector */}
+      {/* Filter Toolbar */}
+      <FilterToolbar
+        primaryToggle={{
+          options: LOG_LEVEL_OPTIONS,
+          value: level,
+          onChange: (v) => setLevel(v as LogLevel),
+        }}
+        dropdownSelector={{
+          options: containerOptions,
+          value: selectedContainer,
+          onChange: setSelectedContainer,
+          label: "Container",
+        }}
+        searchQuery={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Search logs..."
+        showSearch={true}
+        showAutoRefresh={true}
+        autoRefresh={autoRefresh}
+        onAutoRefreshChange={setAutoRefresh}
+        showRefresh={true}
+        onRefresh={handleRefresh}
+        showExport={true}
+        onExport={exportLogs}
+        singleRow={true}
+        customActions={
           <select
             value={tail}
             onChange={(e) => setTail(parseInt(e.target.value))}
             className="px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500"
           >
-            <option value={100}>100 lines</option>
-            <option value={200}>200 lines</option>
-            <option value={500}>500 lines</option>
-            <option value={1000}>1000 lines</option>
-            <option value={2000}>2000 lines</option>
+            {LINES_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
           </select>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Button
-            variant={autoRefresh ? "primary" : "secondary"}
-            size="sm"
-            icon={autoRefresh ? Pause : Play}
-            onClick={() => setAutoRefresh(!autoRefresh)}
-          >
-            {autoRefresh ? "Pause" : "Live"}
-          </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            icon={RefreshCw}
-            onClick={handleRefresh}
-          >
-            Refresh
-          </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            icon={Download}
-            onClick={exportLogs}
-            disabled={!filteredLogs || filteredLogs.length === 0}
-          >
-            Export
-          </Button>
-        </div>
-      </div>
+        }
+      />
 
       {/* Metrics Overview */}
       <MetricsGrid columns={6}>
@@ -305,119 +277,102 @@ export default function DockerLogsPage() {
         />
       </MetricsGrid>
 
-      {/* Main Content */}
-      <div className="flex gap-6">
-        {/* Filters Sidebar */}
-        <div className="w-64 flex-shrink-0">
-          <FilterPanel
-            filters={filterGroups}
-            onReset={() => {
-              setSearch("");
-              setLevel("all");
-              setSelectedContainer("all");
-            }}
-          />
+      {/* Logs Panel */}
+      <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
+        {/* Log Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
+          <div className="flex items-center gap-3">
+            <Activity className="h-4 w-4 text-gray-500" />
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+              {filteredLogs?.length || 0} log entries
+            </span>
+            {autoRefresh && (
+              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 text-xs font-medium rounded-full">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                Live
+              </span>
+            )}
+          </div>
+          {selectedContainer !== "all" && (
+            <Badge>
+              <Container className="h-3 w-3 mr-1" />
+              {selectedContainer}
+            </Badge>
+          )}
         </div>
 
-        {/* Logs Panel */}
-        <div className="flex-1 min-w-0">
-          <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
-            {/* Log Header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
-              <div className="flex items-center gap-3">
-                <Activity className="h-4 w-4 text-gray-500" />
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  {filteredLogs?.length || 0} log entries
-                </span>
-                {autoRefresh && (
-                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 text-xs font-medium rounded-full">
-                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                    Live
-                  </span>
-                )}
-              </div>
-              {selectedContainer !== "all" && (
-                <Badge>
-                  <Container className="h-3 w-3 mr-1" />
-                  {selectedContainer}
-                </Badge>
-              )}
+        {/* Log Entries */}
+        <div className="h-[calc(100vh-420px)] min-h-[400px] overflow-auto">
+          {isLoading ? (
+            <div className="flex items-center justify-center h-64">
+              <Spinner size="lg" label="Loading logs..." />
             </div>
+          ) : filteredLogs && filteredLogs.length > 0 ? (
+            <div className="divide-y divide-gray-100 dark:divide-gray-800">
+              {filteredLogs.map((log, index) => (
+                <div
+                  key={`${log.timestamp}-${index}`}
+                  onClick={() => setSelectedLog(log)}
+                  className={cn(
+                    "group flex items-start gap-4 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer",
+                    log.level === "error" && "bg-red-50/50 dark:bg-red-900/10",
+                    log.level === "warn" && "bg-amber-50/50 dark:bg-amber-900/10"
+                  )}
+                >
+                  {/* Level Icon */}
+                  <div className="flex-shrink-0 pt-0.5">
+                    {getLevelIcon(log.level)}
+                  </div>
 
-            {/* Log Entries */}
-            <div className="h-[calc(100vh-480px)] min-h-[400px] overflow-auto">
-              {isLoading ? (
-                <div className="flex items-center justify-center h-64">
-                  <Spinner size="lg" label="Loading logs..." />
-                </div>
-              ) : filteredLogs && filteredLogs.length > 0 ? (
-                <div className="divide-y divide-gray-100 dark:divide-gray-800">
-                  {filteredLogs.map((log, index) => (
-                    <div
-                      key={`${log.timestamp}-${index}`}
-                      onClick={() => setSelectedLog(log)}
-                      className={cn(
-                        "group flex items-start gap-4 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer",
-                        log.level === "error" && "bg-red-50/50 dark:bg-red-900/10",
-                        log.level === "warn" && "bg-amber-50/50 dark:bg-amber-900/10"
-                      )}
-                    >
-                      {/* Level Icon */}
-                      <div className="flex-shrink-0 pt-0.5">
-                        {getLevelIcon(log.level)}
-                      </div>
-
-                      {/* Timestamp */}
-                      <div className="flex-shrink-0 w-24 text-right">
-                        <div className="text-xs font-mono text-gray-500 dark:text-gray-400">
-                          {formatTimestamp(log.timestamp)}
-                        </div>
-                      </div>
-
-                      {/* Level Badge */}
-                      <div className="flex-shrink-0 w-16">
-                        <Badge color={getLevelBadgeColor(log.level)} size="sm">
-                          {log.level.toUpperCase()}
-                        </Badge>
-                      </div>
-
-                      {/* Container */}
-                      <div className="flex-shrink-0 w-32">
-                        {log.container_name ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-xs font-medium rounded truncate max-w-full">
-                            <Container className="h-3 w-3 flex-shrink-0" />
-                            <span className="truncate">{log.container_name}</span>
-                          </span>
-                        ) : (
-                          <span className="text-xs text-gray-400">-</span>
-                        )}
-                      </div>
-
-                      {/* Message */}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-gray-900 dark:text-gray-100 font-mono break-all line-clamp-2 group-hover:line-clamp-none transition-all">
-                          {log.message}
-                        </p>
-                      </div>
+                  {/* Timestamp */}
+                  <div className="flex-shrink-0 w-24 text-right">
+                    <div className="text-xs font-mono text-gray-500 dark:text-gray-400">
+                      {formatTimestamp(log.timestamp)}
                     </div>
-                  ))}
-                  <div ref={logsEndRef} />
+                  </div>
+
+                  {/* Level Badge */}
+                  <div className="flex-shrink-0 w-16">
+                    <Badge color={getLevelBadgeColor(log.level)} size="sm">
+                      {log.level.toUpperCase()}
+                    </Badge>
+                  </div>
+
+                  {/* Container */}
+                  <div className="flex-shrink-0 w-32">
+                    {log.container_name ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-xs font-medium rounded truncate max-w-full">
+                        <Container className="h-3 w-3 flex-shrink-0" />
+                        <span className="truncate">{log.container_name}</span>
+                      </span>
+                    ) : (
+                      <span className="text-xs text-gray-400">-</span>
+                    )}
+                  </div>
+
+                  {/* Message */}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-gray-900 dark:text-gray-100 font-mono break-all line-clamp-2 group-hover:line-clamp-none transition-all">
+                      {log.message}
+                    </p>
+                  </div>
                 </div>
-              ) : (
-                <div className="py-16">
-                  <EmptyState
-                    icon={FileText}
-                    title="No logs found"
-                    description={
-                      search || selectedContainer !== "all"
-                        ? "Try adjusting your filters"
-                        : "No log entries available"
-                    }
-                  />
-                </div>
-              )}
+              ))}
+              <div ref={logsEndRef} />
             </div>
-          </div>
+          ) : (
+            <div className="py-16">
+              <EmptyState
+                icon={FileText}
+                title="No logs found"
+                description={
+                  search || selectedContainer !== "all"
+                    ? "Try adjusting your filters"
+                    : "No log entries available"
+                }
+              />
+            </div>
+          )}
         </div>
       </div>
 

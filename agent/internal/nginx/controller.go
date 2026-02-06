@@ -434,6 +434,10 @@ server {
 {{ if .IncludeWWW }}    server_name {{ .Domain }} www.{{ .Domain }};
 {{ else }}    server_name {{ .Domain }};
 {{ end }}
+    # Per-domain logging for analytics
+    access_log /var/log/nginx/domains/{{ .Domain }}.access.log infrapilot_analytics;
+    error_log /var/log/nginx/domains/{{ .Domain }}.error.log warn;
+
     # ACME challenge for Let's Encrypt certificate renewal
     location /.well-known/acme-challenge/ {
         root /var/www/acme-challenge;
@@ -452,6 +456,10 @@ server {
 {{ if .IncludeWWW }}    server_name {{ .Domain }} www.{{ .Domain }};
 {{ else }}    server_name {{ .Domain }};
 {{ end }}
+    # Per-domain logging for analytics
+    access_log /var/log/nginx/domains/{{ .Domain }}.access.log infrapilot_analytics;
+    error_log /var/log/nginx/domains/{{ .Domain }}.error.log warn;
+
     # ACME challenge for Let's Encrypt certificate issuance
     location /.well-known/acme-challenge/ {
         root /var/www/acme-challenge;
@@ -483,6 +491,9 @@ server {
 {{ end }}{{ if .IncludeWWW }}    server_name {{ .Domain }} www.{{ .Domain }};
 {{ else }}    server_name {{ .Domain }};
 {{ end }}
+    # Per-domain logging for analytics
+    access_log /var/log/nginx/domains/{{ .Domain }}.access.log infrapilot_analytics;
+    error_log /var/log/nginx/domains/{{ .Domain }}.error.log warn;
 
 {{ if and .SSLCertPath .SSLKeyPath }}
     # Custom certificate paths

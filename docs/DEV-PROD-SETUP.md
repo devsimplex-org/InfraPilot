@@ -5,7 +5,7 @@ This document describes the development and production environment setup for Inf
 ## Architecture Overview
 
 InfraPilot runs as an "all-in-one" container that includes:
-- **PostgreSQL** - Primary database
+- **PostgreSQL 17** - Primary database with TimescaleDB extension
 - **Redis** - Session cache and pub/sub
 - **Nginx** - Reverse proxy and SSL termination
 - **Backend** - Go API server (port 8080)
@@ -26,7 +26,8 @@ InfraPilot runs as an "all-in-one" container that includes:
 └── dx-core-ops/
     └── infra/
         ├── docker-compose.infrapilot.yml   # Production compose file
-        └── .env                       # Production environment
+        ├── data/                           # Persistent data
+        └── .env                            # Production environment
 ```
 
 ## Development Environment
@@ -39,7 +40,7 @@ cd /home/administrator/infrapilot-ee
 ```
 
 This starts:
-- `infrapilot-dev-postgres` - PostgreSQL database
+- `infrapilot-dev-postgres` - PostgreSQL database (timescale/timescaledb:latest-pg16)
 - `infrapilot-dev-redis` - Redis cache
 - `infrapilot-dev-backend` - Backend with hot reload
 - `infrapilot-dev-frontend` - Frontend with hot reload
@@ -68,21 +69,25 @@ cd /home/administrator/infrapilot-ee
 
 This builds and pushes to `ghcr.io/tybali/infrapilot:v1.0.0` and `ghcr.io/tybali/infrapilot:latest`.
 
+For local build only (no push):
+```bash
+./scripts/build-and-publish.sh v1.0.0 --all-in-one --no-push
+```
+
 ### Deploying to Production
 
 ```bash
 cd /home/administrator/dx-core-ops/infra
 
-# Pull latest image
-docker compose --env-file .env -f docker-compose.infrapilot.yml pull infrapilot
-
-# Recreate container
+# Recreate container with new image
 docker compose --env-file .env -f docker-compose.infrapilot.yml up -d --no-deps --force-recreate infrapilot
 
+# Connect to dev network (required for proxies pointing to dev containers)
+docker network connect infrapilot-ee_infrapilot-dev infrapilot
 ```
 
 ### Production URLs
-- Dashboard: https://infra.devsimplex.net (with basic auth)
+- Dashboard: https://infra.devsimplex.net
 - API: https://infra.devsimplex.net/api/
 
 ## Data Persistence
@@ -91,7 +96,7 @@ Production data is stored in Docker volumes mapped to `/data`:
 
 | Path | Contents |
 |------|----------|
-| `/data/postgres` | PostgreSQL data files |
+| `/data/postgres` | PostgreSQL 17 data files |
 | `/data/redis` | Redis persistence |
 | `/data/nginx/conf.d/` | Nginx proxy configs and htpasswd files |
 | `/data/nginx/certs/` | SSL certificates |
@@ -111,7 +116,16 @@ docker exec infrapilot htpasswd -cb /data/nginx/conf.d/.htpasswd_domain_name use
 docker exec infrapilot nginx -s reload
 ```
 
-## Database Migrations
+## Database
+
+### PostgreSQL 17 + TimescaleDB
+
+The production container uses PostgreSQL 17 with TimescaleDB extension for:
+- Time-series nginx log analytics
+- Hypertables for efficient log storage
+- Materialized views for dashboard metrics
+
+### Migrations
 
 Migrations run automatically on startup from embedded SQL files.
 - Up migrations: `*.up.sql` - Applied automatically
@@ -123,10 +137,24 @@ Migration files location: `backend/internal/db/migrations/`
 
 ```bash
 # Check current state
-docker exec infrapilot psql -U postgres -d infrapilot -c "SELECT * FROM schema_migrations ORDER BY version DESC LIMIT 10;"
+docker exec infrapilot su-exec postgres psql -h /run/postgresql -U postgres -d infrapilot -c "SELECT * FROM schema_migrations ORDER BY version DESC LIMIT 10;"
 
 # Run a specific migration
-docker exec infrapilot psql -U postgres -d infrapilot -f /app/backend/migrations/035_example.up.sql
+docker exec infrapilot su-exec postgres psql -h /run/postgresql -U postgres -d infrapilot -f /app/backend/migrations/044_example.up.sql
+```
+
+### Database Backup & Restore
+
+```bash
+# Backup
+docker exec infrapilot su-exec postgres pg_dump -h /run/postgresql -U postgres -d infrapilot -F c -f /tmp/backup.dump
+docker cp infrapilot:/tmp/backup.dump ./infrapilot_backup.dump
+
+# Restore
+docker cp ./infrapilot_backup.dump infrapilot:/tmp/backup.dump
+docker exec infrapilot su-exec postgres pg_restore -h /run/postgresql -U postgres -d infrapilot --clean --if-exists --no-owner /tmp/backup.dump
+# Fix permissions after restore
+docker exec infrapilot su-exec postgres psql -h /run/postgresql -U postgres -d infrapilot -c "GRANT ALL ON ALL TABLES IN SCHEMA public TO infrapilot; GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO infrapilot;"
 ```
 
 ## Networking
@@ -136,14 +164,16 @@ docker exec infrapilot psql -U postgres -d infrapilot -f /app/backend/migrations
 | Network | Purpose |
 |---------|---------|
 | `infrapilot-ee_infrapilot-dev` | Development containers |
-| `dx-core-ops_default` | Production orchestration |
+| `infrapilot` | Production container |
 
 ### Cross-Environment Access
 
-To allow production container to reach dev containers:
+Production container must be connected to dev network to proxy requests to dev containers:
 ```bash
 docker network connect infrapilot-ee_infrapilot-dev infrapilot
 ```
+
+**Important:** This must be done after each container restart/recreate.
 
 ## Logs & Debugging
 
@@ -152,13 +182,14 @@ docker network connect infrapilot-ee_infrapilot-dev infrapilot
 docker logs infrapilot
 
 # Backend logs only
-docker exec infrapilot supervisorctl tail -f backend
+docker exec infrapilot cat /var/log/supervisor/backend.log
+docker exec infrapilot cat /var/log/supervisor/backend-error.log
 
 # Nginx logs
 docker exec infrapilot tail -f /var/log/nginx/error.log
 
-# PostgreSQL logs
-docker exec infrapilot tail -f /data/postgres/pg_log/postgresql.log
+# Check service status
+docker exec infrapilot cat /var/log/supervisor/supervisord.log
 ```
 
 ## Common Operations
@@ -166,15 +197,15 @@ docker exec infrapilot tail -f /data/postgres/pg_log/postgresql.log
 ### Restart a service
 
 ```bash
-docker exec infrapilot supervisorctl restart backend
-docker exec infrapilot supervisorctl restart frontend
-docker exec infrapilot supervisorctl restart nginx
+docker restart infrapilot
+# Then reconnect to dev network
+docker network connect infrapilot-ee_infrapilot-dev infrapilot
 ```
 
 ### Database access
 
 ```bash
-docker exec -it infrapilot psql -U postgres -d infrapilot
+docker exec -it infrapilot su-exec postgres psql -h /run/postgresql -U postgres -d infrapilot
 ```
 
 ### Nginx config test
@@ -190,18 +221,34 @@ docker exec infrapilot nginx -s reload
 Check logs: `docker logs infrapilot`
 
 ### 502 Bad Gateway
-Backend or frontend isn't running:
+1. Check if backend is running:
+   ```bash
+   docker exec infrapilot curl -s http://127.0.0.1:8080/health
+   ```
+2. Check backend error logs:
+   ```bash
+   docker exec infrapilot cat /var/log/supervisor/backend-error.log | tail -20
+   ```
+
+### Nginx keeps restarting
+Check for missing upstreams (dev containers not running):
 ```bash
-docker exec infrapilot supervisorctl status
+docker exec infrapilot cat /var/log/supervisor/nginx-error.log | tail -20
+```
+If errors about `host not found in upstream`, connect to dev network:
+```bash
+docker network connect infrapilot-ee_infrapilot-dev infrapilot
 ```
 
-### Basic auth not working
-1. Check htpasswd file exists: `docker exec infrapilot ls -la /data/nginx/conf.d/.htpasswd*`
-2. Check nginx config has auth_basic directive
-3. Reload nginx: `docker exec infrapilot nginx -s reload`
-
-### Database connection issues
-Check PostgreSQL is running:
+### Database permission errors
+After restore, fix permissions:
 ```bash
-docker exec infrapilot pg_isready -U postgres
+docker exec infrapilot su-exec postgres psql -h /run/postgresql -U postgres -d infrapilot -c "GRANT ALL ON ALL TABLES IN SCHEMA public TO infrapilot; GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO infrapilot;"
 ```
+
+### TimescaleDB not loading
+Check if shared_preload_libraries is set:
+```bash
+docker exec infrapilot cat /data/postgres/postgresql.conf | grep shared_preload
+```
+Should show: `shared_preload_libraries = 'timescaledb'`
