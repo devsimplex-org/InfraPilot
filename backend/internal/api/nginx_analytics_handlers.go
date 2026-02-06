@@ -294,21 +294,6 @@ func (h *Handler) GetTrafficAnalytics(c *gin.Context) {
 	endTime := time.Now()
 	startTime := endTime.Add(-duration)
 
-	// Select the appropriate materialized view based on interval
-	var viewName string
-	switch interval {
-	case "1m", "5m":
-		viewName = "nginx_stats_1m"
-	case "1h":
-		// Use 1m aggregate for real-time data, it will just have more granular buckets
-		// The 1h aggregate may not be refreshed yet for recent data
-		viewName = "nginx_stats_1m"
-	case "1d":
-		viewName = "nginx_stats_daily"
-	default:
-		viewName = "nginx_stats_1m"
-	}
-
 	// Build query
 	var rows pgx.Rows
 	var err error
@@ -372,45 +357,45 @@ func (h *Handler) GetTrafficAnalytics(c *gin.Context) {
 			`, timeBucket), orgID, startTime, endTime, domain)
 		}
 	} else if agentID != nil {
-		// Note: Materialized views don't have p95/p99 columns (requires TSL license features)
-		// We query max_response_time as a proxy for high latency spikes
+		// Query raw table for all domains with agent filter
 		rows, err = h.db.Query(ctx, fmt.Sprintf(`
 			SELECT
-				bucket,
-				COALESCE(SUM(total_requests), 0),
-				COALESCE(SUM(count_2xx), 0),
-				COALESCE(SUM(count_3xx), 0),
-				COALESCE(SUM(count_4xx), 0),
-				COALESCE(SUM(count_5xx), 0),
-				COALESCE(SUM(total_bytes), 0),
-				COALESCE(AVG(avg_response_time), 0),
-				COALESCE(MAX(max_response_time), 0),
-				COALESCE(MIN(min_response_time), 0),
-				COALESCE(SUM(unique_visitors), 0)
-			FROM %s
-			WHERE org_id = $1 AND agent_id = $2 AND bucket >= $3 AND bucket <= $4
+				time_bucket('%s', time) AS bucket,
+				COUNT(*) AS total_requests,
+				COUNT(*) FILTER (WHERE status_code >= 200 AND status_code < 300) AS count_2xx,
+				COUNT(*) FILTER (WHERE status_code >= 300 AND status_code < 400) AS count_3xx,
+				COUNT(*) FILTER (WHERE status_code >= 400 AND status_code < 500) AS count_4xx,
+				COUNT(*) FILTER (WHERE status_code >= 500) AS count_5xx,
+				COALESCE(SUM(response_bytes), 0) AS total_bytes,
+				COALESCE(AVG(response_time), 0) AS avg_response_time,
+				COALESCE(MAX(response_time), 0) AS max_response_time,
+				COALESCE(MIN(response_time), 0) AS min_response_time,
+				COUNT(DISTINCT client_ip) AS unique_visitors
+			FROM nginx_access_logs
+			WHERE org_id = $1 AND agent_id = $2 AND time >= $3 AND time <= $4
 			GROUP BY bucket
 			ORDER BY bucket ASC
-		`, viewName), orgID, agentID, startTime, endTime)
+		`, timeBucket), orgID, agentID, startTime, endTime)
 	} else {
+		// Query raw table for all domains (no domain filter, no agent filter)
 		rows, err = h.db.Query(ctx, fmt.Sprintf(`
 			SELECT
-				bucket,
-				COALESCE(SUM(total_requests), 0),
-				COALESCE(SUM(count_2xx), 0),
-				COALESCE(SUM(count_3xx), 0),
-				COALESCE(SUM(count_4xx), 0),
-				COALESCE(SUM(count_5xx), 0),
-				COALESCE(SUM(total_bytes), 0),
-				COALESCE(AVG(avg_response_time), 0),
-				COALESCE(MAX(max_response_time), 0),
-				COALESCE(MIN(min_response_time), 0),
-				COALESCE(SUM(unique_visitors), 0)
-			FROM %s
-			WHERE org_id = $1 AND bucket >= $2 AND bucket <= $3
+				time_bucket('%s', time) AS bucket,
+				COUNT(*) AS total_requests,
+				COUNT(*) FILTER (WHERE status_code >= 200 AND status_code < 300) AS count_2xx,
+				COUNT(*) FILTER (WHERE status_code >= 300 AND status_code < 400) AS count_3xx,
+				COUNT(*) FILTER (WHERE status_code >= 400 AND status_code < 500) AS count_4xx,
+				COUNT(*) FILTER (WHERE status_code >= 500) AS count_5xx,
+				COALESCE(SUM(response_bytes), 0) AS total_bytes,
+				COALESCE(AVG(response_time), 0) AS avg_response_time,
+				COALESCE(MAX(response_time), 0) AS max_response_time,
+				COALESCE(MIN(response_time), 0) AS min_response_time,
+				COUNT(DISTINCT client_ip) AS unique_visitors
+			FROM nginx_access_logs
+			WHERE org_id = $1 AND time >= $2 AND time <= $3
 			GROUP BY bucket
 			ORDER BY bucket ASC
-		`, viewName), orgID, startTime, endTime)
+		`, timeBucket), orgID, startTime, endTime)
 	}
 
 	if err != nil {
