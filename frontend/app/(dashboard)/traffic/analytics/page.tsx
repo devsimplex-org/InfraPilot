@@ -118,6 +118,31 @@ interface StatusCodeDistribution {
   total: number;
 }
 
+interface MethodStats {
+  method: string;
+  count: number;
+  total_bytes: number;
+  avg_response_time: number;
+  percentage: number;
+}
+
+interface ClientStats {
+  client_ip: string;
+  request_count: number;
+  total_bytes: number;
+  avg_response_time: number;
+  error_count: number;
+  error_rate: number;
+  last_seen: string;
+}
+
+interface UserAgentStats {
+  browsers: Array<{ name: string; count: number; percentage: number }>;
+  devices: Array<{ name: string; count: number; percentage: number }>;
+  top_agents: Array<{ user_agent: string; count: number; type: string }>;
+  total: number;
+}
+
 // =============================================================================
 // Constants
 // =============================================================================
@@ -127,6 +152,34 @@ const STATUS_COLORS = {
   "3xx": "#3b82f6", // blue
   "4xx": "#f59e0b", // amber
   "5xx": "#ef4444", // red
+};
+
+const METHOD_COLORS: Record<string, string> = {
+  GET: "#22c55e",    // green
+  POST: "#3b82f6",   // blue
+  PUT: "#f59e0b",    // amber
+  DELETE: "#ef4444", // red
+  PATCH: "#8b5cf6",  // purple
+  HEAD: "#6b7280",   // gray
+  OPTIONS: "#06b6d4", // cyan
+};
+
+const DEVICE_COLORS: Record<string, string> = {
+  Desktop: "#3b82f6", // blue
+  Mobile: "#22c55e",  // green
+  Tablet: "#f59e0b",  // amber
+  Bot: "#ef4444",     // red
+  Other: "#6b7280",   // gray
+};
+
+const BROWSER_COLORS: Record<string, string> = {
+  Chrome: "#4285F4",
+  Firefox: "#FF7139",
+  Safari: "#000000",
+  Edge: "#0078D7",
+  Opera: "#FF1B2D",
+  IE: "#0076D6",
+  Other: "#6b7280",
 };
 
 const PIE_COLORS = ["#22c55e", "#3b82f6", "#f59e0b", "#ef4444"];
@@ -276,6 +329,57 @@ export default function TrafficAnalyticsPage() {
         params.append("domain", selectedDomain);
       }
       return api.fetchAPI<StatusCodeDistribution>(`/traffic/analytics/status-codes?${params}`);
+    },
+    refetchInterval: autoRefresh ? 30000 : false,
+  });
+
+  // Fetch method distribution
+  const { data: methodsData } = useQuery({
+    queryKey: ["traffic-methods", selectedRange.value, selectedRange.unit, selectedAgent, selectedDomain],
+    queryFn: async () => {
+      const params = new URLSearchParams(getTimeParams());
+      if (selectedAgent) {
+        params.append("agent_id", selectedAgent);
+      }
+      if (selectedDomain) {
+        params.append("domain", selectedDomain);
+      }
+      return api.fetchAPI<{ methods: MethodStats[]; total: number }>(`/traffic/analytics/methods?${params}`);
+    },
+    refetchInterval: autoRefresh ? 30000 : false,
+  });
+
+  // Fetch top clients
+  const { data: clientsData } = useQuery({
+    queryKey: ["traffic-clients", selectedRange.value, selectedRange.unit, selectedAgent, selectedDomain],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        ...getTimeParams(),
+        limit: "10",
+      });
+      if (selectedAgent) {
+        params.append("agent_id", selectedAgent);
+      }
+      if (selectedDomain) {
+        params.append("domain", selectedDomain);
+      }
+      return api.fetchAPI<{ clients: ClientStats[] }>(`/traffic/analytics/clients?${params}`);
+    },
+    refetchInterval: autoRefresh ? 30000 : false,
+  });
+
+  // Fetch user agent stats
+  const { data: userAgentData } = useQuery({
+    queryKey: ["traffic-user-agents", selectedRange.value, selectedRange.unit, selectedAgent, selectedDomain],
+    queryFn: async () => {
+      const params = new URLSearchParams(getTimeParams());
+      if (selectedAgent) {
+        params.append("agent_id", selectedAgent);
+      }
+      if (selectedDomain) {
+        params.append("domain", selectedDomain);
+      }
+      return api.fetchAPI<UserAgentStats>(`/traffic/analytics/user-agents?${params}`);
     },
     refetchInterval: autoRefresh ? 30000 : false,
   });
@@ -860,6 +964,234 @@ export default function TrafficAnalyticsPage() {
               />
             }
           />
+        </Card.Body>
+      </Card>
+
+      {/* Row 3: Methods, Devices, Browsers */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Request Methods */}
+        <Card>
+          <Card.Header>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+              Request Methods
+            </h3>
+          </Card.Header>
+          <Card.Body>
+            {methodsData?.methods && methodsData.methods.length > 0 ? (
+              <div className="space-y-3">
+                {methodsData.methods.map((m) => (
+                  <div key={m.method} className="flex items-center gap-3">
+                    <Badge
+                      color={
+                        m.method === "GET" ? "green" :
+                        m.method === "POST" ? "blue" :
+                        m.method === "PUT" ? "yellow" :
+                        m.method === "DELETE" ? "red" :
+                        m.method === "PATCH" ? "purple" :
+                        "gray"
+                      }
+                      className="w-16 justify-center"
+                    >
+                      {m.method}
+                    </Badge>
+                    <div className="flex-1">
+                      <div className="flex justify-between text-sm mb-1">
+                        <span className="text-gray-600 dark:text-gray-400">
+                          {formatNumber(m.count)} requests
+                        </span>
+                        <span className="text-gray-500">{m.percentage.toFixed(1)}%</span>
+                      </div>
+                      <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all"
+                          style={{
+                            width: `${m.percentage}%`,
+                            backgroundColor: METHOD_COLORS[m.method] || "#6b7280",
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex items-center justify-center h-[200px] text-gray-500">
+                No method data available
+              </div>
+            )}
+          </Card.Body>
+        </Card>
+
+        {/* Device Types */}
+        <Card>
+          <Card.Header>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+              Device Types
+            </h3>
+          </Card.Header>
+          <Card.Body>
+            {userAgentData?.devices && userAgentData.devices.length > 0 ? (
+              <ResponsiveContainer width="100%" height={220}>
+                <PieChart>
+                  <Pie
+                    data={userAgentData.devices}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={50}
+                    outerRadius={80}
+                    paddingAngle={2}
+                    dataKey="count"
+                    nameKey="name"
+                    label={({ name, percent }) =>
+                      percent > 0.05 ? `${name}` : ""
+                    }
+                    labelLine={false}
+                  >
+                    {userAgentData.devices.map((entry, index) => (
+                      <Cell
+                        key={`cell-${index}`}
+                        fill={DEVICE_COLORS[entry.name] || "#6b7280"}
+                      />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "#1F2937",
+                      border: "1px solid #374151",
+                      borderRadius: "8px",
+                    }}
+                    formatter={(value: number, name: string) => [
+                      `${formatNumber(value)} (${((value / (userAgentData?.total || 1)) * 100).toFixed(1)}%)`,
+                      name,
+                    ]}
+                  />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-[220px] text-gray-500">
+                No device data available
+              </div>
+            )}
+          </Card.Body>
+        </Card>
+
+        {/* Browsers */}
+        <Card>
+          <Card.Header>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+              Browsers
+            </h3>
+          </Card.Header>
+          <Card.Body>
+            {userAgentData?.browsers && userAgentData.browsers.length > 0 ? (
+              <div className="space-y-3">
+                {userAgentData.browsers.slice(0, 6).map((b) => (
+                  <div key={b.name} className="flex items-center gap-3">
+                    <span className="w-16 text-sm font-medium text-gray-700 dark:text-gray-300">
+                      {b.name}
+                    </span>
+                    <div className="flex-1">
+                      <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all"
+                          style={{
+                            width: `${b.percentage}%`,
+                            backgroundColor: BROWSER_COLORS[b.name] || "#6b7280",
+                          }}
+                        />
+                      </div>
+                    </div>
+                    <span className="text-sm text-gray-500 w-16 text-right">
+                      {b.percentage.toFixed(1)}%
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex items-center justify-center h-[200px] text-gray-500">
+                No browser data available
+              </div>
+            )}
+          </Card.Body>
+        </Card>
+      </div>
+
+      {/* Row 4: Top Clients */}
+      <Card>
+        <Card.Header>
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+              Top Client IPs
+            </h3>
+            <Badge color="gray" size="sm">
+              {clientsData?.clients?.length || 0} clients
+            </Badge>
+          </div>
+        </Card.Header>
+        <Card.Body className="p-0">
+          {clientsData?.clients && clientsData.clients.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50 dark:bg-gray-800">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      IP Address
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      Requests
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      Bandwidth
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      Avg Latency
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      Errors
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      Last Seen
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                  {clientsData.clients.map((client, idx) => (
+                    <tr key={client.client_ip} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                      <td className="px-4 py-3">
+                        <span className="font-mono text-sm text-gray-900 dark:text-white">
+                          {client.client_ip}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <span className="font-medium text-gray-900 dark:text-white">
+                          {formatNumber(client.request_count)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right text-gray-600 dark:text-gray-400">
+                        {formatBytes(client.total_bytes)}
+                      </td>
+                      <td className="px-4 py-3 text-right text-gray-600 dark:text-gray-400">
+                        {formatResponseTime(client.avg_response_time)}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <span className={client.error_rate > 5 ? "text-red-500" : "text-green-500"}>
+                          {client.error_rate.toFixed(1)}%
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right text-gray-500 text-sm">
+                        {new Date(client.last_seen).toLocaleTimeString()}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="flex items-center justify-center py-12 text-gray-500">
+              No client data available
+            </div>
+          )}
         </Card.Body>
       </Card>
     </div>
