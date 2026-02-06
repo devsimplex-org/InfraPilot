@@ -708,6 +708,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 		analytics.GET("/summary", h.GetTrafficAnalyticsSummary)
 		analytics.GET("/top-paths", h.GetTopPaths)
 		analytics.GET("/status-codes", h.GetStatusCodeDistribution)
+		analytics.GET("/domains", h.GetLogDomains)
 	}
 }
 

@@ -948,6 +948,63 @@ func (h *Handler) GetStatusCodeDistribution(c *gin.Context) {
 	})
 }
 
+// GetLogDomains returns unique domains from nginx access logs
+// GET /api/v1/traffic/analytics/domains
+func (h *Handler) GetLogDomains(c *gin.Context) {
+	// Get org_id - middleware stores it as uuid.UUID
+	orgUUIDVal, _ := c.Get("org_id")
+	orgID := orgUUIDVal.(uuid.UUID)
+
+	// Default to last 24 hours of data
+	hours, _ := strconv.Atoi(c.DefaultQuery("hours", "24"))
+	if hours < 1 {
+		hours = 24
+	}
+	if hours > 720 {
+		hours = 720
+	}
+
+	endTime := time.Now()
+	startTime := endTime.Add(-time.Duration(hours) * time.Hour)
+
+	ctx := c.Request.Context()
+
+	rows, err := h.db.Query(ctx, `
+		SELECT DISTINCT host, COUNT(*) as request_count
+		FROM nginx_access_logs
+		WHERE org_id = $1 AND time >= $2 AND time <= $3 AND host IS NOT NULL AND host != ''
+		GROUP BY host
+		ORDER BY request_count DESC
+		LIMIT 100
+	`, orgID, startTime, endTime)
+
+	if err != nil {
+		h.logger.Error("Failed to query log domains", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve domains"})
+		return
+	}
+	defer rows.Close()
+
+	type DomainInfo struct {
+		Domain       string `json:"domain"`
+		RequestCount int64  `json:"request_count"`
+	}
+
+	var domains []DomainInfo
+	for rows.Next() {
+		var d DomainInfo
+		if err := rows.Scan(&d.Domain, &d.RequestCount); err != nil {
+			h.logger.Warn("Failed to scan domain row", zap.Error(err))
+			continue
+		}
+		domains = append(domains, d)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"domains": domains,
+	})
+}
+
 // Helper functions
 
 func nullFloat64(f float64) *float64 {
