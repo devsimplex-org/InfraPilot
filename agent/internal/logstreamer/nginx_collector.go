@@ -235,10 +235,6 @@ func (c *NginxCollector) openLogFile() error {
 
 	c.file = file
 	c.fileOffset = offset
-	c.logger.Info("Opened nginx log file",
-		zap.String("path", c.logPath),
-		zap.Int64("offset", offset),
-	)
 	return nil
 }
 
@@ -263,14 +259,13 @@ func (c *NginxCollector) reopenLogFile() {
 // readNewLines reads new lines from the log file
 func (c *NginxCollector) readNewLines() {
 	if c.file == nil {
-		c.logger.Debug("readNewLines: file is nil")
 		return
 	}
 
 	// Get current file size
 	info, err := c.file.Stat()
 	if err != nil {
-		c.logger.Warn("Failed to stat file", zap.Error(err))
+		c.logger.Debug("Failed to stat file", zap.Error(err))
 		return
 	}
 
@@ -288,33 +283,24 @@ func (c *NginxCollector) readNewLines() {
 		return
 	}
 
-	c.logger.Info("Reading new log entries",
-		zap.Int64("current_size", currentSize),
-		zap.Int64("last_offset", c.fileOffset),
-	)
-
 	// Seek to last position
 	c.file.Seek(c.fileOffset, io.SeekStart)
 
 	// Read new lines
 	reader := bufio.NewReader(c.file)
-	linesRead := 0
-	linesSkipped := 0
-	linesParsed := 0
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err != io.EOF {
-				c.logger.Warn("Error reading line", zap.Error(err))
+				c.logger.Debug("Error reading line", zap.Error(err))
 			}
 			break
 		}
-		linesRead++
 
 		// Parse the line
 		entry, err := c.parser.Parse(line)
 		if err != nil {
-			c.logger.Warn("Failed to parse nginx log line",
+			c.logger.Debug("Failed to parse nginx log line",
 				zap.String("line", line),
 				zap.Error(err),
 			)
@@ -322,17 +308,11 @@ func (c *NginxCollector) readNewLines() {
 		}
 
 		if entry == nil {
-			linesSkipped++
-			c.logger.Info("Failed to parse log line (nil result)",
-				zap.String("line", line[:min(len(line), 200)]),
-			)
 			continue
 		}
-		linesParsed++
 
 		// Skip health checks if configured
 		if c.skipHealthChecks && IsHealthCheck(entry.Path, entry.UserAgent) {
-			linesSkipped++
 			continue
 		}
 
@@ -342,14 +322,6 @@ func (c *NginxCollector) readNewLines() {
 		}
 
 		c.addEntry(*entry)
-	}
-
-	if linesRead > 0 {
-		c.logger.Info("Processed nginx log lines",
-			zap.Int("read", linesRead),
-			zap.Int("parsed", linesParsed),
-			zap.Int("skipped", linesSkipped),
-		)
 	}
 
 	// Update offset
@@ -363,10 +335,6 @@ func (c *NginxCollector) addEntry(entry NginxLogEntry) {
 	defer c.bufferMu.Unlock()
 
 	c.buffer = append(c.buffer, entry)
-	c.logger.Debug("Added entry to buffer",
-		zap.Int("buffer_count", len(c.buffer)),
-		zap.String("path", entry.Path),
-	)
 
 	// Flush if buffer is full
 	if len(c.buffer) >= c.bufferSize {
@@ -420,7 +388,7 @@ func (c *NginxCollector) flush() {
 		return
 	}
 
-	c.logger.Info("Flushed nginx logs to backend", zap.Int("count", len(entries)))
+	c.logger.Debug("Flushed nginx logs to backend", zap.Int("count", len(entries)))
 }
 
 // Stop stops the nginx log collector

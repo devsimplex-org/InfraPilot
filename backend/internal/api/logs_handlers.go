@@ -511,13 +511,36 @@ func (h *Handler) getNginxLogsReal(c *gin.Context) {
 			}
 		}
 	} else {
-		// For global logs, use Docker container logs API
-		// (nginx access.log/error.log are symlinked to stdout/stderr in container)
-		logs, err = h.getNginxLogsFromContainer(ctx, docker, nginxContainerID, logType, tail)
+		// For global logs, try reading from log file first (if nginx writes to files)
+		// Then fall back to Docker container logs API (if logs are symlinked to stdout/stderr)
+		var logFile string
+		if logType == "error" {
+			logFile = "/var/log/nginx/error.log"
+		} else {
+			logFile = "/var/log/nginx/access.log"
+		}
+
+		h.logger.Info("Attempting to read nginx logs from file",
+			zap.String("file", logFile),
+			zap.String("container", nginxContainerID),
+		)
+
+		logs, err = h.getNginxLogsFromFile(ctx, docker, nginxContainerID, logFile, logType, tail)
 		if err != nil {
-			h.logger.Error("Failed to get container logs", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get logs"})
-			return
+			h.logger.Info("Failed to get logs from file, trying container logs",
+				zap.String("file", logFile),
+				zap.Error(err))
+			// Fall back to container logs
+			logs, err = h.getNginxLogsFromContainer(ctx, docker, nginxContainerID, logType, tail)
+			if err != nil {
+				h.logger.Error("Failed to get container logs", zap.Error(err))
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get logs"})
+				return
+			}
+		} else {
+			h.logger.Info("Successfully read logs from file",
+				zap.String("file", logFile),
+				zap.Int("count", len(logs)))
 		}
 	}
 
