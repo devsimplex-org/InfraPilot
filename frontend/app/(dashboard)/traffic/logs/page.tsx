@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   FileText,
@@ -11,7 +11,7 @@ import {
   Copy,
   Check,
   Terminal,
-  ArrowDown,
+  ArrowUp,
   FileJson,
   FileSpreadsheet,
 } from "lucide-react";
@@ -117,6 +117,7 @@ function LogEntryRow({
   index,
   logType,
   isSelected,
+  isNew,
   onClick,
   searchQuery,
 }: {
@@ -124,6 +125,7 @@ function LogEntryRow({
   index: number;
   logType: LogType;
   isSelected: boolean;
+  isNew: boolean;
   onClick: () => void;
   searchQuery: string;
 }) {
@@ -186,10 +188,11 @@ function LogEntryRow({
       <div
         onClick={onClick}
         className={cn(
-          "group flex items-center gap-2 py-2 px-3 rounded-md cursor-pointer transition-colors",
+          "group flex items-center gap-2 py-2 px-3 rounded-md cursor-pointer transition-all duration-500",
           isSelected
             ? "bg-primary-500/20 border border-primary-500/50"
-            : "hover:bg-gray-800/50"
+            : "hover:bg-gray-800/50",
+          isNew && "animate-highlight-fade bg-green-500/30 border-l-2 border-l-green-400"
         )}
       >
         <span className="text-gray-600 text-xs font-mono w-6 text-right shrink-0">
@@ -237,13 +240,14 @@ function LogEntryRow({
     <div
       onClick={onClick}
       className={cn(
-        "group py-2 px-3 rounded-md cursor-pointer transition-colors",
+        "group py-2 px-3 rounded-md cursor-pointer transition-all duration-500",
         isSelected
           ? "bg-primary-500/20 border border-primary-500/50"
           : "hover:bg-gray-800/50",
         errorLevel === "emerg" && "bg-red-900/30",
         errorLevel === "error" && "bg-red-900/20",
-        errorLevel === "warn" && "bg-yellow-900/20"
+        errorLevel === "warn" && "bg-yellow-900/20",
+        isNew && "animate-highlight-fade bg-green-500/30 border-l-2 border-l-green-400"
       )}
     >
       <div className="flex items-start gap-2">
@@ -327,6 +331,9 @@ export default function TrafficLogsPage() {
   const [selectedLog, setSelectedLog] = useState<NginxLogEntry | null>(null);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const logContainerRef = useRef<HTMLDivElement>(null);
+  const [newLogIds, setNewLogIds] = useState<Set<string>>(new Set());
+  const previousLogsRef = useRef<Set<string>>(new Set());
+  const isFirstLoadRef = useRef(true);
 
   // Fetch agents
   const { data: agents } = useQuery({
@@ -399,9 +406,59 @@ export default function TrafficLogsPage() {
 
   const logs: NginxLogEntry[] = logsData?.logs || [];
 
-  // Filter logs by search and level
+  // Generate unique key for a log entry (stable across sorting)
+  const getLogKey = useCallback((log: NginxLogEntry) => {
+    // Use combination of timestamp, message hash, and fields for uniqueness
+    const msgHash = log.message ? log.message.slice(0, 100) : '';
+    return `${log.timestamp || ''}_${log.status_code || ''}_${log.method || ''}_${log.path?.slice(0, 50) || ''}_${log.client_ip || ''}_${msgHash}`;
+  }, []);
+
+  // Track new logs when data refreshes (only in live mode)
+  useEffect(() => {
+    if (!logs.length) return;
+
+    // Build set of current log keys
+    const currentKeys = new Set(logs.map((log) => getLogKey(log)));
+
+    // On first load, just store the keys without marking as new
+    if (isFirstLoadRef.current) {
+      previousLogsRef.current = currentKeys;
+      isFirstLoadRef.current = false;
+      return;
+    }
+
+    // Find new logs (in current but not in previous)
+    if (autoRefresh) {
+      const newKeys = new Set<string>();
+      logs.forEach((log) => {
+        const key = getLogKey(log);
+        if (!previousLogsRef.current.has(key)) {
+          newKeys.add(key);
+        }
+      });
+
+      if (newKeys.size > 0) {
+        setNewLogIds(newKeys);
+
+        // Scroll to top to show new logs
+        if (logContainerRef.current) {
+          logContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        // Clear highlight after 3 seconds
+        setTimeout(() => {
+          setNewLogIds(new Set());
+        }, 3000);
+      }
+    }
+
+    // Update previous logs reference
+    previousLogsRef.current = currentKeys;
+  }, [logs, autoRefresh, getLogKey]);
+
+  // Filter and sort logs (newest first)
   const filteredLogs = useMemo(() => {
-    return logs.filter((log) => {
+    const filtered = logs.filter((log) => {
       // Search filter
       if (searchQuery) {
         const searchLower = searchQuery.toLowerCase();
@@ -449,6 +506,13 @@ export default function TrafficLogsPage() {
 
       return true;
     });
+
+    // Sort by timestamp descending (newest first)
+    return filtered.sort((a, b) => {
+      const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+      const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+      return timeB - timeA;
+    });
   }, [logs, searchQuery, levelFilter, logType, methodFilter, ipFilter]);
 
   // Calculate metrics
@@ -482,12 +546,12 @@ export default function TrafficLogsPage() {
     return { total, errors, warnings, success };
   }, [logs, logType]);
 
-  // Auto-scroll to bottom when new logs arrive
+  // Reset first load flag when query params change
   useEffect(() => {
-    if (autoRefresh && logContainerRef.current) {
-      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
-    }
-  }, [logs, autoRefresh]);
+    isFirstLoadRef.current = true;
+    previousLogsRef.current = new Set();
+    setNewLogIds(new Set());
+  }, [selectedAgent, logType, lines, selectedDomain]);
 
   // Export function
   const exportLogs = (format: string) => {
@@ -557,10 +621,17 @@ export default function TrafficLogsPage() {
     setTimeout(() => setCopiedIndex(null), 2000);
   };
 
-  // Scroll to bottom
+  // Scroll to top (for latest logs)
+  const scrollToTop = () => {
+    if (logContainerRef.current) {
+      logContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
+  // Scroll to bottom (for oldest logs)
   const scrollToBottom = () => {
     if (logContainerRef.current) {
-      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+      logContainerRef.current.scrollTo({ top: logContainerRef.current.scrollHeight, behavior: 'smooth' });
     }
   };
 
@@ -767,13 +838,20 @@ export default function TrafficLogsPage() {
         <Card>
           <CardHeader
             action={
-              <button
-                onClick={scrollToBottom}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
-              >
-                <ArrowDown className="h-3 w-3" />
-                Scroll to bottom
-              </button>
+              <div className="flex items-center gap-2">
+                {newLogIds.size > 0 && (
+                  <span className="text-xs text-green-500 font-medium animate-pulse">
+                    +{newLogIds.size} new
+                  </span>
+                )}
+                <button
+                  onClick={scrollToTop}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+                >
+                  <ArrowUp className="h-3 w-3" />
+                  Latest
+                </button>
+              </div>
             }
           >
             <div className="flex items-center gap-3">
@@ -799,17 +877,21 @@ export default function TrafficLogsPage() {
               ref={logContainerRef}
               className="bg-gray-950 font-mono text-sm overflow-auto max-h-[600px] p-2 space-y-0.5"
             >
-              {filteredLogs.map((log, index) => (
-                <LogEntryRow
-                  key={index}
-                  log={log}
-                  index={index}
-                  logType={logType}
-                  isSelected={selectedLog === log}
-                  onClick={() => setSelectedLog(log)}
-                  searchQuery={searchQuery}
-                />
-              ))}
+              {filteredLogs.map((log, index) => {
+                const logKey = getLogKey(log);
+                return (
+                  <LogEntryRow
+                    key={logKey}
+                    log={log}
+                    index={index}
+                    logType={logType}
+                    isSelected={selectedLog === log}
+                    isNew={newLogIds.has(logKey)}
+                    onClick={() => setSelectedLog(log)}
+                    searchQuery={searchQuery}
+                  />
+                );
+              })}
             </div>
           </CardBody>
         </Card>
