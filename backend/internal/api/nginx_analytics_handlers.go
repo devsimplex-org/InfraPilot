@@ -311,6 +311,8 @@ func (h *Handler) GetTrafficAnalytics(c *gin.Context) {
 
 	ctx := c.Request.Context()
 
+	// Note: Materialized views don't have p95/p99 columns (requires TSL license features)
+	// We query max_response_time as a proxy for high latency spikes
 	if agentID != nil {
 		rows, err = h.db.Query(ctx, fmt.Sprintf(`
 			SELECT
@@ -322,8 +324,6 @@ func (h *Handler) GetTrafficAnalytics(c *gin.Context) {
 				COALESCE(SUM(count_5xx), 0),
 				COALESCE(SUM(total_bytes), 0),
 				COALESCE(AVG(avg_response_time), 0),
-				COALESCE(MAX(p95_response_time), 0),
-				COALESCE(MAX(p99_response_time), 0),
 				COALESCE(MAX(max_response_time), 0),
 				COALESCE(MIN(min_response_time), 0),
 				COALESCE(SUM(unique_visitors), 0)
@@ -343,8 +343,6 @@ func (h *Handler) GetTrafficAnalytics(c *gin.Context) {
 				COALESCE(SUM(count_5xx), 0),
 				COALESCE(SUM(total_bytes), 0),
 				COALESCE(AVG(avg_response_time), 0),
-				COALESCE(MAX(p95_response_time), 0),
-				COALESCE(MAX(p99_response_time), 0),
 				COALESCE(MAX(max_response_time), 0),
 				COALESCE(MIN(min_response_time), 0),
 				COALESCE(SUM(unique_visitors), 0)
@@ -374,8 +372,6 @@ func (h *Handler) GetTrafficAnalytics(c *gin.Context) {
 			&dp.Count5xx,
 			&dp.TotalBytes,
 			&dp.AvgResponseTime,
-			&dp.P95ResponseTime,
-			&dp.P99ResponseTime,
 			&dp.MaxResponseTime,
 			&dp.MinResponseTime,
 			&dp.UniqueVisitors,
@@ -384,6 +380,10 @@ func (h *Handler) GetTrafficAnalytics(c *gin.Context) {
 			h.logger.Error("Failed to scan analytics row", zap.Error(err))
 			continue
 		}
+		// P95/P99 not available from materialized views (requires TSL license)
+		// Use max as upper bound indicator
+		dp.P95ResponseTime = dp.MaxResponseTime
+		dp.P99ResponseTime = dp.MaxResponseTime
 		dataPoints = append(dataPoints, dp)
 	}
 
@@ -438,22 +438,22 @@ func (h *Handler) GetTrafficAnalyticsSummary(c *gin.Context) {
 	var summary NginxAnalyticsSummary
 	var err error
 
-	// Use nginx_stats_1m for better real-time data (1h aggregate may not be refreshed yet)
+	// Query raw table for accurate percentile calculations
 	if agentID != nil {
 		err = h.db.QueryRow(ctx, `
 			SELECT
-				COALESCE(SUM(total_requests), 0),
-				COALESCE(SUM(total_bytes), 0),
-				COALESCE(SUM(unique_visitors), 0),
-				COALESCE(AVG(avg_response_time), 0),
-				COALESCE(MAX(p95_response_time), 0),
-				COALESCE(MAX(p99_response_time), 0),
-				COALESCE(SUM(count_2xx), 0),
-				COALESCE(SUM(count_3xx), 0),
-				COALESCE(SUM(count_4xx), 0),
-				COALESCE(SUM(count_5xx), 0)
-			FROM nginx_stats_1m
-			WHERE org_id = $1 AND agent_id = $2 AND bucket >= $3 AND bucket <= $4
+				COUNT(*),
+				COALESCE(SUM(response_bytes), 0),
+				COUNT(DISTINCT client_ip),
+				COALESCE(AVG(response_time), 0),
+				COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY response_time), 0),
+				COALESCE(percentile_cont(0.99) WITHIN GROUP (ORDER BY response_time), 0),
+				COALESCE(SUM(CASE WHEN status_code >= 200 AND status_code < 300 THEN 1 ELSE 0 END), 0),
+				COALESCE(SUM(CASE WHEN status_code >= 300 AND status_code < 400 THEN 1 ELSE 0 END), 0),
+				COALESCE(SUM(CASE WHEN status_code >= 400 AND status_code < 500 THEN 1 ELSE 0 END), 0),
+				COALESCE(SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END), 0)
+			FROM nginx_access_logs
+			WHERE org_id = $1 AND agent_id = $2 AND time >= $3 AND time <= $4
 		`, orgID, agentID, startTime, endTime).Scan(
 			&summary.TotalRequests,
 			&summary.TotalBytes,
@@ -469,18 +469,18 @@ func (h *Handler) GetTrafficAnalyticsSummary(c *gin.Context) {
 	} else {
 		err = h.db.QueryRow(ctx, `
 			SELECT
-				COALESCE(SUM(total_requests), 0),
-				COALESCE(SUM(total_bytes), 0),
-				COALESCE(SUM(unique_visitors), 0),
-				COALESCE(AVG(avg_response_time), 0),
-				COALESCE(MAX(p95_response_time), 0),
-				COALESCE(MAX(p99_response_time), 0),
-				COALESCE(SUM(count_2xx), 0),
-				COALESCE(SUM(count_3xx), 0),
-				COALESCE(SUM(count_4xx), 0),
-				COALESCE(SUM(count_5xx), 0)
-			FROM nginx_stats_1m
-			WHERE org_id = $1 AND bucket >= $2 AND bucket <= $3
+				COUNT(*),
+				COALESCE(SUM(response_bytes), 0),
+				COUNT(DISTINCT client_ip),
+				COALESCE(AVG(response_time), 0),
+				COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY response_time), 0),
+				COALESCE(percentile_cont(0.99) WITHIN GROUP (ORDER BY response_time), 0),
+				COALESCE(SUM(CASE WHEN status_code >= 200 AND status_code < 300 THEN 1 ELSE 0 END), 0),
+				COALESCE(SUM(CASE WHEN status_code >= 300 AND status_code < 400 THEN 1 ELSE 0 END), 0),
+				COALESCE(SUM(CASE WHEN status_code >= 400 AND status_code < 500 THEN 1 ELSE 0 END), 0),
+				COALESCE(SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END), 0)
+			FROM nginx_access_logs
+			WHERE org_id = $1 AND time >= $2 AND time <= $3
 		`, orgID, startTime, endTime).Scan(
 			&summary.TotalRequests,
 			&summary.TotalBytes,
