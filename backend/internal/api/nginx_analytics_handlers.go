@@ -679,6 +679,9 @@ func (h *Handler) GetTopPaths(c *gin.Context) {
 		}
 	}
 
+	// Domain filtering
+	domain := c.Query("domain")
+
 	endTime := time.Now()
 	startTime := endTime.Add(-duration)
 
@@ -688,7 +691,44 @@ func (h *Handler) GetTopPaths(c *gin.Context) {
 	var err error
 
 	// Query raw table for real-time data (aggregate may not be refreshed for current hour)
-	if agentID != nil {
+	if domain != "" {
+		// Filter by domain
+		if agentID != nil {
+			rows, err = h.db.Query(ctx, `
+				SELECT
+					path,
+					COUNT(*) as total_requests,
+					COALESCE(SUM(response_bytes), 0) as total_bytes,
+					COALESCE(AVG(response_time), 0) as avg_response_time,
+					COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY response_time), 0) as p95_response_time,
+					SUM(CASE WHEN status_code >= 400 AND status_code < 500 THEN 1 ELSE 0 END) as count_4xx,
+					SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END) as count_5xx,
+					COUNT(DISTINCT client_ip) as unique_visitors
+				FROM nginx_access_logs
+				WHERE org_id = $1 AND agent_id = $2 AND time >= $3 AND time <= $4 AND host = $5
+				GROUP BY path
+				ORDER BY total_requests DESC
+				LIMIT $6
+			`, orgID, agentID, startTime, endTime, domain, limit)
+		} else {
+			rows, err = h.db.Query(ctx, `
+				SELECT
+					path,
+					COUNT(*) as total_requests,
+					COALESCE(SUM(response_bytes), 0) as total_bytes,
+					COALESCE(AVG(response_time), 0) as avg_response_time,
+					COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY response_time), 0) as p95_response_time,
+					SUM(CASE WHEN status_code >= 400 AND status_code < 500 THEN 1 ELSE 0 END) as count_4xx,
+					SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END) as count_5xx,
+					COUNT(DISTINCT client_ip) as unique_visitors
+				FROM nginx_access_logs
+				WHERE org_id = $1 AND time >= $2 AND time <= $3 AND host = $4
+				GROUP BY path
+				ORDER BY total_requests DESC
+				LIMIT $5
+			`, orgID, startTime, endTime, domain, limit)
+		}
+	} else if agentID != nil {
 		rows, err = h.db.Query(ctx, `
 			SELECT
 				path,
@@ -794,6 +834,9 @@ func (h *Handler) GetStatusCodeDistribution(c *gin.Context) {
 		}
 	}
 
+	// Domain filtering
+	domain := c.Query("domain")
+
 	endTime := time.Now()
 	startTime := endTime.Add(-duration)
 
@@ -803,7 +846,30 @@ func (h *Handler) GetStatusCodeDistribution(c *gin.Context) {
 	var err error
 
 	// Query raw logs for status code distribution
-	if agentID != nil {
+	if domain != "" {
+		// Filter by domain
+		if agentID != nil {
+			rows, err = h.db.Query(ctx, `
+				SELECT
+					status_code,
+					COUNT(*) as count
+				FROM nginx_access_logs
+				WHERE org_id = $1 AND agent_id = $2 AND time >= $3 AND time <= $4 AND host = $5
+				GROUP BY status_code
+				ORDER BY count DESC
+			`, orgID, agentID, startTime, endTime, domain)
+		} else {
+			rows, err = h.db.Query(ctx, `
+				SELECT
+					status_code,
+					COUNT(*) as count
+				FROM nginx_access_logs
+				WHERE org_id = $1 AND time >= $2 AND time <= $3 AND host = $4
+				GROUP BY status_code
+				ORDER BY count DESC
+			`, orgID, startTime, endTime, domain)
+		}
+	} else if agentID != nil {
 		rows, err = h.db.Query(ctx, `
 			SELECT
 				status_code,

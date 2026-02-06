@@ -213,7 +213,7 @@ export default function TrafficAnalyticsPage() {
         params.append("agent_id", selectedAgent);
       }
       if (selectedDomain) {
-        params.append("host", selectedDomain);
+        params.append("domain", selectedDomain);
       }
       return api.fetchAPI<NginxAnalyticsResponse>(`/traffic/analytics?${params}`);
     },
@@ -229,7 +229,7 @@ export default function TrafficAnalyticsPage() {
         params.append("agent_id", selectedAgent);
       }
       if (selectedDomain) {
-        params.append("host", selectedDomain);
+        params.append("domain", selectedDomain);
       }
       return api.fetchAPI<NginxAnalyticsSummary>(`/traffic/analytics/summary?${params}`);
     },
@@ -248,7 +248,7 @@ export default function TrafficAnalyticsPage() {
         params.append("agent_id", selectedAgent);
       }
       if (selectedDomain) {
-        params.append("host", selectedDomain);
+        params.append("domain", selectedDomain);
       }
       return api.fetchAPI<{ paths: NginxTopPath[] }>(`/traffic/analytics/top-paths?${params}`);
     },
@@ -264,7 +264,7 @@ export default function TrafficAnalyticsPage() {
         params.append("agent_id", selectedAgent);
       }
       if (selectedDomain) {
-        params.append("host", selectedDomain);
+        params.append("domain", selectedDomain);
       }
       return api.fetchAPI<StatusCodeDistribution>(`/traffic/analytics/status-codes?${params}`);
     },
