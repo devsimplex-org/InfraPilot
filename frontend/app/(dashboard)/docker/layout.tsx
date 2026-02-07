@@ -10,6 +10,7 @@ import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Spinner } from "@/components/ui/Spinner";
 import { ContainerPanel } from "@/components/docker/ContainerPanel";
+import { DeploymentPanel } from "@/components/docker/DeploymentPanel";
 import { StackDeployWizard } from "@/components/StackDeployWizard";
 import { cn } from "@/lib/utils";
 
@@ -123,6 +124,7 @@ function DockerLayoutContent({ children }: { children: ReactNode }) {
       <>
         {children}
         <ContainerPanel />
+        <DeploymentPanel />
         <StackDeployWizard
           isOpen={showStackDeployWizard}
           onClose={() => setShowStackDeployWizard(false)}
@@ -190,6 +192,9 @@ function DockerLayoutContent({ children }: { children: ReactNode }) {
 
       {/* Global Container Panel */}
       <ContainerPanel />
+
+      {/* Global Deployment Panel */}
+      <DeploymentPanel />
 
       {/* Stack Deploy Wizard Modal */}
       <StackDeployWizard
