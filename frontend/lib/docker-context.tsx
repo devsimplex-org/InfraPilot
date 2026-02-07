@@ -20,6 +20,11 @@ interface DockerContextType {
   containerPanelId: string | null;
   openContainerPanel: (containerId: string) => void;
   closeContainerPanel: () => void;
+
+  // Global deployment panel
+  deploymentPanelId: string | null;
+  openDeploymentPanel: (deploymentId: string) => void;
+  closeDeploymentPanel: () => void;
 }
 
 const DockerContext = createContext<DockerContextType | undefined>(undefined);
@@ -28,6 +33,7 @@ export function DockerProvider({ children }: { children: ReactNode }) {
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
   const [forceDelete, setForceDelete] = useState(false);
   const [containerPanelId, setContainerPanelId] = useState<string | null>(null);
+  const [deploymentPanelId, setDeploymentPanelId] = useState<string | null>(null);
 
   // Fetch agents
   const { data: agents, isLoading: isLoadingAgents } = useQuery({
@@ -48,6 +54,9 @@ export function DockerProvider({ children }: { children: ReactNode }) {
   const openContainerPanel = (containerId: string) => setContainerPanelId(containerId);
   const closeContainerPanel = () => setContainerPanelId(null);
 
+  const openDeploymentPanel = (deploymentId: string) => setDeploymentPanelId(deploymentId);
+  const closeDeploymentPanel = () => setDeploymentPanelId(null);
+
   return (
     <DockerContext.Provider
       value={{
@@ -61,6 +70,9 @@ export function DockerProvider({ children }: { children: ReactNode }) {
         containerPanelId,
         openContainerPanel,
         closeContainerPanel,
+        deploymentPanelId,
+        openDeploymentPanel,
+        closeDeploymentPanel,
       }}
     >
       {children}
