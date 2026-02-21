@@ -105,7 +105,7 @@ export function NavigationItemComponent({
   if (locked) {
     // Locked items link to settings/license upgrade page
     return (
-      <Link href="/settings" className={baseClasses} title={`Requires ${item.tierLabel ?? 'upgrade'} — click to manage license`}>
+      <Link href="/settings/license" className={baseClasses} title={`Requires ${item.tierLabel ?? 'upgrade'} — click to manage license`}>
         {content}
       </Link>
     );
