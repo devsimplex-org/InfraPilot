@@ -8,6 +8,7 @@ const (
 	FeatureSecretsManagement   = "secrets_management"
 	FeatureVulnScanning        = "vulnerability_scanning"
 	FeatureCodeQuality         = "code_quality"
+	FeatureStackManagement     = "stack_management"
 	FeatureDataGovernance      = "data_governance"
 	FeatureRuntimeSecurity     = "runtime_security"
 	FeatureUnlimitedAgents     = "unlimited_agents"
@@ -26,6 +27,7 @@ func AllFeatures() []string {
 		FeatureSecretsManagement,
 		FeatureVulnScanning,
 		FeatureCodeQuality,
+		FeatureStackManagement,
 		FeatureDataGovernance,
 		FeatureRuntimeSecurity,
 		FeatureUnlimitedAgents,

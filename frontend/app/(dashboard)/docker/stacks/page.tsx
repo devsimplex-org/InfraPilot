@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { FeatureGate } from "@/components/ui/FeatureGate";
 import {
   Layers,
   AlertTriangle,
@@ -57,7 +58,7 @@ const statusConfig: Record<StackStatus, { color: string; icon: React.ElementType
   stopped: { color: "gray", icon: StopCircle, label: "Stopped" },
 };
 
-export default function DockerStacksPage() {
+function DockerStacksPageContent() {
   const queryClient = useQueryClient();
   const { selectedAgent, openContainerPanel } = useDocker();
 
@@ -299,6 +300,14 @@ export default function DockerStacksPage() {
         isLoading={deleteMutation.isPending}
       />
     </div>
+  );
+}
+
+export default function DockerStacksPage() {
+  return (
+    <FeatureGate feature="stack_management" tier="professional" featureLabel="Docker Stacks">
+      <DockerStacksPageContent />
+    </FeatureGate>
   );
 }
 
