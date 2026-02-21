@@ -26,8 +26,6 @@ import {
   DependencyRisk,
   ExternalHealthOverview,
 } from "@/lib/api";
-import { Breadcrumb } from "@/components/ui/Breadcrumb";
-import { PageHeader } from "@/components/ui/PageHeader";
 import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
 import { Tabs } from "@/components/ui/page-layout";
 import { Table, Column } from "@/components/ui/Table";
@@ -374,18 +372,6 @@ export default function DependenciesPage() {
 
   return (
     <div className="space-y-6">
-      <Breadcrumb
-        items={[
-          { label: "Home", href: "/dashboard" },
-          { label: "External Dependencies" },
-        ]}
-      />
-
-      <PageHeader
-        title="External Dependencies"
-        description="Track and monitor external services, APIs, and third-party dependencies"
-        icon={Globe}
-      />
 
       <Tabs tabs={tabs} activeTab={activeTab} onChange={setActiveTab} />
 

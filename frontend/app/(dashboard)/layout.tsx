@@ -10,25 +10,16 @@ import {
   Bell,
   Settings,
   LogOut,
-  Users,
   Menu,
   X,
   Activity,
   Network,
   HardDrive,
-  Image,
   Shield,
   ShieldCheck,
   Package,
   AlertTriangle,
-  MessageSquare,
-  ShieldAlert,
-  Trophy,
   Code2,
-  Gauge,
-  Rocket,
-  Play,
-  Scale,
   Wrench,
   Box,
   Database,
@@ -47,18 +38,15 @@ import { Navigation, NavigationSection } from "@/components/ui/Navigation";
 import { CommandPalette } from "@/components/ui/CommandPalette";
 import { Spinner } from "@/components/ui/Spinner";
 
-// DevSecOps Lifecycle Navigation Structure
-// Streamlined: ~32 items → ~16 visible items (intent-centric, not tool-centric)
 const navigationSections: NavigationSection[] = [
   {
-    id: "overview",
-    label: "Overview",
-    icon: Gauge,
+    id: "infrastructure",
+    label: "Infrastructure",
+    icon: HardDrive,
     color: "text-blue-600 dark:text-blue-400",
     items: [
       { name: "Dashboard", href: "/", icon: LayoutDashboard },
       { name: "Docker", href: "/docker", icon: Container },
-      { name: "Security Posture", href: "/security", icon: Shield },
       { name: "Traffic", href: "/traffic", icon: Network },
     ],
   },
@@ -74,48 +62,39 @@ const navigationSections: NavigationSection[] = [
     ],
   },
   {
-    id: "build",
-    label: "Build",
+    id: "security",
+    label: "Security",
+    icon: Shield,
+    color: "text-red-600 dark:text-red-400",
+    items: [
+      { name: "Security Posture", href: "/security", icon: Shield },
+      { name: "Exposure", href: "/run/exposure", icon: Globe },
+      { name: "Vulnerabilities", href: "/vulnerabilities", icon: AlertTriangle, requiredFeature: "vulnerability_scanning", tierLabel: "Pro" },
+      { name: "Alerts", href: "/alerts", icon: Bell },
+      { name: "Runtime Security", href: "/runtime-security", icon: ShieldCheck, requiredFeature: "runtime_security", tierLabel: "Enterprise" },
+    ],
+  },
+  {
+    id: "develop",
+    label: "Develop",
     icon: Code2,
     color: "text-yellow-600 dark:text-yellow-400",
     items: [
       { name: "Code Quality", href: "/code-quality", icon: Code2, requiredFeature: "code_quality", tierLabel: "Pro" },
-      { name: "Developer Feedback", href: "/feedback", icon: MessageSquare },
       { name: "Policies", href: "/policies", icon: FileText },
-    ],
-  },
-  {
-    id: "deploy",
-    label: "Deploy",
-    icon: Rocket,
-    color: "text-orange-600 dark:text-orange-400",
-    items: [
       { name: "Deployments", href: "/docker/deployments", icon: Package },
       { name: "Artifacts", href: "/deploy/artifacts", icon: Box, requiredFeature: "vulnerability_scanning", tierLabel: "Pro" },
-      { name: "Vulnerabilities", href: "/vulnerabilities", icon: AlertTriangle, requiredFeature: "vulnerability_scanning", tierLabel: "Pro" },
     ],
   },
   {
-    id: "run",
-    label: "Run",
-    icon: Play,
-    color: "text-red-600 dark:text-red-400",
+    id: "monitor",
+    label: "Monitor",
+    icon: Activity,
+    color: "text-green-600 dark:text-green-400",
     items: [
-      { name: "Runtime Security", href: "/runtime-security", icon: ShieldCheck, requiredFeature: "runtime_security", tierLabel: "Enterprise" },
-      { name: "Exposure", href: "/run/exposure", icon: Globe },
-      { name: "Alerts", href: "/alerts", icon: Bell },
-    ],
-  },
-  {
-    id: "govern",
-    label: "Govern",
-    icon: Scale,
-    color: "text-purple-600 dark:text-purple-400",
-    items: [
-      { name: "Risk Exceptions", href: "/exceptions", icon: ShieldAlert },
-      { name: "Teams & Ownership", href: "/ownership", icon: Users },
-      { name: "Security Maturity", href: "/maturity", icon: Trophy },
-      { name: "Dependencies", href: "/dependencies", icon: Globe },
+      { name: "Background Jobs", href: "/monitor", icon: Activity },
+      { name: "Metrics & Reports", href: "/monitor/metrics", icon: BarChart3 },
+      { name: "Dependencies", href: "/monitor/dependencies", icon: Globe },
     ],
   },
   {
@@ -125,9 +104,6 @@ const navigationSections: NavigationSection[] = [
     color: "text-gray-600 dark:text-gray-400",
     items: [
       { name: "Platform Security", href: "/platform-security", icon: ShieldCheck },
-      { name: "Background Jobs", href: "/platform/jobs", icon: Activity },
-      { name: "Metrics & Reports", href: "/platform/metrics", icon: BarChart3 },
-      { name: "Infrastructure", href: "/platform/infrastructure", icon: HardDrive }, // Consolidated: Proxies, Networks, Volumes, Health
       { name: "Settings", href: "/settings", icon: Settings },
     ],
   },

@@ -40,6 +40,7 @@ import {
   Database,
   Key,
   Archive,
+  BarChart3,
   ArrowRight,
   CornerDownLeft,
   LucideIcon,
@@ -303,6 +304,35 @@ const defaultNavigationItems: CommandItem[] = [
     href: "/webhooks",
     section: "Govern",
     keywords: ["webhook", "integration", "hook"],
+  },
+
+  // Monitor
+  {
+    id: "background-jobs",
+    label: "Background Jobs",
+    description: "Monitor background jobs and worker processes",
+    icon: Activity,
+    href: "/monitor",
+    section: "Monitor",
+    keywords: ["jobs", "background", "workers", "scheduled", "tasks"],
+  },
+  {
+    id: "metrics-reports",
+    label: "Metrics & Reports",
+    description: "Metric definitions, dashboards, and reports",
+    icon: BarChart3,
+    href: "/monitor/metrics",
+    section: "Monitor",
+    keywords: ["metrics", "reports", "dashboards", "telemetry"],
+  },
+  {
+    id: "dependencies",
+    label: "Dependencies",
+    description: "External services and third-party dependencies",
+    icon: Globe,
+    href: "/monitor/dependencies",
+    section: "Monitor",
+    keywords: ["dependencies", "external", "services", "api"],
   },
 
   // Platform
