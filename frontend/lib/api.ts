@@ -604,6 +604,16 @@ export interface LicenseSettingsResponse {
   key_source: "env" | "database" | "setup_mode" | "offline";
 }
 
+// Matches what GET /api/v1/license actually returns (available to all authenticated users)
+export interface LicenseTierInfo {
+  valid: boolean;
+  tier: string;       // "community" | "professional" | "enterprise"
+  max_agents: number;
+  features: string[]; // e.g. ["core_monitoring", "basic_alerts", ...]
+  expires_at: string | null;
+  upgrade_url: string;
+}
+
 // System Settings types
 export interface InfraPilotDomainSettings {
   domain: string;
@@ -4187,6 +4197,7 @@ export const api = {
 
   // License
   getLicenseInfo: () => fetchAPI<LicenseInfo>("/license"),
+  getLicenseTierInfo: () => fetchAPI<LicenseTierInfo>("/license"),
 
   // License settings (admin)
   getLicenseSettings: () => fetchAPI<LicenseSettingsResponse>("/settings/license"),

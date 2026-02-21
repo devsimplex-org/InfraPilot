@@ -259,21 +259,30 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 			protected.GET("/services/:name/deployments", h.listServiceDeployments)
 			protected.GET("/services/:name/current", h.getCurrentDeployment)
 
-			// Security Scanning (Epic 1: Supply Chain Security)
-			protected.POST("/scans", h.RequireModifyContainers(), h.triggerImageScan)
-			protected.GET("/scans", h.listScans)
-			protected.GET("/scans/ws", h.scanWebSocket) // WebSocket for real-time scans (must be before :sid)
-			protected.GET("/pulls/ws", h.pullWebSocket)   // WebSocket for real-time image pulls
-			protected.GET("/imports/ws", h.importSecretsWebSocket) // WebSocket for real-time secrets import
-			protected.GET("/scans/:sid", h.getScanDetails)
-			protected.GET("/scans/:sid/vulnerabilities", h.getScanVulnerabilities)
+			// Security Scanning (Epic 1: Supply Chain Security) — requires Professional+
+			scans := protected.Group("/scans")
+			scans.Use(h.RequireFeature(license.FeatureVulnScanning))
+			{
+				scans.POST("", h.RequireModifyContainers(), h.triggerImageScan)
+				scans.GET("", h.listScans)
+				scans.GET("/ws", h.scanWebSocket)
+				scans.GET("/:sid", h.getScanDetails)
+				scans.GET("/:sid/vulnerabilities", h.getScanVulnerabilities)
+			}
+			// WebSocket helpers (ungated — used broadly)
+			protected.GET("/pulls/ws", h.pullWebSocket)
+			protected.GET("/imports/ws", h.importSecretsWebSocket)
 
-			// SBOM Management
-			protected.POST("/sboms", h.RequireModifyContainers(), h.generateSBOM)
-			protected.GET("/sboms", h.listSBOMs)
-			protected.GET("/sboms/:sid", h.getSBOMDetails)
-			protected.GET("/sboms/:sid/download", h.downloadSBOM)
-			protected.GET("/sboms/:sid/packages/search", h.searchSBOMPackages)
+			// SBOM Management — requires Professional+
+			sboms := protected.Group("/sboms")
+			sboms.Use(h.RequireFeature(license.FeatureVulnScanning))
+			{
+				sboms.POST("", h.RequireModifyContainers(), h.generateSBOM)
+				sboms.GET("", h.listSBOMs)
+				sboms.GET("/:sid", h.getSBOMDetails)
+				sboms.GET("/:sid/download", h.downloadSBOM)
+				sboms.GET("/:sid/packages/search", h.searchSBOMPackages)
+			}
 
 			// Policy Management (Epic 2: Policy-as-Code)
 			policies := protected.Group("/policies")

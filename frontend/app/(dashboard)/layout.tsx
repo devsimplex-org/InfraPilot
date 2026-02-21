@@ -37,6 +37,7 @@ import {
   BarChart3,
 } from "lucide-react";
 import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@/lib/auth";
 import { cn, isIPAddress } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -67,9 +68,9 @@ const navigationSections: NavigationSection[] = [
     icon: Database,
     color: "text-cyan-600 dark:text-cyan-400",
     items: [
-      { name: "Databases", href: "/data/databases", icon: Database },
+      { name: "Databases", href: "/data/databases", icon: Database, requiredFeature: "data_governance", tierLabel: "Enterprise" },
       { name: "Backups", href: "/data/databases/backups", icon: Archive },
-      { name: "Secrets", href: "/data/secrets", icon: Key },
+      { name: "Secrets", href: "/data/secrets", icon: Key, requiredFeature: "secrets_management", tierLabel: "Pro" },
     ],
   },
   {
@@ -78,7 +79,7 @@ const navigationSections: NavigationSection[] = [
     icon: Code2,
     color: "text-yellow-600 dark:text-yellow-400",
     items: [
-      { name: "Code Quality", href: "/code-quality", icon: Code2 },
+      { name: "Code Quality", href: "/code-quality", icon: Code2, requiredFeature: "code_quality", tierLabel: "Pro" },
       { name: "Developer Feedback", href: "/feedback", icon: MessageSquare },
       { name: "Policies", href: "/policies", icon: FileText },
     ],
@@ -90,8 +91,8 @@ const navigationSections: NavigationSection[] = [
     color: "text-orange-600 dark:text-orange-400",
     items: [
       { name: "Deployments", href: "/docker/deployments", icon: Package },
-      { name: "Artifacts", href: "/deploy/artifacts", icon: Box }, // Consolidated: Images, Scans, SBOMs, Registries
-      { name: "Vulnerabilities", href: "/vulnerabilities", icon: AlertTriangle },
+      { name: "Artifacts", href: "/deploy/artifacts", icon: Box, requiredFeature: "vulnerability_scanning", tierLabel: "Pro" },
+      { name: "Vulnerabilities", href: "/vulnerabilities", icon: AlertTriangle, requiredFeature: "vulnerability_scanning", tierLabel: "Pro" },
     ],
   },
   {
@@ -100,7 +101,7 @@ const navigationSections: NavigationSection[] = [
     icon: Play,
     color: "text-red-600 dark:text-red-400",
     items: [
-      { name: "Runtime Security", href: "/runtime-security", icon: ShieldCheck },
+      { name: "Runtime Security", href: "/runtime-security", icon: ShieldCheck, requiredFeature: "runtime_security", tierLabel: "Enterprise" },
       { name: "Exposure", href: "/run/exposure", icon: Globe },
       { name: "Alerts", href: "/alerts", icon: Bell },
     ],
@@ -144,6 +145,14 @@ export default function DashboardLayout({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isChecking, setIsChecking] = useState(true);
   const [showDomainWarning, setShowDomainWarning] = useState(false);
+
+  // Fetch license tier info to enable feature gating in navigation
+  const { data: licenseInfo } = useQuery({
+    queryKey: ["licenseTierInfo"],
+    queryFn: () => api.getLicenseTierInfo(),
+    staleTime: 5 * 60 * 1000, // 5 min — license doesn't change often
+    enabled: !isChecking,
+  });
 
   // Check if accessing via IP address
   useEffect(() => {
@@ -254,6 +263,7 @@ export default function DashboardLayout({
           <Navigation
             sections={navigationSections}
             onItemClick={() => setSidebarOpen(false)}
+            enabledFeatures={licenseInfo?.features}
           />
         </nav>
 

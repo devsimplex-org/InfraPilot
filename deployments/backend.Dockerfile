@@ -8,9 +8,6 @@ WORKDIR /build
 
 RUN apk add --no-cache git ca-certificates tzdata
 
-# Install garble for binary obfuscation
-RUN go install mvdan.cc/garble@latest
-
 # Copy go modules
 COPY go.mod go.sum* ./
 RUN go mod download
@@ -21,13 +18,8 @@ COPY . .
 # VERSION is injected by build-and-publish.sh via --build-arg
 ARG VERSION=dev
 
-# Build binary with garble obfuscation:
-#   -literals  also obfuscates string literals (hides feature names, URLs, etc.)
-#   -seed      random per-build seed → different symbol hashes each release
-# Symbol names, type names, and string literals are all replaced with hashes.
-# CGO_ENABLED=0 still applies; garble handles -w -s automatically.
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 garble -literals -seed=random build \
-    -ldflags="-X main.version=${VERSION}" \
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags="-s -w -X main.version=${VERSION}" \
     -o /backend ./cmd/server
 
 # -------------------------------------------------------------
