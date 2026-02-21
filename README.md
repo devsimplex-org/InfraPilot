@@ -299,7 +299,7 @@ Need multi-node clustering, SSO/SAML, or priority support?
 
 Contact **enterprise@infrapilot.org**
 
----## 📢 Ownership Update
+## 📢 Ownership Update
 
 InfraPilot is now owned and maintained by [Infrapilot.sh](https://infrapilot.sh).
 
