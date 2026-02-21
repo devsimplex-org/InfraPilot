@@ -225,8 +225,7 @@ export default function TrafficLayout({ children }: { children: ReactNode }) {
                     const Icon = tab.icon;
                     const isLocked =
                       !!tab.requiredFeature &&
-                      !!licenseInfo &&
-                      !licenseInfo.features.includes(tab.requiredFeature);
+                      (!licenseInfo || !licenseInfo.features.includes(tab.requiredFeature));
 
                     return (
                       <button
