@@ -6,6 +6,7 @@ import { RefreshCw } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
+import { FeatureGate } from "@/components/ui/FeatureGate";
 import { cn } from "@/lib/utils";
 
 const tabs = [
@@ -27,6 +28,7 @@ export default function CodeQualityLayout({ children }: { children: ReactNode })
   const activeTab = getActiveTab();
 
   return (
+    <FeatureGate feature="code_quality" tier="professional" featureLabel="Code Quality">
     <div className="space-y-6">
       <PageHeader
         title="Code Quality"
@@ -64,5 +66,6 @@ export default function CodeQualityLayout({ children }: { children: ReactNode })
 
       {children}
     </div>
+    </FeatureGate>
   );
 }

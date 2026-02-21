@@ -6,6 +6,7 @@ import { RefreshCw } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
+import { FeatureGate } from "@/components/ui/FeatureGate";
 import { cn } from "@/lib/utils";
 
 const tabs = [
@@ -26,6 +27,7 @@ export default function VulnerabilitiesLayout({ children }: { children: ReactNod
   const activeTab = getActiveTab();
 
   return (
+    <FeatureGate feature="vulnerability_scanning" tier="professional" featureLabel="Vulnerability Scanning">
     <div className="space-y-6">
       <PageHeader
         title="Vulnerabilities"
@@ -63,5 +65,6 @@ export default function VulnerabilitiesLayout({ children }: { children: ReactNod
 
       {children}
     </div>
+    </FeatureGate>
   );
 }

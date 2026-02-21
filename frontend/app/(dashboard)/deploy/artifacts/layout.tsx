@@ -6,6 +6,7 @@ import { RefreshCw } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
+import { FeatureGate } from "@/components/ui/FeatureGate";
 import { cn } from "@/lib/utils";
 
 const tabs = [
@@ -29,6 +30,7 @@ export default function ArtifactsLayout({ children }: { children: ReactNode }) {
   const activeTab = getActiveTab();
 
   return (
+    <FeatureGate feature="vulnerability_scanning" tier="professional" featureLabel="Artifacts & Vulnerability Scanning">
     <div className="space-y-6">
       <PageHeader
         title="Artifacts"
@@ -68,5 +70,6 @@ export default function ArtifactsLayout({ children }: { children: ReactNode }) {
 
       {children}
     </div>
+    </FeatureGate>
   );
 }
