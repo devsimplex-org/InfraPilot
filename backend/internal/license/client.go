@@ -15,20 +15,11 @@ import (
 )
 
 const (
-	defaultValidationURL = "https://infrapilot.sh/api/license/validate"
-	cacheDuration        = 24 * time.Hour
-	graceDuration        = 48 * time.Hour
-	httpTimeout          = 10 * time.Second
+	validationURL = "https://infrapilot.sh/api/license/validate"
+	cacheDuration = 24 * time.Hour
+	graceDuration = 48 * time.Hour
+	httpTimeout   = 10 * time.Second
 )
-
-// validationURL returns the endpoint to validate against.
-// Override with LICENSE_VALIDATION_URL env var for staging / self-hosted infrapilot.sh.
-func validationURL() string {
-	if u := os.Getenv("LICENSE_VALIDATION_URL"); u != "" {
-		return u
-	}
-	return defaultValidationURL
-}
 
 // ValidationResponse mirrors the JSON returned by infrapilot.sh/api/license/validate.
 type ValidationResponse struct {
@@ -161,7 +152,7 @@ func (c *Client) fetchFromAPI() (*ValidationResponse, error) {
 		return nil, err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, validationURL(), bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, validationURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
