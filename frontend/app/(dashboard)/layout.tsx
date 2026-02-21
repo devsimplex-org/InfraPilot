@@ -150,7 +150,7 @@ export default function DashboardLayout({
   const { data: licenseInfo } = useQuery({
     queryKey: ["licenseTierInfo"],
     queryFn: () => api.getLicenseTierInfo(),
-    staleTime: 5 * 60 * 1000, // 5 min — license doesn't change often
+    staleTime: 60 * 1000, // 1 min — short enough to reflect license changes quickly
     enabled: !isChecking,
   });
 

@@ -24,7 +24,7 @@ export function FeatureGate({ feature, tier, featureLabel, children }: FeatureGa
   const { data } = useQuery({
     queryKey: ['licenseTierInfo'],
     queryFn: () => api.getLicenseTierInfo(),
-    staleTime: 5 * 60 * 1000,
+    staleTime: 60 * 1000,
   });
 
   // No data yet (very first render before cache is populated) — render nothing
