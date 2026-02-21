@@ -269,7 +269,7 @@ docker build -t infrapilot .
 
 ## Security
 
-Report vulnerabilities to **security@infrapilot.org** — do NOT open public issues.
+Report vulnerabilities to **security@infrapilot.sh** — do NOT open public issues.
 
 See [SECURITY.md](SECURITY.md) for details.
 
@@ -297,7 +297,7 @@ Apache License 2.0 — see [LICENSE](LICENSE)
 
 Need multi-node clustering, SSO/SAML, or priority support?
 
-Contact **enterprise@infrapilot.org**
+Contact **enterprise@infrapilot.sh**
 
 ## 📢 Ownership Update
 
