@@ -19,6 +19,7 @@ const (
 	cacheDuration = 24 * time.Hour
 	graceDuration = 48 * time.Hour
 	httpTimeout   = 10 * time.Second
+	retryInterval = 5 * time.Minute // minimum gap between failed validation attempts
 )
 
 // ValidationResponse mirrors the JSON returned by infrapilot.sh/api/license/validate.
@@ -43,10 +44,12 @@ type Client struct {
 	version    string
 	logger     *zap.Logger
 
-	mu          sync.RWMutex
-	cached      *ValidationResponse
-	cachedAt    time.Time
-	lastValidAt time.Time
+	mu             sync.RWMutex
+	cached         *ValidationResponse
+	cachedAt       time.Time
+	lastValidAt    time.Time
+	lastAttempt    time.Time  // timestamp of last fetchFromAPI call (for retry throttling)
+	lastAttemptErr error      // error from the last failed attempt
 }
 
 // NewClient creates a license client. It loads or creates a stable instance ID
@@ -70,6 +73,7 @@ func NewClient(licenseKey, dataDir, version string, logger *zap.Logger) (*Client
 
 // Validate returns the current license state, using the 24h cache when fresh.
 // On network failure it falls back to the cached response within a 48h grace period.
+// Retries are throttled to at most once per 5 minutes to avoid blocking API requests.
 func (c *Client) Validate() (*ValidationResponse, error) {
 	// Fast path — return cached response if still fresh.
 	c.mu.RLock()
@@ -78,11 +82,29 @@ func (c *Client) Validate() (*ValidationResponse, error) {
 		c.mu.RUnlock()
 		return resp, nil
 	}
+	// Throttle: if no valid cache and last attempt was recent, return the last error
+	// rather than making another blocking HTTP request.
+	throttled := c.cached == nil && !c.lastAttempt.IsZero() && time.Since(c.lastAttempt) < retryInterval
+	lastErr := c.lastAttemptErr
 	c.mu.RUnlock()
+
+	if throttled {
+		return nil, lastErr
+	}
+
+	// Mark the attempt timestamp before the network call.
+	c.mu.Lock()
+	c.lastAttempt = time.Now()
+	c.mu.Unlock()
 
 	resp, err := c.fetchFromAPI()
 	if err != nil {
 		c.logger.Warn("License validation network error", zap.Error(err))
+
+		wrappedErr := fmt.Errorf("license validation failed: %w", err)
+		c.mu.Lock()
+		c.lastAttemptErr = wrappedErr
+		c.mu.Unlock()
 
 		// Fall back to stale cache within grace period.
 		c.mu.RLock()
@@ -92,12 +114,13 @@ func (c *Client) Validate() (*ValidationResponse, error) {
 				zap.Duration("age", time.Since(c.cachedAt)))
 			return c.cached, nil
 		}
-		return nil, fmt.Errorf("license validation failed and grace period expired: %w", err)
+		return nil, wrappedErr
 	}
 
 	c.mu.Lock()
 	c.cached = resp
 	c.cachedAt = time.Now()
+	c.lastAttemptErr = nil
 	if resp.Valid {
 		c.lastValidAt = time.Now()
 	}

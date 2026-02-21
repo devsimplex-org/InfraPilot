@@ -114,10 +114,20 @@ func main() {
 				resp, validateErr := licenseClient.Validate()
 				if validateErr == nil && resp != nil && resp.Valid {
 					logger.Info("License loaded from database", zap.String("tier", resp.Tier))
+				} else if validateErr != nil {
+					// Network error reaching infrapilot.sh — keep the client.
+					// HasFeature() returns false until validation succeeds (safe default).
+					// Retries happen automatically, throttled to once per 5 minutes.
+					logger.Warn("License validation failed at startup — features restricted until infrapilot.sh is reachable",
+						zap.Error(validateErr))
 				} else {
+					// resp.Valid == false: key is explicitly invalid
+					logger.Warn("License key stored in database is invalid — starting in setup mode",
+						zap.String("reason", resp.Error))
 					licenseClient = nil
 				}
 			} else {
+				logger.Error("Failed to create license client", zap.Error(err))
 				licenseClient = nil
 			}
 		}
