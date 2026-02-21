@@ -299,7 +299,10 @@ Need multi-node clustering, SSO/SAML, or priority support?
 
 Contact **enterprise@infrapilot.org**
 
----
-InfraPilot is an open-source project stewarded by [DevSimplex](https://devsimplex.com) 
+---## 📢 Ownership Update
 
-Repository Maintained By [DevSimplex](https://github.com/devsimplex-org)
+InfraPilot is now owned and maintained by [Infrapilot.sh](https://infrapilot.sh).
+
+Following the acquisition, all future development, releases, and roadmap direction are managed by the Infrapilot team.
+
+We remain committed to keeping InfraPilot open-source and community-driven.
