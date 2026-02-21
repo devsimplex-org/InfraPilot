@@ -1,6 +1,6 @@
 # InfraPilot Documentation
 
-> **Current Version**: v2.0 (in development)
+> **Current Version**: v2.0
 > **v1 Status**: Complete (archived)
 
 ---
@@ -71,19 +71,19 @@ docs/
 
 **Stats**: 74+ API endpoints, 20+ database tables
 
-### v2.0 (In Development)
+### v2.0 (Current)
 
 **Focus**: Production infrastructure control plane
 
-**New Epics** (8 planned):
-- Epic 7: Research & Metrics Readiness (Optional)
-- Epic 13: Traffic & Exposure Governance (HIGH)
-- Epic 14: Database & Data Governance (HIGH)
-- Epic 15: Backup & Recovery Visibility
-- Epic 16: Secrets Hygiene
-- Epic 17: Background Jobs & Workers
-- Epic 18: External Dependency Mapping
-- Epic 19: UX & Navigation System (HIGH)
+**New Epics** (8 complete):
+- Epic 7: Research & Metrics Readiness ✅
+- Epic 13: Traffic & Exposure Governance ✅
+- Epic 14: Database & Data Governance ✅
+- Epic 15: Backup & Recovery Visibility ✅
+- Epic 16: Secrets Hygiene ✅
+- Epic 17: Background Jobs & Workers ✅
+- Epic 18: External Dependency Mapping ✅
+- Epic 19: UX & Navigation System ✅
 
 **Stats**: 50+ new API endpoints, 14 new database tables
 
