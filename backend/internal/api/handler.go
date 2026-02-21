@@ -15,6 +15,7 @@ import (
 	"github.com/infrapilot/backend/internal/crypto"
 	"github.com/infrapilot/backend/internal/feedback"
 	agentgrpc "github.com/infrapilot/backend/internal/grpc"
+	"github.com/infrapilot/backend/internal/license"
 	"github.com/infrapilot/backend/internal/policy"
 	"github.com/infrapilot/backend/internal/registry"
 	"github.com/infrapilot/backend/internal/scanner"
@@ -32,9 +33,10 @@ type Handler struct {
 	feedbackIntegration *feedback.DeploymentIntegration
 	registryService     *registry.Service
 	encryptionSvc       *crypto.EncryptionService
+	license             *license.Client
 }
 
-func NewHandler(db *pgxpool.Pool, authService *auth.Service, logger *zap.Logger, encryptionSvc *crypto.EncryptionService) *Handler {
+func NewHandler(db *pgxpool.Pool, authService *auth.Service, logger *zap.Logger, encryptionSvc *crypto.EncryptionService, licenseClient *license.Client) *Handler {
 	// Initialize feedback system
 	feedbackManager := feedback.NewManager(db, logger)
 	feedbackRenderer := feedback.NewTemplateRenderer(db, logger)
@@ -55,6 +57,7 @@ func NewHandler(db *pgxpool.Pool, authService *auth.Service, logger *zap.Logger,
 		feedbackIntegration: feedbackIntegration,
 		registryService:     registry.NewService(db, logger, encryptionSvc),
 		encryptionSvc:       encryptionSvc,
+		license:             licenseClient,
 	}
 }
 
@@ -335,8 +338,12 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				maturity.GET("/metrics", h.listSecurityMetrics)
 			}
 
+			// License info (authenticated users can see their tier)
+			protected.GET("/license", h.LicenseInfo)
+
 			// Code Quality (Epic 12: Code Quality Integration)
 			codeQuality := protected.Group("/code-quality")
+			codeQuality.Use(h.RequireFeature(license.FeatureCodeQuality))
 			{
 				// Results
 				codeQuality.GET("/results", h.listCodeQualityResults)
@@ -376,6 +383,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 
 			// Runtime Security (Epic 3: Runtime Security & Drift Detection)
 			runtime := protected.Group("/runtime")
+			runtime.Use(h.RequireFeature(license.FeatureRuntimeSecurity))
 			{
 				// Drift Events
 				runtime.GET("/drift-events", h.listDriftEvents)
@@ -462,6 +470,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 
 			// Database & Data Governance (Epic 14)
 			databases := protected.Group("/databases")
+			databases.Use(h.RequireFeature(license.FeatureDataGovernance))
 			{
 				databases.GET("", h.listDatabaseInventory)
 				databases.GET("/posture", h.getDatabasePosture)
@@ -493,6 +502,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 
 			// Secrets Hygiene (Epic 16)
 			secrets := protected.Group("/secrets")
+			secrets.Use(h.RequireFeature(license.FeatureSecretsManagement))
 			{
 				secrets.GET("", h.listSecrets)
 				secrets.GET("/hygiene", h.getSecretsHygieneSummary)

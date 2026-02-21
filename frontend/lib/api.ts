@@ -2273,6 +2273,40 @@ export interface CreateDatabaseRequest {
   tags?: string[];
 }
 
+// Agent-scoped database types
+export interface AgentDatabase {
+  id: string;
+  name: string;
+  db_type: string;
+  version?: string;
+  host?: string;
+  port?: number;
+  status: string;
+  environment: string;
+  created_at: string;
+}
+
+export interface AddAgentDatabaseRequest {
+  name: string;
+  db_type: string;
+  host?: string;
+  port?: number;
+  environment?: string;
+  version?: string;
+}
+
+export interface AgentDatabaseMetrics {
+  database_id: string;
+  name: string;
+  db_type: string;
+  status: string;
+  environment: string;
+  version?: string;
+  size_bytes: number;
+  connection_count: number;
+  max_connections: number;
+}
+
 // Epic 15: Backup & Recovery Types
 export interface BackupJob {
   id: string;
@@ -5248,6 +5282,24 @@ export const api = {
         non_compliant: number;
       };
     }>(`/databases/compliance`),
+
+  // Agent-scoped database endpoints
+  getAgentDatabases: (agentId: string) =>
+    fetchAPI<{ databases: AgentDatabase[] }>(`/agents/${agentId}/databases`),
+
+  addAgentDatabase: (agentId: string, data: AddAgentDatabaseRequest) =>
+    fetchAPI<AgentDatabase>(`/agents/${agentId}/databases`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  removeAgentDatabase: (agentId: string, databaseId: string) =>
+    fetchAPI<void>(`/agents/${agentId}/databases/${databaseId}`, {
+      method: "DELETE",
+    }),
+
+  getAgentDatabaseMetrics: (agentId: string, databaseId: string) =>
+    fetchAPI<AgentDatabaseMetrics>(`/agents/${agentId}/databases/${databaseId}/metrics`),
 
   // Epic 15: Backup & Recovery
   getBackupOverview: () =>

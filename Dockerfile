@@ -19,15 +19,16 @@ FROM golang:1.24-alpine AS backend-builder
 WORKDIR /build
 
 RUN apk add --no-cache git ca-certificates tzdata
+RUN go install mvdan.cc/garble@latest
 
 COPY backend/go.mod backend/go.sum* ./backend/
 RUN cd backend && go mod download
 
 COPY backend/ ./backend/
 
-RUN cd backend && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-    -ldflags="-w -s" \
-    -a -installsuffix cgo \
+ARG VERSION=dev
+RUN cd backend && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 garble -literals -seed=random build \
+    -ldflags="-X main.version=${VERSION}" \
     -o /backend ./cmd/server
 
 # -------------------------------------------------------------
@@ -38,15 +39,15 @@ FROM golang:1.24-alpine AS agent-builder
 WORKDIR /build
 
 RUN apk add --no-cache git ca-certificates
+RUN go install mvdan.cc/garble@latest
 
 COPY agent/go.mod agent/go.sum* ./agent/
 RUN cd agent && go mod download
 
 COPY agent/ ./agent/
 
-RUN cd agent && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+RUN cd agent && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 garble -literals -seed=random build \
     -ldflags="-w -s" \
-    -a -installsuffix cgo \
     -o /agent ./cmd/agent
 
 # -------------------------------------------------------------

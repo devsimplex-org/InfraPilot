@@ -20,6 +20,8 @@ type Config struct {
 	JWTExpiry      time.Duration
 	AllowedOrigins []string
 	EncryptionKey  string // 64-char hex string (32 bytes) for AES-256-GCM encryption
+	LicenseKey string // License key from infrapilot.sh
+	DataDir    string // Persistent data directory for instance ID etc.
 }
 
 func Load() (*Config, error) {
@@ -36,6 +38,9 @@ func Load() (*Config, error) {
 		JWTExpiry:      getEnvDuration("JWT_EXPIRY", 24*time.Hour),
 		AllowedOrigins: getEnvSlice("ALLOWED_ORIGINS", []string{"http://localhost:3000"}),
 		EncryptionKey:  getEnv("ENCRYPTION_KEY", ""),
+		LicenseKey:     getEnv("LICENSE_KEY", ""),
+		DataDir:        getEnv("DATA_DIR", "/data"),
+		// Version is injected at build time via main.version; not read from env here.
 	}
 
 	// Validate required fields
