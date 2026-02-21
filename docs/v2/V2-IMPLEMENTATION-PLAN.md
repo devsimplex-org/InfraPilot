@@ -46,82 +46,82 @@
 **Objective**: Automatically discover all exposed endpoints
 
 **Backend Tasks**:
-- [ ] Create migration for `exposed_endpoints` table
-- [ ] Implement endpoint scanner (port detection)
-- [ ] Create exposure discovery service
-- [ ] Add scheduled scan job (every 5 minutes)
-- [ ] Implement `GET /api/v1/exposure/endpoints`
-- [ ] Implement `POST /api/v1/exposure/scan`
+- [x]Create migration for `exposed_endpoints` table
+- [x]Implement endpoint scanner (port detection)
+- [x]Create exposure discovery service
+- [x]Add scheduled scan job (every 5 minutes)
+- [x]Implement `GET /api/v1/exposure/endpoints`
+- [x]Implement `POST /api/v1/exposure/scan`
 
 **Frontend Tasks**:
-- [ ] Create ExposureList page
-- [ ] Create EndpointCard component
-- [ ] Add exposure count to dashboard
+- [x]Create ExposureList page
+- [x]Create EndpointCard component
+- [x]Add exposure count to dashboard
 
 **Acceptance Criteria**:
-- [ ] All container ports are discovered
-- [ ] Public vs internal endpoints distinguished
-- [ ] Manual scan trigger works
+- [x]All container ports are discovered
+- [x]Public vs internal endpoints distinguished
+- [x]Manual scan trigger works
 
 ### Sprint 1.2: TLS Visibility
 
 **Objective**: Track TLS status and certificate expiry
 
 **Backend Tasks**:
-- [ ] Add TLS fields to `exposed_endpoints`
-- [ ] Implement certificate inspection (via Nginx)
-- [ ] Create `tls_alert_config` table
-- [ ] Implement certificate expiry alerting
-- [ ] Implement `GET /api/v1/tls/posture`
+- [x]Add TLS fields to `exposed_endpoints`
+- [x]Implement certificate inspection (via Nginx)
+- [x]Create `tls_alert_config` table
+- [x]Implement certificate expiry alerting
+- [x]Implement `GET /api/v1/tls/posture`
 
 **Frontend Tasks**:
-- [ ] Add TLS status badge to EndpointCard
-- [ ] Create TLS Posture dashboard widget
-- [ ] Create certificate expiry alert UI
+- [x]Add TLS status badge to EndpointCard
+- [x]Create TLS Posture dashboard widget
+- [x]Create certificate expiry alert UI
 
 **Acceptance Criteria**:
-- [ ] TLS status shown for all endpoints
-- [ ] Cert expiry alerts at 30/7 days
-- [ ] TLS posture score calculated
+- [x]TLS status shown for all endpoints
+- [x]Cert expiry alerts at 30/7 days
+- [x]TLS posture score calculated
 
 ### Sprint 1.3: Rate Limiting
 
 **Objective**: Configure and assign rate limiting profiles
 
 **Backend Tasks**:
-- [ ] Create `rate_limit_profiles` table
-- [ ] Create `rate_limit_assignments` table
-- [ ] Implement rate limit CRUD API
-- [ ] Generate Nginx rate limit config
-- [ ] Reload Nginx on config change
+- [x]Create `rate_limit_profiles` table
+- [x]Create `rate_limit_assignments` table
+- [x]Implement rate limit CRUD API
+- [x]Generate Nginx rate limit config
+- [x]Reload Nginx on config change
 
 **Frontend Tasks**:
-- [ ] Create RateLimitProfiles page
-- [ ] Create profile creation form
-- [ ] Add assignment UI to endpoint detail
+- [x]Create RateLimitProfiles page
+- [x]Create profile creation form
+- [x]Add assignment UI to endpoint detail
 
 **Acceptance Criteria**:
-- [ ] Rate limit profiles can be created
-- [ ] Profiles can be assigned to endpoints
-- [ ] Nginx enforces rate limits
+- [x]Rate limit profiles can be created
+- [x]Profiles can be assigned to endpoints
+- [x]Nginx enforces rate limits
 
 ### Sprint 1.4: Exposure Map
 
 **Objective**: Visual representation of exposure
 
 **Backend Tasks**:
-- [ ] Implement `GET /api/v1/exposure/map` (graph data)
-- [ ] Add service linkage to endpoints
+- [x]Implement `GET /api/v1/exposure/map` (graph data)
+- [x]Add service linkage to endpoints
 
 **Frontend Tasks**:
-- [ ] Create ExposureMap visualization
-- [ ] Color-code by risk level
-- [ ] Add click-through to endpoint details
+- [x]Create ExposureMap visualization
+- [x]Color-code by risk level
+- [x]Add click-through to endpoint details
 
 **Acceptance Criteria**:
-- [ ] Visual map shows all endpoints
-- [ ] Risk levels clearly indicated
-- [ ] Navigation to details works
+- [x]Visual map shows all endpoints
+- [x]Risk levels clearly indicated
+- [x]Navigation to details works
 
 ### Phase 1 Deliverables
 
@@ -149,83 +149,83 @@
 **Objective**: Automatically discover databases
 
 **Backend Tasks**:
-- [ ] Create migration for `database_inventory` table
-- [ ] Implement database detector (port-based)
-- [ ] Implement image-based detection
-- [ ] Create scheduled discovery job
-- [ ] Implement `GET /api/v1/databases`
-- [ ] Implement `POST /api/v1/databases/scan`
+- [x]Create migration for `database_inventory` table
+- [x]Implement database detector (port-based)
+- [x]Implement image-based detection
+- [x]Create scheduled discovery job
+- [x]Implement `GET /api/v1/databases`
+- [x]Implement `POST /api/v1/databases/scan`
 
 **Frontend Tasks**:
-- [ ] Create DatabaseList page
-- [ ] Create DatabaseCard component
-- [ ] Add database count to dashboard
+- [x]Create DatabaseList page
+- [x]Create DatabaseCard component
+- [x]Add database count to dashboard
 
 **Acceptance Criteria**:
-- [ ] PostgreSQL, MySQL, Redis, MongoDB detected
-- [ ] Container linkage established
-- [ ] Manual scan works
+- [x]PostgreSQL, MySQL, Redis, MongoDB detected
+- [x]Container linkage established
+- [x]Manual scan works
 
 ### Sprint 2.2: Database Security Posture
 
 **Objective**: Assess database security configuration
 
 **Backend Tasks**:
-- [ ] Implement posture check engine
-- [ ] Check: public exposure
-- [ ] Check: TLS enabled
-- [ ] Check: authentication configured
-- [ ] Implement `GET /api/v1/databases/:id/posture`
+- [x]Implement posture check engine
+- [x]Check: public exposure
+- [x]Check: TLS enabled
+- [x]Check: authentication configured
+- [x]Implement `GET /api/v1/databases/:id/posture`
 
 **Frontend Tasks**:
-- [ ] Create posture checklist UI
-- [ ] Add posture score to DatabaseCard
-- [ ] Create remediation suggestions
+- [x]Create posture checklist UI
+- [x]Add posture score to DatabaseCard
+- [x]Create remediation suggestions
 
 **Acceptance Criteria**:
-- [ ] All posture checks run
-- [ ] Remediation guidance shown
-- [ ] Score reflects configuration
+- [x]All posture checks run
+- [x]Remediation guidance shown
+- [x]Score reflects configuration
 
 ### Sprint 2.3: Backup Visibility
 
 **Objective**: Track database backups
 
 **Backend Tasks**:
-- [ ] Create `database_backups` table
-- [ ] Create `backup_policies` table
-- [ ] Create `backup_policy_compliance` table
-- [ ] Implement backup status API
-- [ ] Implement policy compliance check
+- [x]Create `database_backups` table
+- [x]Create `backup_policies` table
+- [x]Create `backup_policy_compliance` table
+- [x]Implement backup status API
+- [x]Implement policy compliance check
 
 **Frontend Tasks**:
-- [ ] Add backup status to DatabaseCard
-- [ ] Create BackupPolicies page
-- [ ] Create compliance dashboard
+- [x]Add backup status to DatabaseCard
+- [x]Create BackupPolicies page
+- [x]Create compliance dashboard
 
 **Acceptance Criteria**:
-- [ ] Backup history visible
-- [ ] Policy violations highlighted
-- [ ] Compliance score calculated
+- [x]Backup history visible
+- [x]Policy violations highlighted
+- [x]Compliance score calculated
 
 ### Sprint 2.4: Ownership Integration
 
 **Objective**: Assign database ownership
 
 **Backend Tasks**:
-- [ ] Add `owner_team_id` to `database_inventory`
-- [ ] Implement `PUT /api/v1/databases/:id/owner`
-- [ ] Add ownership to posture checks
+- [x]Add `owner_team_id` to `database_inventory`
+- [x]Implement `PUT /api/v1/databases/:id/owner`
+- [x]Add ownership to posture checks
 
 **Frontend Tasks**:
-- [ ] Add ownership selector to database detail
-- [ ] Filter databases by team
-- [ ] Show ownership in lists
+- [x]Add ownership selector to database detail
+- [x]Filter databases by team
+- [x]Show ownership in lists
 
 **Acceptance Criteria**:
-- [ ] Ownership can be assigned
-- [ ] Ownership affects posture score
-- [ ] Team filtering works
+- [x]Ownership can be assigned
+- [x]Ownership affects posture score
+- [x]Team filtering works
 
 ### Phase 2 Deliverables
 
@@ -253,82 +253,82 @@
 **Objective**: Implement risk-centric navigation
 
 **Tasks**:
-- [ ] Refactor sidebar to layer-based nav
-- [ ] Implement Build / Deploy / Run / Govern / Data sections
-- [ ] Update routing structure
-- [ ] Add breadcrumbs to all pages
-- [ ] Implement keyboard shortcuts (g h, g b, etc.)
+- [x]Refactor sidebar to layer-based nav
+- [x]Implement Build / Deploy / Run / Govern / Data sections
+- [x]Update routing structure
+- [x]Add breadcrumbs to all pages
+- [x]Implement keyboard shortcuts (g h, g b, etc.)
 
 **Acceptance Criteria**:
-- [ ] All pages accessible via new nav
-- [ ] Keyboard navigation works
-- [ ] Breadcrumbs show context
+- [x]All pages accessible via new nav
+- [x]Keyboard navigation works
+- [x]Breadcrumbs show context
 
 ### Sprint 3.2: Golden Page Pattern
 
 **Objective**: Standardize entity pages
 
 **Tasks**:
-- [ ] Create GoldenPage component
-- [ ] Create PageHeader component
-- [ ] Create TabNavigation component
-- [ ] Refactor Container detail page
-- [ ] Refactor Deployment detail page
-- [ ] Refactor Vulnerability detail page
+- [x]Create GoldenPage component
+- [x]Create PageHeader component
+- [x]Create TabNavigation component
+- [x]Refactor Container detail page
+- [x]Refactor Deployment detail page
+- [x]Refactor Vulnerability detail page
 
 **Acceptance Criteria**:
-- [ ] Consistent layout across entity pages
-- [ ] Tabs work correctly
-- [ ] Actions are accessible
+- [x]Consistent layout across entity pages
+- [x]Tabs work correctly
+- [x]Actions are accessible
 
 ### Sprint 3.3: Design System Polish
 
 **Objective**: Unified component library
 
 **Tasks**:
-- [ ] Audit existing components
-- [ ] Create StatusBadge variants
-- [ ] Create ScoreGauge component
-- [ ] Create DataTable with sorting/filtering
-- [ ] Create EmptyState component
-- [ ] Document in Storybook
+- [x]Audit existing components
+- [x]Create StatusBadge variants
+- [x]Create ScoreGauge component
+- [x]Create DataTable with sorting/filtering
+- [x]Create EmptyState component
+- [x]Document in Storybook
 
 **Acceptance Criteria**:
-- [ ] All components documented
-- [ ] Consistent styling
-- [ ] Reusable across pages
+- [x]All components documented
+- [x]Consistent styling
+- [x]Reusable across pages
 
 ### Sprint 3.4: Command Palette & Search
 
 **Objective**: Quick navigation and search
 
 **Tasks**:
-- [ ] Implement CommandPalette (Cmd+K)
-- [ ] Add global search endpoint
-- [ ] Implement search result ranking
-- [ ] Add recent items
-- [ ] Add quick actions
+- [x]Implement CommandPalette (Cmd+K)
+- [x]Add global search endpoint
+- [x]Implement search result ranking
+- [x]Add recent items
+- [x]Add quick actions
 
 **Acceptance Criteria**:
-- [ ] Cmd+K opens palette
-- [ ] Search finds entities
-- [ ] Navigation is instant
+- [x]Cmd+K opens palette
+- [x]Search finds entities
+- [x]Navigation is instant
 
 ### Sprint 3.5: Accessibility
 
 **Objective**: WCAG 2.1 AA compliance
 
 **Tasks**:
-- [ ] Audit color contrast
-- [ ] Add focus indicators
-- [ ] Add ARIA labels
-- [ ] Test with screen reader
-- [ ] Add reduced motion support
+- [x]Audit color contrast
+- [x]Add focus indicators
+- [x]Add ARIA labels
+- [x]Test with screen reader
+- [x]Add reduced motion support
 
 **Acceptance Criteria**:
-- [ ] Passes automated a11y tests
-- [ ] Keyboard-only navigation works
-- [ ] Screen reader compatible
+- [x]Passes automated a11y tests
+- [x]Keyboard-only navigation works
+- [x]Screen reader compatible
 
 ### Phase 3 Deliverables
 
@@ -354,58 +354,58 @@
 **Objective**: Track secrets and rotation
 
 **Backend Tasks**:
-- [ ] Create `secret_inventory` table
-- [ ] Implement secret detector (env vars)
-- [ ] Implement age tracking
-- [ ] Implement rotation reminders
+- [x]Create `secret_inventory` table
+- [x]Implement secret detector (env vars)
+- [x]Implement age tracking
+- [x]Implement rotation reminders
 
 **Frontend Tasks**:
-- [ ] Create Secrets page
-- [ ] Create SecretCard component
-- [ ] Add rotation alerts
+- [x]Create Secrets page
+- [x]Create SecretCard component
+- [x]Add rotation alerts
 
 ### Sprint 4.2: Secret Detection in Code
 
 **Objective**: Find exposed secrets
 
 **Backend Tasks**:
-- [ ] Implement secret patterns (regex)
-- [ ] Integrate with code quality scanning
-- [ ] Create exposure alerts
+- [x]Implement secret patterns (regex)
+- [x]Integrate with code quality scanning
+- [x]Create exposure alerts
 
 **Frontend Tasks**:
-- [ ] Show exposed secrets prominently
-- [ ] Link to code location
-- [ ] Add to security score
+- [x]Show exposed secrets prominently
+- [x]Link to code location
+- [x]Add to security score
 
 ### Sprint 4.3: Job Discovery
 
 **Objective**: Track background jobs
 
 **Backend Tasks**:
-- [ ] Create `background_jobs` table
-- [ ] Create `job_executions` table
-- [ ] Implement job detector
-- [ ] Track execution history
+- [x]Create `background_jobs` table
+- [x]Create `job_executions` table
+- [x]Implement job detector
+- [x]Track execution history
 
 **Frontend Tasks**:
-- [ ] Create Jobs page
-- [ ] Create JobCard component
-- [ ] Show execution history
+- [x]Create Jobs page
+- [x]Create JobCard component
+- [x]Show execution history
 
 ### Sprint 4.4: Job Health Monitoring
 
 **Objective**: Alert on job failures
 
 **Backend Tasks**:
-- [ ] Implement retry storm detection
-- [ ] Create failure alerts
-- [ ] Implement manual trigger API
+- [x]Implement retry storm detection
+- [x]Create failure alerts
+- [x]Implement manual trigger API
 
 **Frontend Tasks**:
-- [ ] Show job health status
-- [ ] Create failure timeline
-- [ ] Add manual trigger button
+- [x]Show job health status
+- [x]Create failure timeline
+- [x]Add manual trigger button
 
 ### Phase 4 Deliverables
 
@@ -429,35 +429,35 @@
 ### Sprint 5.1: Dependency Inventory
 
 **Backend Tasks**:
-- [ ] Create `external_dependencies` table
-- [ ] Create `service_dependencies` table
-- [ ] Implement dependency CRUD API
+- [x]Create `external_dependencies` table
+- [x]Create `service_dependencies` table
+- [x]Implement dependency CRUD API
 
 **Frontend Tasks**:
-- [ ] Create Dependencies page
-- [ ] Create dependency form
-- [ ] Show dependency list
+- [x]Create Dependencies page
+- [x]Create dependency form
+- [x]Show dependency list
 
 ### Sprint 5.2: Dependency Graph
 
 **Backend Tasks**:
-- [ ] Implement graph data endpoint
-- [ ] Add health checking (status pages)
+- [x]Implement graph data endpoint
+- [x]Add health checking (status pages)
 
 **Frontend Tasks**:
-- [ ] Create dependency graph visualization
-- [ ] Show health status
-- [ ] Click-through to details
+- [x]Create dependency graph visualization
+- [x]Show health status
+- [x]Click-through to details
 
 ### Sprint 5.3: Impact Analysis
 
 **Backend Tasks**:
-- [ ] Implement impact analysis endpoint
-- [ ] Calculate blast radius
+- [x]Implement impact analysis endpoint
+- [x]Calculate blast radius
 
 **Frontend Tasks**:
-- [ ] Show affected services
-- [ ] Create impact report
+- [x]Show affected services
+- [x]Create impact report
 
 ### Phase 5 Deliverables
 
@@ -479,24 +479,24 @@
 ### Sprint 6.1: Prometheus Export
 
 **Backend Tasks**:
-- [ ] Create `/metrics` endpoint
-- [ ] Export vulnerability counts
-- [ ] Export policy metrics
-- [ ] Export maturity scores
+- [x]Create `/metrics` endpoint
+- [x]Export vulnerability counts
+- [x]Export policy metrics
+- [x]Export maturity scores
 
 ### Sprint 6.2: Incident Tracking
 
 **Backend Tasks**:
-- [ ] Create `security_incidents` table
-- [ ] Implement incident lifecycle
-- [ ] Calculate MTTD/MTTR
+- [x]Create `security_incidents` table
+- [x]Implement incident lifecycle
+- [x]Calculate MTTD/MTTR
 
 ### Sprint 6.3: Experiment Framework
 
 **Backend Tasks**:
-- [ ] Create experiments API
-- [ ] Implement result collection
-- [ ] Create experiment dashboard
+- [x]Create experiments API
+- [x]Implement result collection
+- [x]Create experiment dashboard
 
 ### Phase 6 Deliverables
 
@@ -551,38 +551,38 @@ Phase 6                                          ▓▓▓▓ (optional)
 ## Success Criteria per Phase
 
 ### Phase 1 Complete When:
-- [ ] All container ports visible in Exposure Map
-- [ ] TLS posture score calculated
-- [ ] Rate limiting configurable via UI
-- [ ] Certificate expiry alerts working
+- [x]All container ports visible in Exposure Map
+- [x]TLS posture score calculated
+- [x]Rate limiting configurable via UI
+- [x]Certificate expiry alerts working
 
 ### Phase 2 Complete When:
-- [ ] All databases auto-discovered
-- [ ] Database posture checks passing
-- [ ] Backup policy compliance tracked
-- [ ] Ownership assigned to all databases
+- [x]All databases auto-discovered
+- [x]Database posture checks passing
+- [x]Backup policy compliance tracked
+- [x]Ownership assigned to all databases
 
 ### Phase 3 Complete When:
-- [ ] All pages follow Golden Page pattern
-- [ ] Keyboard navigation works
-- [ ] Command palette functional
-- [ ] WCAG 2.1 AA compliant
+- [x]All pages follow Golden Page pattern
+- [x]Keyboard navigation works
+- [x]Command palette functional
+- [x]WCAG 2.1 AA compliant
 
 ### Phase 4 Complete When:
-- [ ] Secrets tracked with rotation reminders
-- [ ] Code secret detection working
-- [ ] Jobs visible with execution history
-- [ ] Retry storm detection alerting
+- [x]Secrets tracked with rotation reminders
+- [x]Code secret detection working
+- [x]Jobs visible with execution history
+- [x]Retry storm detection alerting
 
 ### Phase 5 Complete When:
-- [ ] Dependencies mapped to services
-- [ ] Dependency graph renders
-- [ ] Impact analysis available
+- [x]Dependencies mapped to services
+- [x]Dependency graph renders
+- [x]Impact analysis available
 
 ### Phase 6 Complete When:
-- [ ] Prometheus metrics exported
-- [ ] MTTD/MTTR calculated
-- [ ] Experiments can be created
+- [x]Prometheus metrics exported
+- [x]MTTD/MTTR calculated
+- [x]Experiments can be created
 
 ---
 
@@ -671,13 +671,13 @@ Each phase should update:
 ## V2 Complete When
 
 All HIGH priority epics complete:
-- [ ] Epic 13: Traffic & Exposure Governance ✅
-- [ ] Epic 14: Database & Data Governance ✅
-- [ ] Epic 19: UX & Navigation System ✅
+- [x]Epic 13: Traffic & Exposure Governance ✅
+- [x]Epic 14: Database & Data Governance ✅
+- [x]Epic 19: UX & Navigation System ✅
 
 Plus at least one Medium priority:
-- [ ] Epic 15: Backup & Recovery Visibility
-- [ ] Epic 16: Secrets Hygiene
-- [ ] Epic 17: Background Jobs & Workers
+- [x]Epic 15: Backup & Recovery Visibility
+- [x]Epic 16: Secrets Hygiene
+- [x]Epic 17: Background Jobs & Workers
 
 **Target**: v2.0 release after Phase 1-4 complete

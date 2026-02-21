@@ -56,8 +56,8 @@ InfraPilot v2.0 evolves from a Docker-native DevSecOps tool into a **production 
 | **Run** | Runtime awareness & protection | 3, 5, 6 (v1 ✅) |
 | **Govern** | Ownership, risk, accountability | 9, 10, 11 (v1 ✅) |
 | **Platform** | Secure control plane | 6, 7 |
-| **Business Infra** | Databases, traffic, data | 13, 14, 15, 16, 17, 18 (v2 NEW) |
-| **Experience** | UX, clarity, trust | 19 (v2 NEW) |
+| **Business Infra** | Databases, traffic, data | 13, 14, 15, 16, 17, 18 (v2 ✅) |
+| **Experience** | UX, clarity, trust | 19 (v2 ✅) |
 
 ---
 
@@ -80,7 +80,7 @@ InfraPilot v2.0 evolves from a Docker-native DevSecOps tool into a **production 
 | 11 | Security Maturity Scoring | ✅ Complete |
 | 12 | Code Quality Integration | ✅ Complete |
 
-### V2 Core (Planned)
+### V2 Core (Complete)
 
 | Epic | Name | Priority | Purpose |
 |------|------|----------|---------|

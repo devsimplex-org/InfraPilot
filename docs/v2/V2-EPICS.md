@@ -1,6 +1,6 @@
 # InfraPilot v2.0 — Complete Epic Specifications
 
-> Consolidated epic specifications: v1 (complete) + v2 (planned)
+> Consolidated epic specifications: v1 (complete) + v2 (complete)
 
 ---
 
@@ -20,7 +20,7 @@
 11. [Epic 11: Security Maturity Scoring](#epic-11-security-maturity-scoring-) ✅
 12. [Epic 12: Code Quality Integration](#epic-12-code-quality-integration-) ✅
 
-### V2 Expansion (Planned)
+### V2 Expansion (Complete)
 13. [Epic 7: Research & Metrics Readiness](#epic-7-research--metrics-readiness)
 14. [Epic 13: Traffic & Exposure Governance](#epic-13-traffic--exposure-governance)
 15. [Epic 14: Database & Data Governance](#epic-14-database--data-governance)
@@ -371,11 +371,11 @@ Shift-left beyond security → quality.
 
 ---
 
-# V2 Expansion Epics (Planned)
+# V2 Expansion Epics (Complete)
 
 ## Epic 7: Research & Metrics Readiness
 
-**Priority**: Optional | **Effort**: Medium | **Status**: Planned
+**Priority**: Optional | **Effort**: Medium | **Status**: Complete ✅
 
 ### Purpose
 
@@ -461,7 +461,7 @@ CREATE TABLE security_incidents (
 
 ## Epic 13: Traffic & Exposure Governance
 
-**Priority**: HIGH | **Effort**: Large | **Status**: Planned
+**Priority**: HIGH | **Effort**: Large | **Status**: Complete ✅
 
 ### Purpose
 
@@ -580,7 +580,7 @@ CREATE TABLE tls_alert_config (
 
 ## Epic 14: Database & Data Governance
 
-**Priority**: HIGH | **Effort**: Large | **Status**: Planned
+**Priority**: HIGH | **Effort**: Large | **Status**: Complete ✅
 
 ### Purpose
 
@@ -701,7 +701,7 @@ CREATE TABLE database_backups (
 
 ## Epic 15: Backup & Recovery Visibility
 
-**Priority**: Medium | **Effort**: Medium | **Status**: Planned
+**Priority**: Medium | **Effort**: Medium | **Status**: Complete ✅
 
 ### Purpose
 
@@ -751,7 +751,7 @@ CREATE TABLE backup_policy_compliance (
 
 ## Epic 16: Secrets Hygiene
 
-**Priority**: Medium | **Effort**: Medium | **Status**: Planned
+**Priority**: Medium | **Effort**: Medium | **Status**: Complete ✅
 
 ### Purpose
 
@@ -804,7 +804,7 @@ var secretPatterns = []SecretPattern{
 
 ## Epic 17: Background Jobs & Workers
 
-**Priority**: Medium | **Effort**: Medium | **Status**: Planned
+**Priority**: Medium | **Effort**: Medium | **Status**: Complete ✅
 
 ### Purpose
 
@@ -876,7 +876,7 @@ func DetectRetryStorm(jobID string, window time.Duration) *Alert {
 
 ## Epic 18: External Dependency Mapping
 
-**Priority**: Low | **Effort**: Medium | **Status**: Planned
+**Priority**: Low | **Effort**: Medium | **Status**: Complete ✅
 
 ### Purpose
 
@@ -924,7 +924,7 @@ CREATE TABLE service_dependencies (
 
 ## Epic 19: UX & Navigation System (System-Wide Integration)
 
-**Priority**: HIGH | **Effort**: Large | **Status**: Planned
+**Priority**: HIGH | **Effort**: Large | **Status**: Complete ✅
 **Foundation**: v1 Design System (15 components, 150+ Storybook stories)
 
 ### Purpose
@@ -1473,5 +1473,5 @@ const prefersReducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
 | Version | Epics | Tables | Endpoints | Status |
 |---------|-------|--------|-----------|--------|
 | v1 | 11 | 20+ | 74+ | ✅ Complete |
-| v2 | 8 | 14 | 50 | ⏳ Planned |
+| v2 | 8 | 14 | 50 | ✅ Complete |
 | **Total** | **19** | **34+** | **124+** | |
