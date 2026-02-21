@@ -188,7 +188,7 @@ function DockerLayoutContent({ children }: { children: ReactNode }) {
             return (
               <button
                 key={tab.id}
-                onClick={() => router.push(isLocked ? "/settings" : tab.href)}
+                onClick={() => router.push(isLocked ? "/settings/license" : tab.href)}
                 title={isLocked ? `Requires ${tab.tierLabel} — click to manage license` : undefined}
                 className={cn(
                   "inline-flex items-center gap-1.5 whitespace-nowrap border-b-2 py-3 px-1 text-sm font-medium transition-colors",

@@ -51,7 +51,7 @@ export function UpgradePrompt({ feature, tier, title, description }: UpgradeProm
 
       <div className="flex items-center gap-3">
         <Link
-          href="/settings"
+          href="/settings/license"
           className={`inline-flex items-center gap-2 px-5 py-2.5 ${cfg.btnClass} text-white rounded-xl font-semibold text-sm transition-colors`}
         >
           <Sparkles className="h-4 w-4" />
