@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/infrapilot/backend/internal/auth"
+	"github.com/infrapilot/backend/internal/config"
 	"github.com/infrapilot/backend/internal/crypto"
 	"github.com/infrapilot/backend/internal/feedback"
 	agentgrpc "github.com/infrapilot/backend/internal/grpc"
@@ -34,9 +35,11 @@ type Handler struct {
 	registryService     *registry.Service
 	encryptionSvc       *crypto.EncryptionService
 	license             *license.Client
+	cfg                 *config.Config
+	version             string
 }
 
-func NewHandler(db *pgxpool.Pool, authService *auth.Service, logger *zap.Logger, encryptionSvc *crypto.EncryptionService, licenseClient *license.Client) *Handler {
+func NewHandler(db *pgxpool.Pool, authService *auth.Service, logger *zap.Logger, encryptionSvc *crypto.EncryptionService, licenseClient *license.Client, cfg *config.Config, version string) *Handler {
 	// Initialize feedback system
 	feedbackManager := feedback.NewManager(db, logger)
 	feedbackRenderer := feedback.NewTemplateRenderer(db, logger)
@@ -58,6 +61,8 @@ func NewHandler(db *pgxpool.Pool, authService *auth.Service, logger *zap.Logger,
 		registryService:     registry.NewService(db, logger, encryptionSvc),
 		encryptionSvc:       encryptionSvc,
 		license:             licenseClient,
+		cfg:                 cfg,
+		version:             version,
 	}
 }
 
@@ -70,6 +75,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	{
 		// Setup routes (public - only work when no users exist)
 		v1.GET("/setup/status", h.getSetupStatus)
+		v1.POST("/setup/license", h.setupLicense)
 		v1.POST("/setup", h.createInitialAdmin)
 
 		// Auth routes (public)

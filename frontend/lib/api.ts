@@ -574,6 +574,8 @@ export interface DNSVerifyResult {
 // Setup types
 export interface SetupStatusResponse {
   setup_required: boolean;
+  license_configured: boolean;
+  admin_created: boolean;
   user_count: number;
 }
 
@@ -582,6 +584,13 @@ export interface SetupResponse {
   user_id: string;
   access_token?: string;
   refresh_token?: string;
+}
+
+export interface SetupLicenseResponse {
+  valid: boolean;
+  tier: string;
+  max_agents: number;
+  features: string[];
 }
 
 // System Settings types
@@ -3406,6 +3415,12 @@ export interface ServiceProgress {
 export const api = {
   // Setup (first-run)
   getSetupStatus: () => fetchAPI<SetupStatusResponse>("/setup/status"),
+
+  setupLicense: (key: string) =>
+    fetchAPI<SetupLicenseResponse>("/setup/license", {
+      method: "POST",
+      body: JSON.stringify({ key }),
+    }),
 
   createInitialAdmin: (email: string, password: string) =>
     fetchAPI<SetupResponse>("/setup", {
