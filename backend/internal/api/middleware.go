@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/infrapilot/backend/internal/auth"
+	"github.com/infrapilot/backend/internal/license"
 )
 
 // LoggerMiddleware logs HTTP requests
@@ -214,3 +215,51 @@ func (h *Handler) RequireManageAlerts() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// RequireFeature blocks a route if the installed license does not include the
+// given feature. It returns a 403 with an upgrade URL in the response body.
+func (h *Handler) RequireFeature(feature string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !h.license.HasFeature(feature) {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error": "This feature is not available on your current plan",
+				"feature":     feature,
+				"tier":        h.license.Tier(),
+				"upgrade_url": "https://infrapilot.sh/billing",
+			})
+			return
+		}
+		c.Next()
+	}
+}
+
+// LicenseInfo returns the current license state as a JSON endpoint.
+// Useful for the frontend to show upgrade prompts.
+func (h *Handler) LicenseInfo(c *gin.Context) {
+	resp, err := h.license.Validate()
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		return
+	}
+	// Strip issued_to for non-admin callers — exposed info is fine here since
+	// it is already stored server-side and shown in the UI.
+	type licenseInfoResponse struct {
+		Valid      bool                `json:"valid"`
+		Tier       string              `json:"tier"`
+		MaxAgents  int                 `json:"max_agents"`
+		Features   []string            `json:"features"`
+		ExpiresAt  *string             `json:"expires_at"`
+		UpgradeURL string              `json:"upgrade_url"`
+	}
+	c.JSON(http.StatusOK, licenseInfoResponse{
+		Valid:      resp.Valid,
+		Tier:       resp.Tier,
+		MaxAgents:  resp.MaxAgents,
+		Features:   resp.Features,
+		ExpiresAt:  resp.ExpiresAt,
+		UpgradeURL: "https://infrapilot.sh/billing",
+	})
+}
+
+// Ensure license import is used (compile guard).
+var _ = license.FeatureCoreMonitoring

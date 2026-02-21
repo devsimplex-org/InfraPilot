@@ -41,7 +41,7 @@ type StatusFilter = "all" | "running" | "failed" | "pending" | "scanning";
 
 export default function DeploymentsPage() {
   const queryClient = useQueryClient();
-  const { selectedAgent } = useDocker();
+  const { selectedAgent, openDeploymentPanel } = useDocker();
 
   // Local state
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -385,6 +385,7 @@ export default function DeploymentsPage() {
             columns={columns}
             keyExtractor={(row) => row.id}
             hoverable
+            onRowClick={(row) => openDeploymentPanel(row.id)}
             rowClassName={(row) => cn(selectedIds.has(row.id) && "bg-blue-50 dark:bg-blue-900/10")}
           />
         </div>
