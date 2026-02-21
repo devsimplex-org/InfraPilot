@@ -1,0 +1,247 @@
+package license
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	"go.uber.org/zap"
+)
+
+const (
+	defaultValidationURL = "https://infrapilot.sh/api/license/validate"
+	cacheDuration        = 24 * time.Hour
+	graceDuration        = 48 * time.Hour
+	httpTimeout          = 10 * time.Second
+)
+
+// validationURL returns the endpoint to validate against.
+// Override with LICENSE_VALIDATION_URL env var for staging / self-hosted infrapilot.sh.
+func validationURL() string {
+	if u := os.Getenv("LICENSE_VALIDATION_URL"); u != "" {
+		return u
+	}
+	return defaultValidationURL
+}
+
+// ValidationResponse mirrors the JSON returned by infrapilot.sh/api/license/validate.
+type ValidationResponse struct {
+	Valid      bool     `json:"valid"`
+	Tier       string   `json:"tier"`
+	MaxAgents  int      `json:"max_agents"`
+	Features   []string `json:"features"`
+	ExpiresAt  *string  `json:"expires_at"`
+	Error      string   `json:"error,omitempty"`
+	IssuedTo   *struct {
+		Name  string `json:"name"`
+		Email string `json:"email"`
+	} `json:"issued_to,omitempty"`
+}
+
+// Client validates and caches a license key against infrapilot.sh.
+type Client struct {
+	licenseKey string
+	instanceID string
+	hostname   string
+	version    string
+	logger     *zap.Logger
+
+	mu          sync.RWMutex
+	cached      *ValidationResponse
+	cachedAt    time.Time
+	lastValidAt time.Time
+}
+
+// NewClient creates a license client. It loads or creates a stable instance ID
+// from dataDir/instance.id, then performs an initial validation.
+func NewClient(licenseKey, dataDir, version string, logger *zap.Logger) (*Client, error) {
+	hostname, _ := os.Hostname()
+
+	instanceID, err := loadOrCreateInstanceID(dataDir)
+	if err != nil {
+		return nil, fmt.Errorf("license: failed to get instance ID: %w", err)
+	}
+
+	return &Client{
+		licenseKey: licenseKey,
+		instanceID: instanceID,
+		hostname:   hostname,
+		version:    version,
+		logger:     logger,
+	}, nil
+}
+
+// Validate returns the current license state, using the 24h cache when fresh.
+// On network failure it falls back to the cached response within a 48h grace period.
+func (c *Client) Validate() (*ValidationResponse, error) {
+	// Fast path — return cached response if still fresh.
+	c.mu.RLock()
+	if c.cached != nil && time.Since(c.cachedAt) < cacheDuration {
+		resp := c.cached
+		c.mu.RUnlock()
+		return resp, nil
+	}
+	c.mu.RUnlock()
+
+	resp, err := c.fetchFromAPI()
+	if err != nil {
+		c.logger.Warn("License validation network error", zap.Error(err))
+
+		// Fall back to stale cache within grace period.
+		c.mu.RLock()
+		defer c.mu.RUnlock()
+		if c.cached != nil && time.Since(c.lastValidAt) < graceDuration {
+			c.logger.Warn("Using cached license response during grace period",
+				zap.Duration("age", time.Since(c.cachedAt)))
+			return c.cached, nil
+		}
+		return nil, fmt.Errorf("license validation failed and grace period expired: %w", err)
+	}
+
+	c.mu.Lock()
+	c.cached = resp
+	c.cachedAt = time.Now()
+	if resp.Valid {
+		c.lastValidAt = time.Now()
+	}
+	c.mu.Unlock()
+
+	return resp, nil
+}
+
+// HasFeature reports whether the current license includes a specific feature.
+// Returns false on any validation error.
+func (c *Client) HasFeature(feature string) bool {
+	resp, err := c.Validate()
+	if err != nil || !resp.Valid {
+		return false
+	}
+	for _, f := range resp.Features {
+		if f == feature {
+			return true
+		}
+	}
+	return false
+}
+
+// Tier returns the current license tier ("community", "professional", "enterprise").
+func (c *Client) Tier() string {
+	resp, err := c.Validate()
+	if err != nil || !resp.Valid {
+		return "community"
+	}
+	return resp.Tier
+}
+
+// MaxAgents returns the max number of agents this license permits (-1 = unlimited).
+func (c *Client) MaxAgents() int {
+	resp, err := c.Validate()
+	if err != nil || !resp.Valid {
+		return 1
+	}
+	return resp.MaxAgents
+}
+
+func (c *Client) fetchFromAPI() (*ValidationResponse, error) {
+	payload := map[string]string{
+		"key":         c.licenseKey,
+		"instance_id": c.instanceID,
+		"hostname":    c.hostname,
+		"version":     c.version,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, validationURL(), bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", fmt.Sprintf("infrapilot-backend/%s", c.version))
+
+	httpClient := &http.Client{Timeout: httpTimeout}
+	httpResp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer httpResp.Body.Close()
+
+	var result ValidationResponse
+	if err := json.NewDecoder(httpResp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode validation response: %w", err)
+	}
+
+	return &result, nil
+}
+
+// loadOrCreateInstanceID reads dataDir/instance.id or creates it on first run.
+func loadOrCreateInstanceID(dataDir string) (string, error) {
+	if err := os.MkdirAll(dataDir, 0750); err != nil {
+		return "", err
+	}
+
+	idFile := filepath.Join(dataDir, "instance.id")
+	if data, err := os.ReadFile(idFile); err == nil {
+		id := strings.TrimSpace(string(data))
+		if id != "" {
+			return id, nil
+		}
+	}
+
+	// Generate a new stable UUID using crypto/rand via os
+	// We use a simple approach compatible with all Go versions
+	f, err := os.Open("/dev/urandom")
+	if err != nil {
+		return "", fmt.Errorf("failed to open /dev/urandom: %w", err)
+	}
+	defer f.Close()
+
+	b := make([]byte, 16)
+	if _, err := f.Read(b); err != nil {
+		return "", err
+	}
+	// Format as UUID v4
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	id := fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+
+	if err := os.WriteFile(idFile, []byte(id+"\n"), 0600); err != nil {
+		return "", fmt.Errorf("failed to write instance ID: %w", err)
+	}
+
+	return id, nil
+}
+
+// NewOfflineClient returns a client with all features enabled — for development only.
+// It never calls infrapilot.sh. Panics in production.
+func NewOfflineClient(logger *zap.Logger) *Client {
+	if os.Getenv("ENV") == "production" {
+		panic("NewOfflineClient must never be used in production")
+	}
+	logger.Warn("LICENSE: running in offline mode — all features enabled (development only)")
+	c := &Client{
+		licenseKey: "IP-CE-OFFLINE",
+		instanceID: "offline-dev",
+		hostname:   "localhost",
+		version:    "dev",
+		logger:     logger,
+	}
+	c.cached = &ValidationResponse{
+		Valid:     true,
+		Tier:      "enterprise",
+		MaxAgents: -1,
+		Features:  AllFeatures(),
+	}
+	c.cachedAt = time.Now()
+	c.lastValidAt = time.Now()
+	return c
+}

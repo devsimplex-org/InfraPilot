@@ -22,7 +22,11 @@ import (
 	"github.com/infrapilot/backend/internal/crypto"
 	"github.com/infrapilot/backend/internal/db"
 	agentgrpc "github.com/infrapilot/backend/internal/grpc"
+	"github.com/infrapilot/backend/internal/license"
 )
+
+// version is injected at build time via -ldflags.
+var version = "dev"
 
 func main() {
 	// Initialize logger
@@ -69,7 +73,40 @@ func main() {
 		logger.Fatal("Failed to run migrations", zap.Error(err))
 	}
 
-	logger.Info("InfraPilot Community Edition started")
+	// ---------------------------------------------------------------
+	// License validation
+	// ---------------------------------------------------------------
+	var licenseClient *license.Client
+	if os.Getenv("LICENSE_OFFLINE") == "true" && cfg.Env != "production" {
+		licenseClient = license.NewOfflineClient(logger)
+	} else {
+		if cfg.LicenseKey == "" {
+			logger.Fatal(
+				"LICENSE_KEY environment variable is required. " +
+					"Get a free key at https://infrapilot.sh/signup",
+			)
+		}
+		licenseClient, err = license.NewClient(cfg.LicenseKey, cfg.DataDir, version, logger)
+		if err != nil {
+			logger.Fatal("Failed to initialize license client", zap.Error(err))
+		}
+		resp, err := licenseClient.Validate()
+		if err != nil {
+			logger.Fatal("License validation failed", zap.Error(err))
+		}
+		if !resp.Valid {
+			logger.Fatal("Invalid license key",
+				zap.String("error", resp.Error),
+				zap.String("help", "Visit https://infrapilot.sh to manage your license"),
+			)
+		}
+		logger.Info("License validated",
+			zap.String("tier", resp.Tier),
+			zap.Int("max_agents", resp.MaxAgents),
+		)
+	}
+
+	logger.Info("InfraPilot started", zap.String("version", version), zap.String("tier", licenseClient.Tier()))
 
 	// Initialize encryption service (optional but recommended)
 	var encryptionSvc *crypto.EncryptionService
@@ -98,7 +135,7 @@ func main() {
 	router.Use(api.CORSMiddleware(cfg.AllowedOrigins))
 
 	// Setup API routes
-	apiHandler := api.NewHandler(pool, authService, logger, encryptionSvc)
+	apiHandler := api.NewHandler(pool, authService, logger, encryptionSvc, licenseClient)
 	apiHandler.RegisterRoutes(router)
 
 	httpServer := &http.Server{
