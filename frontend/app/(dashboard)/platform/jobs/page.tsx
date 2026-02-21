@@ -30,8 +30,6 @@ import {
   JobStatistics,
   WorkerSummary,
 } from "@/lib/api";
-import { Breadcrumb } from "@/components/ui/Breadcrumb";
-import { PageHeader } from "@/components/ui/PageHeader";
 import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
 import { Tabs } from "@/components/ui/page-layout";
 import { Table, Column } from "@/components/ui/Table";
@@ -449,18 +447,6 @@ export default function JobsPage() {
 
   return (
     <div className="space-y-6">
-      <Breadcrumb
-        items={[
-          { label: "Platform", href: "/platform/jobs" },
-          { label: "Background Jobs" },
-        ]}
-      />
-
-      <PageHeader
-        title="Background Jobs"
-        description="Monitor background jobs, scheduled tasks, and worker processes"
-        icon={Activity}
-      />
 
       <Tabs tabs={tabs} activeTab={activeTab} onChange={setActiveTab} />
 

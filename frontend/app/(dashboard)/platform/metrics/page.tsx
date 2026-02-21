@@ -11,8 +11,6 @@ import {
   ReportExecution,
   TelemetrySettings,
 } from "@/lib/api";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { StatCard } from "@/components/ui/StatCard";
 import { Table, Column } from "@/components/ui/Table";
 import { SlideOver, SlideOverHeader, SlideOverBody } from "@/components/ui/SlideOver";
@@ -486,26 +484,6 @@ export default function MetricsPage() {
 
   return (
     <div className="space-y-6">
-      <Breadcrumb
-        items={[
-          { label: "Platform", href: "/platform/jobs" },
-          { label: "Metrics & Reports" },
-        ]}
-      />
-
-      <PageHeader
-        title="Metrics & Reports"
-        description="Manage metric definitions, dashboards, and scheduled reports"
-        action={
-          <button
-            onClick={() => setActiveTab("telemetry")}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700"
-          >
-            <Settings className="h-4 w-4" />
-            Telemetry Settings
-          </button>
-        }
-      />
 
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
