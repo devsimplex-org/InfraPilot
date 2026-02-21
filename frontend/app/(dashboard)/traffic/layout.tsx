@@ -4,7 +4,6 @@ import { ReactNode, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   RefreshCw,
-  Server,
   Plus,
   Globe,
   Shield,
@@ -20,9 +19,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
-import { EmptyState } from "@/components/ui/EmptyState";
 import { Spinner } from "@/components/ui/Spinner";
-import { Badge } from "@/components/ui/Badge";
 import { cn } from "@/lib/utils";
 import { TrafficProvider } from "@/lib/traffic-context";
 import { ProxyPanel } from "@/components/traffic/ProxyPanel";
@@ -35,7 +32,7 @@ const tabGroups = [
     tabs: [
       { id: "overview", label: "Overview", href: "/traffic", icon: Layers },
       { id: "resources", label: "Resources", href: "/traffic/resources", icon: Network },
-      { id: "policies", label: "Policies", href: "/traffic/policies", icon: Shield },
+      { id: "policies", label: "Policies", href: "/traffic/policies", icon: Shield, requiredFeature: "advanced_alerts", tierLabel: "Pro" },
     ],
   },
   {
@@ -47,10 +44,18 @@ const tabGroups = [
       { id: "logs", label: "Nginx Logs", href: "/traffic/logs", icon: FileText },
     ],
   },
+  {
+    id: "exposure",
+    label: "Exposure",
+    tabs: [
+      { id: "exposure", label: "Exposure", href: "/traffic/exposure", icon: Activity },
+      { id: "endpoints", label: "Endpoints", href: "/traffic/exposure/endpoints", icon: Globe },
+      { id: "ratelimits", label: "Rate Limits", href: "/traffic/exposure/ratelimits", icon: Settings },
+      { id: "tls", label: "TLS Posture", href: "/traffic/exposure/tls", icon: Shield },
+    ],
+  },
 ];
 
-// Flat tabs for easy lookup
-const allTabs = tabGroups.flatMap((g) => g.tabs);
 
 export default function TrafficLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -76,8 +81,10 @@ export default function TrafficLayout({ children }: { children: ReactNode }) {
   const effectiveAgent = selectedAgent || activeAgents[0]?.id;
 
   // Check if we're on a detail or create page (e.g., /traffic/resources/[id] or /traffic/resources/create)
+  // Exposure sub-tabs (/traffic/exposure/endpoints etc.) must NOT be treated as sub-pages
   const pathParts = pathname.split("/").filter(Boolean);
-  const isSubPage = pathParts.length > 2 && !["resources", "policies", "proxies", "logs"].includes(pathParts[2]);
+  const knownSegments = ["resources", "policies", "proxies", "logs", "analytics", "exposure"];
+  const isSubPage = pathParts.length > 2 && pathParts[1] !== "exposure" && !knownSegments.includes(pathParts[2]);
 
   // Determine active tab from pathname
   const getActiveTab = () => {
@@ -85,6 +92,10 @@ export default function TrafficLayout({ children }: { children: ReactNode }) {
     if (pathname === "/traffic/proxies" || pathname.startsWith("/traffic/proxies/")) return "proxies";
     if (pathname === "/traffic/analytics" || pathname.startsWith("/traffic/analytics/")) return "analytics";
     if (pathname === "/traffic/logs" || pathname.startsWith("/traffic/logs/")) return "logs";
+    if (pathname === "/traffic/exposure") return "exposure";
+    if (pathname === "/traffic/exposure/endpoints") return "endpoints";
+    if (pathname === "/traffic/exposure/ratelimits") return "ratelimits";
+    if (pathname === "/traffic/exposure/tls") return "tls";
     const segment = pathname.split("/")[2];
     return segment || "overview";
   };
@@ -197,43 +208,57 @@ export default function TrafficLayout({ children }: { children: ReactNode }) {
         }
       />
 
-      {/* Navigation Tabs */}
+      {/* Navigation Tabs — grouped with separators */}
       <div className="border-b border-gray-200 dark:border-gray-700">
-        <nav className="-mb-px flex space-x-1">
-          {allTabs.map((tab) => {
-            const Icon = tab.icon;
-            const isLocked =
-              !!tab.requiredFeature &&
-              !!licenseInfo &&
-              !licenseInfo.features.includes(tab.requiredFeature);
+        <nav className="-mb-px flex items-end">
+          {tabGroups.map((group, groupIndex) => (
+            <div key={group.id} className="flex items-end">
+              {groupIndex > 0 && (
+                <div className="h-5 w-px bg-gray-200 dark:bg-gray-700 mx-2 mb-3 self-end" />
+              )}
+              <div className="flex flex-col">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 px-3 pb-1">
+                  {group.label}
+                </span>
+                <div className="flex">
+                  {group.tabs.map((tab) => {
+                    const Icon = tab.icon;
+                    const isLocked =
+                      !!tab.requiredFeature &&
+                      !!licenseInfo &&
+                      !licenseInfo.features.includes(tab.requiredFeature);
 
-            return (
-              <button
-                key={tab.id}
-                onClick={() => router.push(isLocked ? "/settings/license" : tab.href)}
-                title={isLocked ? `Requires ${tab.tierLabel} — click to manage license` : undefined}
-                className={cn(
-                  "flex items-center gap-1.5 whitespace-nowrap border-b-2 py-3 px-3 text-sm font-medium transition-colors",
-                  isLocked
-                    ? "border-transparent text-gray-400 dark:text-gray-600 cursor-pointer opacity-70"
-                    : activeTab === tab.id
-                    ? "border-primary-500 text-primary-600 dark:text-primary-400"
-                    : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-                )}
-              >
-                <Icon className="w-4 h-4" />
-                <span>{tab.label}</span>
-                {isLocked && (
-                  <>
-                    <Lock className="h-3 w-3" />
-                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-700">
-                      {tab.tierLabel}
-                    </span>
-                  </>
-                )}
-              </button>
-            );
-          })}
+                    return (
+                      <button
+                        key={tab.id}
+                        onClick={() => router.push(isLocked ? "/settings/license" : tab.href)}
+                        title={isLocked ? `Requires ${tab.tierLabel} — click to manage license` : undefined}
+                        className={cn(
+                          "flex items-center gap-1.5 whitespace-nowrap border-b-2 py-3 px-3 text-sm font-medium transition-colors",
+                          isLocked
+                            ? "border-transparent text-gray-400 dark:text-gray-600 cursor-pointer opacity-70"
+                            : activeTab === tab.id
+                            ? "border-primary-500 text-primary-600 dark:text-primary-400"
+                            : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+                        )}
+                      >
+                        <Icon className="w-4 h-4" />
+                        <span>{tab.label}</span>
+                        {isLocked && (
+                          <>
+                            <Lock className="h-3 w-3" />
+                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-700">
+                              {tab.tierLabel}
+                            </span>
+                          </>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          ))}
         </nav>
       </div>
 

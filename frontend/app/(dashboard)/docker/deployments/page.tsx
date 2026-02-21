@@ -28,6 +28,7 @@ import { RedeployWizard } from "@/components/RedeployWizard";
 import { Button } from "@/components/ui/page-layout";
 import { FilterToolbar, ToggleOption } from "@/components/ui/FilterToolbar";
 import { cn } from "@/lib/utils";
+import { FeatureGate } from "@/components/ui/FeatureGate";
 
 // Filter options
 const DEPLOYMENT_STATUS_OPTIONS: ToggleOption[] = [
@@ -39,7 +40,7 @@ const DEPLOYMENT_STATUS_OPTIONS: ToggleOption[] = [
 
 type StatusFilter = "all" | "running" | "failed" | "pending" | "scanning";
 
-export default function DeploymentsPage() {
+function DeploymentsPageContent() {
   const queryClient = useQueryClient();
   const { selectedAgent, openDeploymentPanel } = useDocker();
 
@@ -461,5 +462,13 @@ export default function DeploymentsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function DeploymentsPage() {
+  return (
+    <FeatureGate feature="stack_management" tier="professional" featureLabel="Deployments">
+      <DeploymentsPageContent />
+    </FeatureGate>
   );
 }

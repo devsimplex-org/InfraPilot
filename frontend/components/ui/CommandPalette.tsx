@@ -203,15 +203,6 @@ const defaultNavigationItems: CommandItem[] = [
     keywords: ["runtime", "security", "monitoring"],
   },
   {
-    id: "exposure",
-    label: "Exposure",
-    description: "Traffic and exposure governance",
-    icon: Globe,
-    href: "/run/exposure",
-    section: "Run",
-    keywords: ["exposure", "traffic", "endpoints", "tls"],
-  },
-  {
     id: "containers",
     label: "Containers",
     description: "Running containers",

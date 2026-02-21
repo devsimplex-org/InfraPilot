@@ -22,6 +22,7 @@ import { SlideOver } from "@/components/ui/SlideOver";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Spinner } from "@/components/ui/Spinner";
+import { FeatureGate } from "@/components/ui/FeatureGate";
 import { FilterToolbar, ToggleOption } from "@/components/ui/FilterToolbar";
 import { cn } from "@/lib/utils";
 
@@ -36,7 +37,7 @@ const POLICY_TYPE_OPTIONS: ToggleOption[] = [
   { value: "authentication", label: "Auth", color: "green" },
 ];
 
-export default function TrafficPoliciesPage() {
+function TrafficPoliciesPageContent() {
   const [selectedPolicy, setSelectedPolicy] = useState<TrafficPolicy | null>(null);
   const [filters, setFilters] = useState({
     type: "" as TrafficPolicyType | "",
@@ -379,5 +380,13 @@ export default function TrafficPoliciesPage() {
         </SlideOver.Footer>
       </SlideOver>
     </div>
+  );
+}
+
+export default function TrafficPoliciesPage() {
+  return (
+    <FeatureGate feature="advanced_alerts" tier="professional" featureLabel="Traffic Policies">
+      <TrafficPoliciesPageContent />
+    </FeatureGate>
   );
 }

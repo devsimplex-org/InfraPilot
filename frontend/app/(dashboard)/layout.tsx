@@ -73,7 +73,6 @@ const navigationSections: NavigationSection[] = [
     color: "text-red-600 dark:text-red-400",
     items: [
       { name: "Security Posture", href: "/security", icon: Shield },
-      { name: "Exposure", href: "/run/exposure", icon: Globe },
       { name: "Vulnerabilities", href: "/vulnerabilities", icon: AlertTriangle, requiredFeature: "vulnerability_scanning", tierLabel: "Pro" },
       { name: "Alerts", href: "/alerts", icon: Bell },
       { name: "Risk Exceptions", href: "/exceptions", icon: ShieldAlert },
@@ -90,7 +89,7 @@ const navigationSections: NavigationSection[] = [
       { name: "Code Quality", href: "/code-quality", icon: Code2, requiredFeature: "code_quality", tierLabel: "Pro" },
       { name: "Developer Feedback", href: "/feedback", icon: MessageSquare },
       { name: "Policies", href: "/policies", icon: FileText },
-      { name: "Deployments", href: "/docker/deployments", icon: Package },
+      { name: "Deployments", href: "/docker/deployments", icon: Package, requiredFeature: "stack_management", tierLabel: "Pro" },
       { name: "Artifacts", href: "/deploy/artifacts", icon: Box, requiredFeature: "vulnerability_scanning", tierLabel: "Pro" },
     ],
   },
