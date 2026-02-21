@@ -16,8 +16,6 @@ import {
   Clock,
 } from "lucide-react";
 import { api, UserAccount } from "@/lib/api";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -47,13 +45,12 @@ const roleConfig: Record<string, { label: string; color: string; icon: React.Rea
   },
 };
 
-export default function UsersPage() {
+export default function SettingsUsersPage() {
   const queryClient = useQueryClient();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editUser, setEditUser] = useState<UserAccount | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<UserAccount | null>(null);
 
-  // Form state
   const [formData, setFormData] = useState({
     email: "",
     password: "",
@@ -111,82 +108,48 @@ export default function UsersPage() {
 
   const openEditModal = (user: UserAccount) => {
     setEditUser(user);
-    setFormData({
-      email: user.email,
-      password: "",
-      role: user.role,
-    });
+    setFormData({ email: user.email, password: "", role: user.role });
   };
 
-  // Calculate metrics
   const totalUsers = users?.length || 0;
-  const activeUsers = users?.filter(u => u.last_login).length || 0;
+  const activeUsers = users?.filter((u) => u.last_login).length || 0;
   const roleCount = users?.reduce((acc, user) => {
     acc[user.role] = (acc[user.role] || 0) + 1;
     return acc;
   }, {} as Record<string, number>);
   const uniqueRoles = Object.keys(roleCount || {}).length;
-  const recentLogins = users?.filter(u => {
-    if (!u.last_login) return false;
-    const lastLogin = new Date(u.last_login);
-    const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    return lastLogin > dayAgo;
-  }).length || 0;
+  const recentLogins =
+    users?.filter((u) => {
+      if (!u.last_login) return false;
+      return new Date(u.last_login) > new Date(Date.now() - 24 * 60 * 60 * 1000);
+    }).length || 0;
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="User Management"
-        description="Manage users and their permissions"
-        breadcrumbs={
-          <Breadcrumb
-            items={[
-              { label: "Platform", href: "/" },
-              { label: "Users", current: true },
-            ]}
-          />
-        }
-        action={
-          <button
-            onClick={() => {
-              setFormData({ email: "", password: "", role: "viewer" });
-              setShowCreateModal(true);
-            }}
-            className="flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg transition-colors"
-          >
-            <Plus className="h-4 w-4" />
-            Add User
-          </button>
-        }
-      />
+      {/* Section header with action */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-base font-semibold text-gray-900 dark:text-white">Users</h2>
+          <p className="text-sm text-gray-500">Manage users and their permissions</p>
+        </div>
+        <button
+          onClick={() => {
+            setFormData({ email: "", password: "", role: "viewer" });
+            setShowCreateModal(true);
+          }}
+          className="flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg transition-colors text-sm"
+        >
+          <Plus className="h-4 w-4" />
+          Add User
+        </button>
+      </div>
 
       {/* Metrics */}
       <MetricsGrid columns={4}>
-        <StatCard
-          label="Total Users"
-          value={totalUsers}
-          icon={UsersIcon}
-          iconColor="text-blue-600"
-        />
-        <StatCard
-          label="Active Users"
-          value={activeUsers}
-          description="With login history"
-          icon={UserCheck}
-          iconColor="text-green-600"
-        />
-        <StatCard
-          label="Roles"
-          value={uniqueRoles}
-          icon={Shield}
-          iconColor="text-purple-600"
-        />
-        <StatCard
-          label="Last 24h Logins"
-          value={recentLogins}
-          icon={Clock}
-          iconColor="text-orange-600"
-        />
+        <StatCard label="Total Users" value={totalUsers} icon={UsersIcon} iconColor="text-blue-600" />
+        <StatCard label="Active Users" value={activeUsers} description="With login history" icon={UserCheck} iconColor="text-green-600" />
+        <StatCard label="Roles" value={uniqueRoles} icon={Shield} iconColor="text-purple-600" />
+        <StatCard label="Last 24h Logins" value={recentLogins} icon={Clock} iconColor="text-orange-600" />
       </MetricsGrid>
 
       {/* Users table */}
@@ -197,11 +160,7 @@ export default function UsersPage() {
           </div>
         ) : !users || users.length === 0 ? (
           <div className="py-12">
-            <EmptyState
-              icon={UsersIcon}
-              title="No users found"
-              description="Add a user to get started"
-            />
+            <EmptyState icon={UsersIcon} title="No users found" description="Add a user to get started" />
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -225,9 +184,7 @@ export default function UsersPage() {
                         <span className="text-gray-900 dark:text-white font-medium">{user.email}</span>
                       </td>
                       <td className="px-4 py-3">
-                        <span
-                          className={`inline-flex items-center gap-2 px-2 py-1 rounded text-xs font-medium ${role.color}`}
-                        >
+                        <span className={`inline-flex items-center gap-2 px-2 py-1 rounded text-xs font-medium ${role.color}`}>
                           {role.icon}
                           {role.label}
                         </span>
@@ -244,9 +201,7 @@ export default function UsersPage() {
                         )}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
-                        {user.last_login
-                          ? new Date(user.last_login).toLocaleString()
-                          : "Never"}
+                        {user.last_login ? new Date(user.last_login).toLocaleString() : "Never"}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
                         {new Date(user.created_at).toLocaleDateString()}
@@ -284,18 +239,13 @@ export default function UsersPage() {
           <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6 w-full max-w-md">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Add New User</h2>
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
-              >
+              <button onClick={() => setShowCreateModal(false)} className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white">
                 <X className="h-5 w-5" />
               </button>
             </div>
             <form onSubmit={handleCreate} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">
-                  Email
-                </label>
+                <label className="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Email</label>
                 <input
                   type="email"
                   value={formData.email}
@@ -305,9 +255,7 @@ export default function UsersPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">
-                  Password
-                </label>
+                <label className="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Password</label>
                 <input
                   type="password"
                   value={formData.password}
@@ -318,9 +266,7 @@ export default function UsersPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">
-                  Role
-                </label>
+                <label className="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Role</label>
                 <select
                   value={formData.role}
                   onChange={(e) => setFormData({ ...formData, role: e.target.value })}
@@ -333,18 +279,10 @@ export default function UsersPage() {
                 </select>
               </div>
               <div className="flex justify-end gap-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateModal(false)}
-                  className="px-4 py-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
-                >
+                <button type="button" onClick={() => setShowCreateModal(false)} className="px-4 py-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors">
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  disabled={createMutation.isPending}
-                  className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg disabled:opacity-50 transition-colors"
-                >
+                <button type="submit" disabled={createMutation.isPending} className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg disabled:opacity-50 transition-colors">
                   {createMutation.isPending ? "Creating..." : "Create User"}
                 </button>
               </div>
@@ -359,18 +297,13 @@ export default function UsersPage() {
           <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6 w-full max-w-md">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Edit User</h2>
-              <button
-                onClick={() => setEditUser(null)}
-                className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
-              >
+              <button onClick={() => setEditUser(null)} className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white">
                 <X className="h-5 w-5" />
               </button>
             </div>
             <form onSubmit={handleUpdate} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">
-                  Email
-                </label>
+                <label className="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Email</label>
                 <input
                   type="email"
                   value={formData.email}
@@ -380,9 +313,7 @@ export default function UsersPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">
-                  New Password (leave blank to keep current)
-                </label>
+                <label className="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">New Password (leave blank to keep current)</label>
                 <input
                   type="password"
                   value={formData.password}
@@ -392,9 +323,7 @@ export default function UsersPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">
-                  Role
-                </label>
+                <label className="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Role</label>
                 <select
                   value={formData.role}
                   onChange={(e) => setFormData({ ...formData, role: e.target.value })}
@@ -407,18 +336,10 @@ export default function UsersPage() {
                 </select>
               </div>
               <div className="flex justify-end gap-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setEditUser(null)}
-                  className="px-4 py-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
-                >
+                <button type="button" onClick={() => setEditUser(null)} className="px-4 py-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors">
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  disabled={updateMutation.isPending}
-                  className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg disabled:opacity-50 transition-colors"
-                >
+                <button type="submit" disabled={updateMutation.isPending} className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg disabled:opacity-50 transition-colors">
                   {updateMutation.isPending ? "Saving..." : "Save Changes"}
                 </button>
               </div>
@@ -433,14 +354,10 @@ export default function UsersPage() {
           <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6 w-full max-w-md">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Delete User</h2>
             <p className="text-gray-600 dark:text-gray-400 mb-4">
-              Are you sure you want to delete <span className="text-gray-900 dark:text-white font-medium">{deleteConfirm.email}</span>?
-              This action cannot be undone.
+              Are you sure you want to delete <span className="text-gray-900 dark:text-white font-medium">{deleteConfirm.email}</span>? This action cannot be undone.
             </p>
             <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setDeleteConfirm(null)}
-                className="px-4 py-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
-              >
+              <button onClick={() => setDeleteConfirm(null)} className="px-4 py-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors">
                 Cancel
               </button>
               <button

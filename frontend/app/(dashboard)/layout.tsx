@@ -128,7 +128,6 @@ const navigationSections: NavigationSection[] = [
       { name: "Background Jobs", href: "/platform/jobs", icon: Activity },
       { name: "Metrics & Reports", href: "/platform/metrics", icon: BarChart3 },
       { name: "Infrastructure", href: "/platform/infrastructure", icon: HardDrive }, // Consolidated: Proxies, Networks, Volumes, Health
-      { name: "Users", href: "/users", icon: Users },
       { name: "Settings", href: "/settings", icon: Settings },
     ],
   },

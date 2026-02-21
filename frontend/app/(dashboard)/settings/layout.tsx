@@ -2,7 +2,7 @@
 
 import { ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Globe, Crown, Shield, FileText } from "lucide-react";
+import { Globe, Crown, Shield, FileText, Users } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { cn } from "@/lib/utils";
@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 const tabs = [
   { id: "general", label: "General", href: "/settings", icon: Globe },
   { id: "license", label: "License", href: "/settings/license", icon: Crown },
+  { id: "users", label: "Users", href: "/settings/users", icon: Users },
   { id: "security", label: "Security", href: "/settings/security", icon: Shield },
   { id: "pages", label: "Default Pages", href: "/settings/pages", icon: FileText },
 ];
