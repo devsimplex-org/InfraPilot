@@ -624,6 +624,23 @@ func (h *Handler) dispatchDefaultPageConfig(agentID uuid.UUID, orgID uuid.UUID, 
 		return
 	}
 
+	// Write 502.html — served by nginx when any upstream container is down.
+	// Uses the user-configured 502/maintenance page, or a built-in fallback.
+	errorHTML := h.getErrorPageHTML(orgID)
+	errorPayload, _ := json.Marshal(agentgrpc.NginxCommand{
+		Action:        agentgrpc.NginxActionWriteConfig,
+		ConfigContent: errorHTML,
+		ConfigPath:    "/var/www/html/502.html",
+	})
+	errorCmd := &agentgrpc.BackendMessage{
+		RequestId: uuid.New().String(),
+		Type:      "nginx",
+		Command:   errorPayload,
+	}
+	if err := agentgrpc.SendCommandAsync(agentIDStr, errorCmd); err != nil {
+		h.logger.Error("Failed to dispatch error page HTML", zap.Error(err))
+	}
+
 	// Generate and dispatch updated default.conf
 	defaultConf := generateDefaultNginxConfig(domainConfigured)
 	confPayload, _ := json.Marshal(agentgrpc.NginxCommand{
@@ -646,6 +663,30 @@ func (h *Handler) dispatchDefaultPageConfig(agentID uuid.UUID, orgID uuid.UUID, 
 		zap.String("agent_id", agentIDStr),
 		zap.Bool("domain_configured", domainConfigured),
 	)
+}
+
+// getErrorPageHTML returns the HTML to serve when an upstream is unavailable (502/503/504).
+// Priority: enabled 502 page → enabled maintenance page → built-in default.
+func (h *Handler) getErrorPageHTML(orgID uuid.UUID) string {
+	ctx := context.Background()
+
+	for _, pageType := range []string{"502", "maintenance"} {
+		var page DefaultPage
+		err := h.db.QueryRow(ctx, `
+			SELECT page_type, enabled, title, heading, message, show_logo, custom_css
+			FROM default_pages
+			WHERE org_id = $1 AND page_type = $2
+		`, orgID, pageType).Scan(
+			&page.PageType, &page.Enabled, &page.Title, &page.Heading,
+			&page.Message, &page.ShowLogo, &page.CustomCSS,
+		)
+		if err == nil && page.Enabled {
+			return generateDefaultPageHTML(page)
+		}
+	}
+
+	// Neither is configured/enabled — render the built-in 502 template.
+	return generateDefaultPageHTML(defaultPageTemplates["502"])
 }
 
 // getWelcomePageHTML retrieves the welcome page HTML from database or returns default

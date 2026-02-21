@@ -1302,6 +1302,12 @@ func generateNginxConfig(proxy ProxyHost, headers SecurityHeaders) string {
 		if proxy.ProxyType == "redirect" && proxy.RedirectURL != nil && *proxy.RedirectURL != "" {
 			config += generateRedirectLocationBlock(*proxy.RedirectURL, proxy.RedirectCode)
 		} else {
+			// Docker DNS resolver: defers upstream hostname resolution to request time
+			// so nginx starts cleanly even when the upstream container is stopped.
+			config += "    resolver 127.0.0.11 valid=30s ipv6=off;\n"
+			config += "    root /var/www/html;\n"
+			config += "    error_page 502 503 504 /502.html;\n"
+			config += "    location = /502.html { internal; }\n\n"
 			config += generateLocationBlockWithAuth(proxy.UpstreamTarget, proxy.BasicAuthEnabled, proxy.BasicAuthRealm, proxy.Domain, proxy.BasicAuthExcludedPaths)
 		}
 		config += "}\n\n"
@@ -1375,6 +1381,12 @@ func generateNginxConfig(proxy ProxyHost, headers SecurityHeaders) string {
 		if proxy.ProxyType == "redirect" && proxy.RedirectURL != nil && *proxy.RedirectURL != "" {
 			config += generateRedirectLocationBlock(*proxy.RedirectURL, proxy.RedirectCode)
 		} else {
+			// Docker DNS resolver: defers upstream hostname resolution to request time
+			// so nginx starts cleanly even when the upstream container is stopped.
+			config += "    resolver 127.0.0.11 valid=30s ipv6=off;\n"
+			config += "    root /var/www/html;\n"
+			config += "    error_page 502 503 504 /502.html;\n"
+			config += "    location = /502.html { internal; }\n\n"
 			config += generateLocationBlockWithAuth(proxy.UpstreamTarget, proxy.BasicAuthEnabled, proxy.BasicAuthRealm, proxy.Domain, proxy.BasicAuthExcludedPaths)
 		}
 		config += "}\n"
@@ -1451,7 +1463,10 @@ func generateLocationBlockWithAuth(upstream string, basicAuthEnabled bool, basic
 			}
 			config += fmt.Sprintf("    location %s {\n", path)
 			config += "        auth_basic off;\n"
-			config += fmt.Sprintf("        proxy_pass %s;\n", upstream)
+			// Use variable-based upstream so nginx resolves at request time,
+			// not at startup — prevents nginx crash when container is stopped.
+			config += fmt.Sprintf("        set $upstream \"%s\";\n", upstream)
+			config += "        proxy_pass $upstream;\n"
 			config += "        proxy_http_version 1.1;\n"
 			config += "        proxy_set_header Host $host;\n"
 			config += "        proxy_set_header X-Real-IP $remote_addr;\n"
@@ -1476,7 +1491,10 @@ func generateLocationBlockWithAuth(upstream string, basicAuthEnabled bool, basic
 		config += fmt.Sprintf("        auth_basic_user_file /data/nginx/conf.d/.htpasswd_%s;\n\n", sanitizeFilename(domain))
 	}
 
-	config += fmt.Sprintf("        proxy_pass %s;\n", upstream)
+	// Use variable-based upstream so nginx resolves at request time,
+	// not at startup — prevents nginx crash when container is stopped.
+	config += fmt.Sprintf("        set $upstream \"%s\";\n", upstream)
+	config += "        proxy_pass $upstream;\n"
 	config += "        proxy_http_version 1.1;\n"
 	config += "        proxy_set_header Host $host;\n"
 	config += "        proxy_set_header X-Real-IP $remote_addr;\n"
@@ -1487,6 +1505,9 @@ func generateLocationBlockWithAuth(upstream string, basicAuthEnabled bool, basic
 	config += "        proxy_connect_timeout 60s;\n"
 	config += "        proxy_send_timeout 60s;\n"
 	config += "        proxy_read_timeout 60s;\n"
+	// Intercept upstream errors so nginx serves the custom error page (502.html)
+	// instead of the raw nginx error when the upstream container is down.
+	config += "        proxy_intercept_errors on;\n"
 	config += "    }\n"
 	return config
 }
