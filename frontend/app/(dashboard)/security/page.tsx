@@ -13,8 +13,6 @@ import {
   GitBranch,
 } from "lucide-react";
 import { api } from "@/lib/api";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
 import { Card } from "@/components/ui/Card";
 import { Table } from "@/components/ui/Table";
@@ -27,14 +25,11 @@ import {
   Line,
   AreaChart,
   Area,
-  BarChart,
-  Bar,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Legend,
 } from "recharts";
 
 interface SecurityPosture {
@@ -111,26 +106,19 @@ export default function SecurityDashboard() {
   const { data: posture, isLoading } = useQuery({
     queryKey: ["security-posture"],
     queryFn: () => api.fetchAPI<SecurityPosture>("/security/posture"),
-    refetchInterval: 30000, // Refresh every 30 seconds
+    refetchInterval: 30000,
   });
 
-  // Map risk level to status level for StatusIndicator
   const getRiskStatus = (riskLevel: string) => {
     switch (riskLevel) {
-      case "low":
-        return "healthy";
-      case "medium":
-        return "warning";
-      case "high":
-        return "degraded";
-      case "critical":
-        return "critical";
-      default:
-        return "warning";
+      case "low": return "healthy";
+      case "medium": return "warning";
+      case "high": return "degraded";
+      case "critical": return "critical";
+      default: return "warning";
     }
   };
 
-  // Get score color
   const getScoreColor = (score: number) => {
     if (score >= 80) return "text-green-600 dark:text-green-400";
     if (score >= 60) return "text-yellow-600 dark:text-yellow-400";
@@ -138,52 +126,20 @@ export default function SecurityDashboard() {
     return "text-red-600 dark:text-red-400";
   };
 
-  // Loading state
   if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <PageHeader
-          title="Security Posture"
-          description="Real-time DevSecOps metrics and security insights"
-          breadcrumbs={
-            <Breadcrumb
-              items={[
-                { label: "Overview", href: "/" },
-                { label: "Security Posture", current: true },
-              ]}
-            />
-          }
-        />
-        <Spinner.Page label="Loading security posture..." />
-      </div>
-    );
+    return <Spinner.Page label="Loading security posture..." />;
   }
 
   if (!posture) {
     return (
-      <div className="space-y-6">
-        <PageHeader
-          title="Security Posture"
-          description="Real-time DevSecOps metrics and security insights"
-          breadcrumbs={
-            <Breadcrumb
-              items={[
-                { label: "Overview", href: "/" },
-                { label: "Security Posture", current: true },
-              ]}
-            />
-          }
-        />
-        <EmptyState
-          icon={Shield}
-          title="No security data available"
-          description="Unable to load security posture data"
-        />
-      </div>
+      <EmptyState
+        icon={Shield}
+        title="No security data available"
+        description="Unable to load security posture data"
+      />
     );
   }
 
-  // Define table columns for recent security events
   const eventColumns = [
     {
       key: "severity",
@@ -198,12 +154,8 @@ export default function SecurityDashboard() {
       header: "Event",
       render: (value: string, row: SecurityEvent) => (
         <div>
-          <div className="text-sm font-medium text-gray-900 dark:text-white">
-            {value}
-          </div>
-          <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            {row.description}
-          </div>
+          <div className="text-sm font-medium text-gray-900 dark:text-white">{value}</div>
+          <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">{row.description}</div>
         </div>
       ),
     },
@@ -234,34 +186,7 @@ export default function SecurityDashboard() {
 
   return (
     <div className="space-y-6">
-      {/* Section 1: Page Header with Breadcrumbs */}
-      <PageHeader
-        title="Security Posture"
-        description="Real-time DevSecOps metrics and security insights"
-        breadcrumbs={
-          <Breadcrumb
-            items={[
-              { label: "Overview", href: "/" },
-              { label: "Security Posture", current: true },
-            ]}
-          />
-        }
-        action={
-          <div className="flex items-center gap-3">
-            <StatusIndicator
-              status={getRiskStatus(posture.risk_level)}
-              label={`${posture.risk_level} Risk`}
-              pulse
-              size="sm"
-            />
-            <span className="text-xs text-gray-500 dark:text-gray-400">
-              Last updated: {new Date().toLocaleTimeString()}
-            </span>
-          </div>
-        }
-      />
-
-      {/* Section 2: Overall Security Score Card */}
+      {/* Overall Security Score Card */}
       <Card variant="default">
         <Card.Body>
           <div className="flex items-center justify-between">
@@ -276,12 +201,17 @@ export default function SecurityDashboard() {
                 <span className="text-2xl text-gray-400">/100</span>
               </div>
             </div>
-            <div className="flex flex-col items-end gap-2">
+            <div className="flex flex-col items-end gap-3">
               <Shield className="w-12 h-12 text-primary-600 dark:text-primary-400" />
+              <StatusIndicator
+                status={getRiskStatus(posture.risk_level)}
+                label={`${posture.risk_level} Risk`}
+                pulse
+                size="sm"
+              />
             </div>
           </div>
 
-          {/* Score breakdown metrics */}
           <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="text-center">
               <p className="text-sm text-gray-500 dark:text-gray-400">Success Rate</p>
@@ -311,7 +241,7 @@ export default function SecurityDashboard() {
         </Card.Body>
       </Card>
 
-      {/* Section 3: Key Metrics Grid */}
+      {/* Key Metrics Grid */}
       <MetricsGrid columns={4}>
         <StatCard
           label="Deployments"
@@ -320,7 +250,6 @@ export default function SecurityDashboard() {
           icon={Activity}
           iconColor="text-blue-600 dark:text-blue-400"
         />
-
         <StatCard
           label="Vulnerabilities"
           value={posture.vulnerability_stats.total}
@@ -333,7 +262,6 @@ export default function SecurityDashboard() {
               : "text-gray-900 dark:text-white"
           }
         />
-
         <StatCard
           label="Policy Compliance"
           value={`${posture.policy_stats.compliance_rate.toFixed(0)}%`}
@@ -346,7 +274,6 @@ export default function SecurityDashboard() {
               : "text-yellow-600 dark:text-yellow-400"
           }
         />
-
         <StatCard
           label="SBOM Coverage"
           value={posture.sbom_stats.total_sboms}
@@ -356,9 +283,8 @@ export default function SecurityDashboard() {
         />
       </MetricsGrid>
 
-      {/* Section 4: Two Column Layout - Vulnerability Breakdown & Deployment Stats */}
+      {/* Vulnerability Breakdown & Deployment Stats */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Vulnerability Breakdown */}
         <Card>
           <Card.Header>
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
@@ -367,42 +293,20 @@ export default function SecurityDashboard() {
           </Card.Header>
           <Card.Body>
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 bg-red-600 rounded-full"></div>
-                  <span className="text-sm text-gray-700 dark:text-gray-300">Critical</span>
+              {[
+                { label: "Critical", value: posture.vulnerability_stats.critical, color: "bg-red-600" },
+                { label: "High", value: posture.vulnerability_stats.high, color: "bg-orange-600" },
+                { label: "Medium", value: posture.vulnerability_stats.medium, color: "bg-yellow-600" },
+                { label: "Low", value: posture.vulnerability_stats.low, color: "bg-blue-600" },
+              ].map(({ label, value, color }) => (
+                <div key={label} className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className={`w-3 h-3 ${color} rounded-full`}></div>
+                    <span className="text-sm text-gray-700 dark:text-gray-300">{label}</span>
+                  </div>
+                  <span className="text-sm font-semibold text-gray-900 dark:text-white">{value}</span>
                 </div>
-                <span className="text-sm font-semibold text-gray-900 dark:text-white">
-                  {posture.vulnerability_stats.critical}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 bg-orange-600 rounded-full"></div>
-                  <span className="text-sm text-gray-700 dark:text-gray-300">High</span>
-                </div>
-                <span className="text-sm font-semibold text-gray-900 dark:text-white">
-                  {posture.vulnerability_stats.high}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 bg-yellow-600 rounded-full"></div>
-                  <span className="text-sm text-gray-700 dark:text-gray-300">Medium</span>
-                </div>
-                <span className="text-sm font-semibold text-gray-900 dark:text-white">
-                  {posture.vulnerability_stats.medium}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 bg-blue-600 rounded-full"></div>
-                  <span className="text-sm text-gray-700 dark:text-gray-300">Low</span>
-                </div>
-                <span className="text-sm font-semibold text-gray-900 dark:text-white">
-                  {posture.vulnerability_stats.low}
-                </span>
-              </div>
+              ))}
               <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-gray-700 dark:text-gray-300">Fixable</span>
@@ -421,7 +325,6 @@ export default function SecurityDashboard() {
           </Card.Body>
         </Card>
 
-        {/* Deployment Statistics */}
         <Card>
           <Card.Header>
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
@@ -457,20 +360,20 @@ export default function SecurityDashboard() {
                   {posture.deployment_stats.blocked}
                 </span>
               </div>
-              <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+              <div className="pt-4 border-t border-gray-200 dark:border-gray-700 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-gray-700 dark:text-gray-300">Success Rate</span>
                   <span className="text-sm font-semibold text-green-600 dark:text-green-400">
                     {posture.deployment_stats.success_rate.toFixed(1)}%
                   </span>
                 </div>
-                <div className="flex items-center justify-between mt-2">
+                <div className="flex items-center justify-between">
                   <span className="text-sm text-gray-700 dark:text-gray-300">Last 24h</span>
                   <span className="text-sm font-semibold text-gray-900 dark:text-white">
                     {posture.deployment_stats.last_24h}
                   </span>
                 </div>
-                <div className="flex items-center justify-between mt-2">
+                <div className="flex items-center justify-between">
                   <span className="text-sm text-gray-700 dark:text-gray-300">Avg Deploy Time</span>
                   <span className="text-sm font-semibold text-gray-900 dark:text-white">
                     {posture.deployment_stats.avg_deploy_time}
@@ -482,9 +385,8 @@ export default function SecurityDashboard() {
         </Card>
       </div>
 
-      {/* Section 5: Trend Charts */}
+      {/* Trend Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Deployment Trends */}
         <Card>
           <Card.Header>
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
@@ -498,25 +400,14 @@ export default function SecurityDashboard() {
                 <XAxis dataKey="date" stroke="#9CA3AF" fontSize={12} />
                 <YAxis stroke="#9CA3AF" fontSize={12} />
                 <Tooltip
-                  contentStyle={{
-                    backgroundColor: "#1F2937",
-                    border: "1px solid #374151",
-                    borderRadius: "8px",
-                  }}
+                  contentStyle={{ backgroundColor: "#1F2937", border: "1px solid #374151", borderRadius: "8px" }}
                 />
-                <Area
-                  type="monotone"
-                  dataKey="value"
-                  stroke="#3B82F6"
-                  fill="#3B82F6"
-                  fillOpacity={0.3}
-                />
+                <Area type="monotone" dataKey="value" stroke="#3B82F6" fill="#3B82F6" fillOpacity={0.3} />
               </AreaChart>
             </ResponsiveContainer>
           </Card.Body>
         </Card>
 
-        {/* Vulnerability Trends */}
         <Card>
           <Card.Header>
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
@@ -530,26 +421,16 @@ export default function SecurityDashboard() {
                 <XAxis dataKey="date" stroke="#9CA3AF" fontSize={12} />
                 <YAxis stroke="#9CA3AF" fontSize={12} />
                 <Tooltip
-                  contentStyle={{
-                    backgroundColor: "#1F2937",
-                    border: "1px solid #374151",
-                    borderRadius: "8px",
-                  }}
+                  contentStyle={{ backgroundColor: "#1F2937", border: "1px solid #374151", borderRadius: "8px" }}
                 />
-                <Line
-                  type="monotone"
-                  dataKey="value"
-                  stroke="#EF4444"
-                  strokeWidth={2}
-                  dot={{ fill: "#EF4444" }}
-                />
+                <Line type="monotone" dataKey="value" stroke="#EF4444" strokeWidth={2} dot={{ fill: "#EF4444" }} />
               </LineChart>
             </ResponsiveContainer>
           </Card.Body>
         </Card>
       </div>
 
-      {/* Section 6: Recent Security Events Table */}
+      {/* Recent Security Events */}
       <Card>
         <Card.Header>
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
