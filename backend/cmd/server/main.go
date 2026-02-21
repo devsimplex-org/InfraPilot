@@ -79,13 +79,8 @@ func main() {
 	var licenseClient *license.Client
 	if os.Getenv("LICENSE_OFFLINE") == "true" && cfg.Env != "production" {
 		licenseClient = license.NewOfflineClient(logger)
-	} else {
-		if cfg.LicenseKey == "" {
-			logger.Fatal(
-				"LICENSE_KEY environment variable is required. " +
-					"Get a free key at https://infrapilot.sh/signup",
-			)
-		}
+	} else if cfg.LicenseKey != "" {
+		// ENV var set — validate immediately (existing behaviour)
 		licenseClient, err = license.NewClient(cfg.LicenseKey, cfg.DataDir, version, logger)
 		if err != nil {
 			logger.Fatal("Failed to initialize license client", zap.Error(err))
@@ -104,6 +99,33 @@ func main() {
 			zap.String("tier", resp.Tier),
 			zap.Int("max_agents", resp.MaxAgents),
 		)
+	} else {
+		// Try to load license key from system_settings (saved via setup wizard)
+		var savedKey string
+		pool.QueryRow(ctx, `
+			SELECT setting_value->>'key' FROM system_settings
+			WHERE org_id = '00000000-0000-0000-0000-000000000001'
+			AND setting_key = 'license_key'
+		`).Scan(&savedKey)
+
+		if savedKey != "" {
+			licenseClient, err = license.NewClient(savedKey, cfg.DataDir, version, logger)
+			if err == nil {
+				resp, validateErr := licenseClient.Validate()
+				if validateErr == nil && resp != nil && resp.Valid {
+					logger.Info("License loaded from database", zap.String("tier", resp.Tier))
+				} else {
+					licenseClient = nil
+				}
+			} else {
+				licenseClient = nil
+			}
+		}
+
+		if licenseClient == nil {
+			logger.Warn("No license key configured — starting in setup mode (complete setup at the web UI)")
+			licenseClient = license.NewOfflineClient(logger)
+		}
 	}
 
 	logger.Info("InfraPilot started", zap.String("version", version), zap.String("tier", licenseClient.Tier()))
@@ -135,7 +157,7 @@ func main() {
 	router.Use(api.CORSMiddleware(cfg.AllowedOrigins))
 
 	// Setup API routes
-	apiHandler := api.NewHandler(pool, authService, logger, encryptionSvc, licenseClient)
+	apiHandler := api.NewHandler(pool, authService, logger, encryptionSvc, licenseClient, cfg, version)
 	apiHandler.RegisterRoutes(router)
 
 	httpServer := &http.Server{
