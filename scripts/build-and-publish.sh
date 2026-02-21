@@ -37,7 +37,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # Registry target. Override with REGISTRY env var for private registries.
 # Community images are published to ghcr.io/infrapilot-sh/infrapilot (public).
-IMAGE_PREFIX="${REGISTRY:-ghcr.io/infrapilot-sh/infrapilot}"
+IMAGE_PREFIX="${REGISTRY:-ghcr.io/tybali/infrapilot}"
 
 # Colors
 RED='\033[0;31m'
@@ -199,6 +199,7 @@ if [ "$BUILD_ALL_IN_ONE" = true ]; then
     echo -e "${YELLOW}Building All-in-One (legacy)...${NC}"
     docker build \
         $PLATFORM \
+        --build-arg VERSION="${VERSION}" \
         -t "${IMAGE_PREFIX}:${VERSION}" \
         -f Dockerfile \
         .
