@@ -212,6 +212,39 @@ func loadOrCreateInstanceID(dataDir string) (string, error) {
 	return id, nil
 }
 
+// GetKey returns the current license key (may be empty for offline/setup-mode clients).
+func (c *Client) GetKey() string {
+	return c.licenseKey
+}
+
+// UpdateKey validates a new license key and, if valid, replaces the in-memory state.
+// If validation fails the existing key/cache is preserved and the validation response is returned.
+func (c *Client) UpdateKey(newKey string) (*ValidationResponse, error) {
+	// Build a temporary request to validate the new key against the API.
+	tmpClient := &Client{
+		licenseKey: newKey,
+		instanceID: c.instanceID,
+		hostname:   c.hostname,
+		version:    c.version,
+		logger:     c.logger,
+	}
+	resp, err := tmpClient.fetchFromAPI()
+	if err != nil {
+		return nil, fmt.Errorf("license validation request failed: %w", err)
+	}
+	if !resp.Valid {
+		return resp, nil
+	}
+	// Swap the in-memory state atomically.
+	c.mu.Lock()
+	c.licenseKey = newKey
+	c.cached = resp
+	c.cachedAt = time.Now()
+	c.lastValidAt = time.Now()
+	c.mu.Unlock()
+	return resp, nil
+}
+
 // NewOfflineClient returns a client with all features enabled — for development only.
 // It never calls infrapilot.sh. Panics in production.
 func NewOfflineClient(logger *zap.Logger) *Client {

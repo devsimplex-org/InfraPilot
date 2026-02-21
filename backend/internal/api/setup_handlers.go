@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -235,5 +236,172 @@ func (h *Handler) createInitialAdmin(c *gin.Context) {
 		"user_id":       userID,
 		"access_token":  accessToken,
 		"refresh_token": refreshToken,
+	})
+}
+
+// maskLicenseKey masks the middle segments of a license key for display.
+// e.g. "IP-CE-DTSE-QPNW-WG7U" → "IP-CE-****-****-WG7U"
+func maskLicenseKey(key string) string {
+	parts := strings.Split(key, "-")
+	if len(parts) < 5 {
+		if len(key) > 4 {
+			return key[:4] + strings.Repeat("*", len(key)-4)
+		}
+		return "****"
+	}
+	masked := make([]string, len(parts))
+	for i, p := range parts {
+		if i == 0 || i == 1 || i == len(parts)-1 {
+			masked[i] = p
+		} else {
+			masked[i] = strings.Repeat("*", len(p))
+		}
+	}
+	return strings.Join(masked, "-")
+}
+
+// LicenseSettingsResponse is returned by GET /settings/license
+type LicenseSettingsResponse struct {
+	Valid      bool     `json:"valid"`
+	Tier       string   `json:"tier"`
+	MaxAgents  int      `json:"max_agents"`
+	Features   []string `json:"features"`
+	ExpiresAt  *string  `json:"expires_at"`
+	UpgradeURL string   `json:"upgrade_url"`
+	KeyDisplay string   `json:"key_display"` // masked key, empty if none
+	KeySource  string   `json:"key_source"`  // "env", "database", "setup_mode"
+}
+
+// getLicenseSettings returns the current license info for the settings page.
+// This is a super_admin-only authenticated endpoint.
+func (h *Handler) getLicenseSettings(c *gin.Context) {
+	resp, err := h.license.Validate()
+	if err != nil {
+		c.JSON(http.StatusOK, LicenseSettingsResponse{
+			Valid:      false,
+			Tier:       "unknown",
+			MaxAgents:  0,
+			Features:   []string{},
+			UpgradeURL: "https://infrapilot.sh/billing",
+			KeySource:  "setup_mode",
+		})
+		return
+	}
+
+	// Determine key source and compute a masked display value.
+	keyDisplay := ""
+	keySource := "setup_mode"
+
+	if h.cfg.LicenseKey != "" {
+		keyDisplay = maskLicenseKey(h.cfg.LicenseKey)
+		keySource = "env"
+	} else if os.Getenv("LICENSE_OFFLINE") == "true" {
+		keySource = "offline"
+	} else {
+		// Try to get the saved key from DB.
+		var savedKey string
+		_ = h.db.QueryRow(c.Request.Context(), `
+			SELECT setting_value->>'key' FROM system_settings
+			WHERE org_id = '00000000-0000-0000-0000-000000000001'
+			AND setting_key = 'license_key'
+		`).Scan(&savedKey)
+		if savedKey != "" {
+			keyDisplay = maskLicenseKey(savedKey)
+			keySource = "database"
+		}
+	}
+
+	c.JSON(http.StatusOK, LicenseSettingsResponse{
+		Valid:      resp.Valid,
+		Tier:       resp.Tier,
+		MaxAgents:  resp.MaxAgents,
+		Features:   resp.Features,
+		ExpiresAt:  resp.ExpiresAt,
+		UpgradeURL: "https://infrapilot.sh/billing",
+		KeyDisplay: keyDisplay,
+		KeySource:  keySource,
+	})
+}
+
+// updateLicenseKey validates a new license key, saves it to system_settings,
+// and updates the in-memory license client — no restart required.
+func (h *Handler) updateLicenseKey(c *gin.Context) {
+	// Reject if key is locked to the environment — changes must be done via env var.
+	if h.cfg.LicenseKey != "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "License key is set via the LICENSE_KEY environment variable and cannot be changed from the UI. Remove the env var to manage the license here.",
+		})
+		return
+	}
+
+	var req SetupLicenseRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Validate the new key against infrapilot.sh and swap it in-memory.
+	resp, err := h.license.UpdateKey(req.Key)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "license validation failed: " + err.Error()})
+		return
+	}
+	if !resp.Valid {
+		errMsg := "invalid license key"
+		if resp.Error != "" {
+			errMsg = resp.Error
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": errMsg})
+		return
+	}
+
+	// Ensure default org exists.
+	orgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	_, err = h.db.Exec(c.Request.Context(), `
+		INSERT INTO organizations (id, name, slug)
+		VALUES ($1, 'Default Organization', 'default')
+		ON CONFLICT (id) DO NOTHING
+	`, orgID)
+	if err != nil {
+		h.logger.Error("Failed to ensure organization exists", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to ensure organization"})
+		return
+	}
+
+	// Upsert license key into system_settings.
+	settingValue, err := json.Marshal(map[string]interface{}{
+		"key":        req.Key,
+		"tier":       resp.Tier,
+		"max_agents": resp.MaxAgents,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode license data"})
+		return
+	}
+	_, err = h.db.Exec(c.Request.Context(), `
+		INSERT INTO system_settings (org_id, setting_key, setting_value)
+		VALUES ($1, 'license_key', $2)
+		ON CONFLICT (org_id, setting_key) DO UPDATE SET setting_value = EXCLUDED.setting_value
+	`, orgID, string(settingValue))
+	if err != nil {
+		h.logger.Error("Failed to save license key", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save license key"})
+		return
+	}
+
+	h.logger.Info("License key updated via settings",
+		zap.String("tier", resp.Tier),
+		zap.Int("max_agents", resp.MaxAgents),
+	)
+
+	c.JSON(http.StatusOK, LicenseSettingsResponse{
+		Valid:      resp.Valid,
+		Tier:       resp.Tier,
+		MaxAgents:  resp.MaxAgents,
+		Features:   resp.Features,
+		ExpiresAt:  resp.ExpiresAt,
+		UpgradeURL: "https://infrapilot.sh/billing",
+		KeyDisplay: maskLicenseKey(req.Key),
+		KeySource:  "database",
 	})
 }

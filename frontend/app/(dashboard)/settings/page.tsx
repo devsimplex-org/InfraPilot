@@ -34,7 +34,7 @@ import {
   Send,
   ShieldCheck,
 } from "lucide-react";
-import { api, Agent, User, MFASetupResponse, InfraPilotDomainSettings, LicenseInfo, SSOProvider, SSOProviderType, CreateSSOProviderRequest, AuditConfig, AuditExport, ComplianceReport, DefaultPage, DefaultPageType } from "@/lib/api";
+import { api, Agent, User, MFASetupResponse, InfraPilotDomainSettings, LicenseInfo, LicenseSettingsResponse, SSOProvider, SSOProviderType, CreateSSOProviderRequest, AuditConfig, AuditExport, ComplianceReport, DefaultPage, DefaultPageType } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/lib/auth";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -538,99 +538,283 @@ function NginxConfigSection({ agentId }: { agentId: string | null }) {
   );
 }
 
-// Edition Section - Community OSS
+// Tier display config
+const TIER_CONFIG: Record<string, { label: string; color: string; badgeClass: string; iconClass: string }> = {
+  community: {
+    label: "Community Edition",
+    color: "green",
+    badgeClass: "bg-green-500/10 text-green-400 border-green-500/30",
+    iconClass: "text-green-400",
+  },
+  professional: {
+    label: "Professional Edition",
+    color: "blue",
+    badgeClass: "bg-blue-500/10 text-blue-400 border-blue-500/30",
+    iconClass: "text-blue-400",
+  },
+  enterprise: {
+    label: "Enterprise Edition",
+    color: "purple",
+    badgeClass: "bg-purple-500/10 text-purple-400 border-purple-500/30",
+    iconClass: "text-purple-400",
+  },
+};
+
+const FEATURE_LABELS: Record<string, string> = {
+  core_monitoring: "Core Monitoring",
+  proxy_management: "Proxy Management",
+  container_ops: "Container Operations",
+  unified_logs: "Unified Logs",
+  alert_channels: "Alerts & Notifications",
+  user_management: "User Management",
+  supply_chain_security: "Supply Chain Security",
+  runtime_security: "Runtime Security",
+  policy_as_code: "Policy-as-Code",
+  secrets_management: "Secrets Management",
+  data_governance: "Data Governance",
+  code_quality: "Code Quality",
+};
+
 function LicenseSection() {
-  const features = [
-    { name: "Proxy Management", description: "Nginx reverse proxy with SSL automation" },
-    { name: "Container Operations", description: "Docker management with real-time stats" },
-    { name: "Unified Logs", description: "Multi-container log aggregation" },
-    { name: "Alerts & Notifications", description: "Slack, email, webhook alerts" },
-    { name: "User Management", description: "RBAC with MFA support" },
-    { name: "Health Monitoring", description: "TLS, database, and system health" },
-  ];
+  const queryClient = useQueryClient();
+  const [newKey, setNewKey] = useState("");
+  const [showUpdateForm, setShowUpdateForm] = useState(false);
+  const [updateError, setUpdateError] = useState("");
+  const [updateSuccess, setUpdateSuccess] = useState(false);
+
+  const { data: license, isLoading } = useQuery({
+    queryKey: ["licenseSettings"],
+    queryFn: () => api.getLicenseSettings(),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: (key: string) => api.updateLicenseKey(key),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["licenseSettings"] });
+      setNewKey("");
+      setShowUpdateForm(false);
+      setUpdateError("");
+      setUpdateSuccess(true);
+      setTimeout(() => setUpdateSuccess(false), 4000);
+    },
+    onError: (err: Error) => {
+      setUpdateError(err.message);
+    },
+  });
+
+  const tier = license?.tier ?? "community";
+  const tierCfg = TIER_CONFIG[tier] ?? TIER_CONFIG.community;
+  const isEnvLocked = license?.key_source === "env";
+  const isOffline = license?.key_source === "offline";
 
   return (
     <Card>
       <Card.Header>
         <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-green-500/10">
-            <Sparkles className="h-5 w-5 text-green-400" />
+          <div className={cn("p-2 rounded-lg", tier === "enterprise" ? "bg-purple-500/10" : tier === "professional" ? "bg-blue-500/10" : "bg-green-500/10")}>
+            <Crown className={cn("h-5 w-5", tierCfg.iconClass)} />
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Community Edition</h2>
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">License</h2>
             <p className="text-sm text-gray-600 dark:text-gray-400">
-              Open source with all features included
+              Manage your InfraPilot license
             </p>
           </div>
         </div>
       </Card.Header>
       <Card.Body>
-        <div className="space-y-6">
-          {/* Status Card */}
-          <div className="p-4 rounded-lg border bg-green-500/5 border-green-500/30">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-3 h-3 rounded-full bg-green-500" />
-                <div>
-                  <span className="font-semibold text-gray-900 dark:text-white">
-                    InfraPilot Community
-                  </span>
-                  <p className="text-sm text-gray-500 mt-0.5">Apache 2.0 License</p>
-                </div>
-              </div>
-              <Badge className="bg-green-500/10 text-green-400 border-green-500/30">
-                All Features Included
-              </Badge>
-            </div>
+        {isLoading ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-6 w-6 text-gray-400 animate-spin" />
           </div>
+        ) : (
+          <div className="space-y-6">
+            {/* Success banner */}
+            {updateSuccess && (
+              <div className="flex items-center gap-3 p-3 bg-green-500/10 border border-green-500/30 rounded-lg text-green-400 text-sm">
+                <Check className="h-4 w-4 flex-shrink-0" />
+                License key updated successfully. Your new license is active immediately.
+              </div>
+            )}
 
-          {/* Features Grid */}
-          <div>
-            <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Available Features</h3>
-            <div className="grid sm:grid-cols-2 gap-3">
-              {features.map((feature) => (
-                <div
-                  key={feature.name}
-                  className="p-3 rounded-lg border bg-green-500/5 border-green-500/20"
-                >
-                  <div className="flex items-start gap-2">
-                    <Check className="h-4 w-4 text-green-400 mt-0.5 flex-shrink-0" />
-                    <div>
-                      <p className="text-sm font-medium text-gray-900 dark:text-white">
-                        {feature.name}
-                      </p>
-                      <p className="text-xs text-gray-500 mt-0.5">{feature.description}</p>
-                    </div>
+            {/* Current license status */}
+            <div className={cn("p-4 rounded-lg border", tier === "enterprise" ? "bg-purple-500/5 border-purple-500/30" : tier === "professional" ? "bg-blue-500/5 border-blue-500/30" : "bg-green-500/5 border-green-500/30")}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className={cn("w-3 h-3 rounded-full", license?.valid ? "bg-green-500" : "bg-yellow-500")} />
+                  <div>
+                    <span className="font-semibold text-gray-900 dark:text-white">
+                      {tierCfg.label}
+                    </span>
+                    <p className="text-sm text-gray-500 mt-0.5">
+                      {license?.max_agents === -1
+                        ? "Unlimited agents"
+                        : `Up to ${license?.max_agents ?? 1} agent${(license?.max_agents ?? 1) !== 1 ? "s" : ""}`}
+                      {license?.expires_at && ` · Expires ${new Date(license.expires_at).toLocaleDateString()}`}
+                    </p>
                   </div>
                 </div>
-              ))}
-            </div>
-          </div>
-
-          {/* GitHub Link */}
-          <div className="p-4 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg">
-            <div className="flex items-center justify-between">
-              <div>
-                <h4 className="font-medium text-gray-900 dark:text-white">Open Source</h4>
-                <p className="text-sm text-gray-500 mt-1">
-                  Contribute, report issues, or star the project
-                </p>
+                <Badge className={tierCfg.badgeClass}>
+                  {license?.valid ? "Active" : "Invalid"}
+                </Badge>
               </div>
-              <a
-                href="https://github.com/devsimplex-org/infrapilot"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-4 py-2 bg-gray-900 dark:bg-white dark:text-gray-900 text-white rounded-lg transition-colors flex items-center gap-2 text-sm hover:bg-gray-800 dark:hover:bg-gray-100"
-              >
-                <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
-                  <path fillRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" clipRule="evenodd" />
-                </svg>
-                GitHub
-                <ExternalLink className="h-3 w-3" />
-              </a>
             </div>
+
+            {/* Active key display */}
+            {(license?.key_display || isEnvLocked || isOffline) && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Active License Key
+                </label>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 flex items-center gap-2 px-3 py-2 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
+                    <KeyRound className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                    <code className="text-sm font-mono text-gray-700 dark:text-gray-300 flex-1">
+                      {isOffline ? "Offline Mode (dev)" : license?.key_display || "—"}
+                    </code>
+                    {isEnvLocked && (
+                      <Badge className="bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 text-xs border-0">
+                        ENV
+                      </Badge>
+                    )}
+                    {license?.key_source === "database" && (
+                      <Badge className="bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 text-xs border-0">
+                        DB
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+                {isEnvLocked && (
+                  <p className="mt-1.5 text-xs text-gray-500">
+                    Locked via <code className="font-mono">LICENSE_KEY</code> environment variable. Remove the env var to manage the license from here.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Features grid */}
+            {license?.features && license.features.length > 0 && (
+              <div>
+                <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Included Features</h3>
+                <div className="grid sm:grid-cols-2 gap-2">
+                  {license.features.map((f) => (
+                    <div key={f} className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                      <Check className="h-3.5 w-3.5 text-green-400 flex-shrink-0" />
+                      {FEATURE_LABELS[f] ?? f.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Update key section */}
+            {!isEnvLocked && !isOffline && (
+              <div className="pt-4 border-t border-gray-200 dark:border-gray-800">
+                {!showUpdateForm ? (
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                        {license?.key_source === "setup_mode" ? "No license key configured" : "Update license key"}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {license?.key_source === "setup_mode"
+                          ? "Enter a license key to enable full validation"
+                          : "Change or renew your license key"}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setShowUpdateForm(true)}
+                      className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg text-sm transition-colors flex items-center gap-2"
+                    >
+                      <Key className="h-4 w-4" />
+                      {license?.key_source === "setup_mode" ? "Add License Key" : "Update Key"}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        New License Key
+                      </label>
+                      <input
+                        type="text"
+                        value={newKey}
+                        onChange={(e) => {
+                          setNewKey(e.target.value);
+                          setUpdateError("");
+                        }}
+                        placeholder="IP-CE-XXXX-XXXX-XXXX"
+                        className="w-full px-4 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white font-mono placeholder-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        autoFocus
+                      />
+                      <p className="mt-1.5 text-xs text-gray-500">
+                        Get a free key at{" "}
+                        <a href="https://infrapilot.sh/signup" target="_blank" rel="noopener noreferrer" className="text-primary-400 hover:underline">
+                          infrapilot.sh/signup
+                        </a>
+                      </p>
+                    </div>
+
+                    {updateError && (
+                      <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
+                        {updateError}
+                      </div>
+                    )}
+
+                    <div className="flex gap-2 justify-end">
+                      <button
+                        onClick={() => {
+                          setShowUpdateForm(false);
+                          setNewKey("");
+                          setUpdateError("");
+                        }}
+                        className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => updateMutation.mutate(newKey)}
+                        disabled={!newKey.trim() || updateMutation.isPending}
+                        className="px-4 py-2 bg-primary-600 hover:bg-primary-700 disabled:bg-primary-400 text-white rounded-lg text-sm transition-colors flex items-center gap-2"
+                      >
+                        {updateMutation.isPending ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Check className="h-4 w-4" />
+                        )}
+                        {updateMutation.isPending ? "Validating..." : "Validate & Save"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Upgrade link for non-enterprise tiers */}
+            {tier !== "enterprise" && (
+              <div className="p-4 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="font-medium text-gray-900 dark:text-white">Need more?</h4>
+                    <p className="text-sm text-gray-500 mt-0.5">
+                      Upgrade to Professional or Enterprise for more agents and advanced features
+                    </p>
+                  </div>
+                  <a
+                    href={license?.upgrade_url ?? "https://infrapilot.sh/billing"}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg transition-colors flex items-center gap-2 text-sm flex-shrink-0"
+                  >
+                    <Sparkles className="h-4 w-4" />
+                    Upgrade
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                </div>
+              </div>
+            )}
           </div>
-        </div>
+        )}
       </Card.Body>
     </Card>
   );
