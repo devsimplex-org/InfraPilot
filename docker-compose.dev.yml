@@ -63,8 +63,8 @@ services:
       ENV: development
       HTTP_PORT: 8080
       GRPC_PORT: 9090
-      DATABASE_URL: postgres://infrapilot:infrapilot@postgres:5432/infrapilot?sslmode=disable
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgres://infrapilot:infrapilot@infrapilot-dev-postgres:5432/infrapilot?sslmode=disable
+      REDIS_URL: redis://infrapilot-dev-redis:6379
       JWT_SECRET: dev-secret-key-for-development-only-32chars
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost}
     volumes:
