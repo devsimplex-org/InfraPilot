@@ -68,7 +68,7 @@ const navigationSections: NavigationSection[] = [
     color: "text-cyan-600 dark:text-cyan-400",
     items: [
       { name: "Databases", href: "/data/databases", icon: Database },
-      { name: "Backups", href: "/data/backups", icon: Archive },
+      { name: "Backups", href: "/data/databases/backups", icon: Archive },
       { name: "Secrets", href: "/data/secrets", icon: Key },
     ],
   },
