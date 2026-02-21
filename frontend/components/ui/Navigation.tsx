@@ -203,8 +203,7 @@ export function Navigation({ sections, className, onItemClick, enabledFeatures }
                 {section.items.map((item) => {
                   const isLocked =
                     !!item.requiredFeature &&
-                    !!enabledFeatures &&
-                    !enabledFeatures.includes(item.requiredFeature);
+                    (!enabledFeatures || !enabledFeatures.includes(item.requiredFeature));
                   return (
                     <NavigationItemComponent
                       key={item.href || item.name}

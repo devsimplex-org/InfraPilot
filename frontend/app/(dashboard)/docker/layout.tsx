@@ -182,8 +182,7 @@ function DockerLayoutContent({ children }: { children: ReactNode }) {
           {tabs.map((tab) => {
             const isLocked =
               !!tab.requiredFeature &&
-              !!licenseInfo &&
-              !licenseInfo.features.includes(tab.requiredFeature);
+              (!licenseInfo || !licenseInfo.features.includes(tab.requiredFeature));
 
             return (
               <button
