@@ -8,6 +8,9 @@ WORKDIR /build
 
 RUN apk add --no-cache git ca-certificates
 
+# Install garble for binary obfuscation
+RUN go install mvdan.cc/garble@latest
+
 # Copy go modules
 COPY go.mod go.sum* ./
 RUN go mod download
@@ -15,10 +18,9 @@ RUN go mod download
 # Copy source
 COPY . .
 
-# Build binary
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+# Build binary with garble obfuscation
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 garble -literals -seed=random build \
     -ldflags="-w -s" \
-    -a -installsuffix cgo \
     -o /agent ./cmd/agent
 
 # -------------------------------------------------------------
