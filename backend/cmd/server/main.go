@@ -124,7 +124,7 @@ func main() {
 
 		if licenseClient == nil {
 			logger.Warn("No license key configured — starting in setup mode (complete setup at the web UI)")
-			licenseClient = license.NewOfflineClient(logger)
+			licenseClient = license.NewSetupModeClient(logger)
 		}
 	}
 

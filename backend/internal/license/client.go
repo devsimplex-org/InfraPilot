@@ -236,3 +236,27 @@ func NewOfflineClient(logger *zap.Logger) *Client {
 	c.lastValidAt = time.Now()
 	return c
 }
+
+// NewSetupModeClient returns a client with all features temporarily enabled for
+// first-run setup mode. Unlike NewOfflineClient it does not panic in production —
+// it is intended to be used only until the operator completes the setup wizard
+// and the server is restarted with a real license key.
+func NewSetupModeClient(logger *zap.Logger) *Client {
+	logger.Warn("LICENSE: running in setup mode — all features temporarily enabled until setup is complete")
+	c := &Client{
+		licenseKey: "IP-CE-SETUP",
+		instanceID: "setup",
+		hostname:   "localhost",
+		version:    "dev",
+		logger:     logger,
+	}
+	c.cached = &ValidationResponse{
+		Valid:     true,
+		Tier:      "community",
+		MaxAgents: -1,
+		Features:  AllFeatures(),
+	}
+	c.cachedAt = time.Now()
+	c.lastValidAt = time.Now()
+	return c
+}

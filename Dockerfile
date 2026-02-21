@@ -19,7 +19,7 @@ FROM golang:1.24-alpine AS backend-builder
 WORKDIR /build
 
 RUN apk add --no-cache git ca-certificates tzdata
-RUN go install mvdan.cc/garble@latest
+RUN go install mvdan.cc/garble@v0.14.2
 
 COPY backend/go.mod backend/go.sum* ./backend/
 RUN cd backend && go mod download
@@ -39,7 +39,7 @@ FROM golang:1.24-alpine AS agent-builder
 WORKDIR /build
 
 RUN apk add --no-cache git ca-certificates
-RUN go install mvdan.cc/garble@latest
+RUN go install mvdan.cc/garble@v0.14.2
 
 COPY agent/go.mod agent/go.sum* ./agent/
 RUN cd agent && go mod download
