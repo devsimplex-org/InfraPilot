@@ -15,9 +15,12 @@ RUN go mod download
 # Copy source
 COPY . .
 
-# Build binary
+# VERSION is injected by build-and-publish.sh via --build-arg
+ARG VERSION=dev
+
+# Build binary — version is stamped into main.version at link time
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-    -ldflags="-w -s" \
+    -ldflags="-w -s -X main.version=${VERSION}" \
     -a -installsuffix cgo \
     -o /backend ./cmd/server
 
@@ -27,11 +30,13 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 FROM alpine:3.21
 
 # OCI Labels
+ARG VERSION=dev
 LABEL org.opencontainers.image.title="InfraPilot Backend"
 LABEL org.opencontainers.image.description="InfraPilot API Server"
-LABEL org.opencontainers.image.source="https://github.com/devsimplex-org/infrapilot"
-LABEL org.opencontainers.image.licenses="Apache-2.0"
-LABEL org.opencontainers.image.vendor="DevSimplex"
+LABEL org.opencontainers.image.source="https://github.com/infrapilot-sh/infrapilot"
+LABEL org.opencontainers.image.licenses="AGPL-3.0"
+LABEL org.opencontainers.image.vendor="InfraPilot"
+LABEL org.opencontainers.image.version="${VERSION}"
 
 # Install runtime dependencies
 RUN apk add --no-cache \
@@ -61,8 +66,9 @@ RUN wget -q -O /usr/local/bin/opa https://openpolicyagent.org/downloads/latest/o
     chmod +x /usr/local/bin/opa && \
     opa version
 
-# Create app user
-RUN adduser -D -H -s /sbin/nologin appuser
+# Create app user and persistent data directory
+RUN adduser -D -H -s /sbin/nologin appuser && \
+    mkdir -p /data && chown appuser:appuser /data
 
 WORKDIR /app
 
@@ -75,10 +81,14 @@ RUN chown -R appuser:appuser /app
 
 USER appuser
 
+# Persistent volume for instance ID, caches, etc.
+VOLUME ["/data"]
+
 # Environment
 ENV ENV=production
 ENV HTTP_PORT=8080
 ENV GRPC_PORT=9090
+ENV DATA_DIR=/data
 
 # Expose ports
 EXPOSE 8080 9090
