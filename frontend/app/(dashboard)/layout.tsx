@@ -19,6 +19,10 @@ import {
   ShieldCheck,
   Package,
   AlertTriangle,
+  ShieldAlert,
+  Trophy,
+  MessageSquare,
+  Users,
   Code2,
   Wrench,
   Box,
@@ -48,6 +52,7 @@ const navigationSections: NavigationSection[] = [
       { name: "Dashboard", href: "/", icon: LayoutDashboard },
       { name: "Docker", href: "/docker", icon: Container },
       { name: "Traffic", href: "/traffic", icon: Network },
+      { name: "Infrastructure", href: "/platform/infrastructure", icon: HardDrive },
     ],
   },
   {
@@ -57,7 +62,7 @@ const navigationSections: NavigationSection[] = [
     color: "text-cyan-600 dark:text-cyan-400",
     items: [
       { name: "Databases", href: "/data/databases", icon: Database, requiredFeature: "data_governance", tierLabel: "Enterprise" },
-      { name: "Backups", href: "/data/databases/backups", icon: Archive },
+      { name: "Backups", href: "/data/backups", icon: Archive, requiredFeature: "data_governance", tierLabel: "Enterprise" },
       { name: "Secrets", href: "/data/secrets", icon: Key, requiredFeature: "secrets_management", tierLabel: "Pro" },
     ],
   },
@@ -71,6 +76,8 @@ const navigationSections: NavigationSection[] = [
       { name: "Exposure", href: "/run/exposure", icon: Globe },
       { name: "Vulnerabilities", href: "/vulnerabilities", icon: AlertTriangle, requiredFeature: "vulnerability_scanning", tierLabel: "Pro" },
       { name: "Alerts", href: "/alerts", icon: Bell },
+      { name: "Risk Exceptions", href: "/exceptions", icon: ShieldAlert },
+      { name: "Security Maturity", href: "/maturity", icon: Trophy },
       { name: "Runtime Security", href: "/runtime-security", icon: ShieldCheck, requiredFeature: "runtime_security", tierLabel: "Enterprise" },
     ],
   },
@@ -81,6 +88,7 @@ const navigationSections: NavigationSection[] = [
     color: "text-yellow-600 dark:text-yellow-400",
     items: [
       { name: "Code Quality", href: "/code-quality", icon: Code2, requiredFeature: "code_quality", tierLabel: "Pro" },
+      { name: "Developer Feedback", href: "/feedback", icon: MessageSquare },
       { name: "Policies", href: "/policies", icon: FileText },
       { name: "Deployments", href: "/docker/deployments", icon: Package },
       { name: "Artifacts", href: "/deploy/artifacts", icon: Box, requiredFeature: "vulnerability_scanning", tierLabel: "Pro" },
@@ -104,6 +112,7 @@ const navigationSections: NavigationSection[] = [
     color: "text-gray-600 dark:text-gray-400",
     items: [
       { name: "Platform Security", href: "/platform-security", icon: ShieldCheck },
+      { name: "Teams & Ownership", href: "/ownership", icon: Users },
       { name: "Settings", href: "/settings", icon: Settings },
     ],
   },

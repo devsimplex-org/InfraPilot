@@ -13,6 +13,7 @@ import {
 import { api } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
+import { FeatureGate } from "@/components/ui/FeatureGate";
 import { StatCard, MetricsGrid } from "@/components/ui/StatCard";
 import { Card } from "@/components/ui/Card";
 import { Table } from "@/components/ui/Table";
@@ -217,7 +218,7 @@ function formatTime(timestamp: string): string {
 // Main Component
 // =============================================================================
 
-export default function TrafficAnalyticsPage() {
+function TrafficAnalyticsPageContent() {
   const queryClient = useQueryClient();
 
   // State
@@ -1195,5 +1196,13 @@ export default function TrafficAnalyticsPage() {
         </Card.Body>
       </Card>
     </div>
+  );
+}
+
+export default function TrafficAnalyticsPage() {
+  return (
+    <FeatureGate feature="advanced_alerts" tier="professional" featureLabel="Traffic Analytics">
+      <TrafficAnalyticsPageContent />
+    </FeatureGate>
   );
 }
