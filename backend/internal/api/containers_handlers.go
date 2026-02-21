@@ -208,8 +208,10 @@ func (h *Handler) listContainersReal(c *gin.Context) {
 
 		// Get network names
 		networks := make([]string, 0)
-		for netName := range ctr.NetworkSettings.Networks {
-			networks = append(networks, netName)
+		if ctr.NetworkSettings != nil {
+			for netName := range ctr.NetworkSettings.Networks {
+				networks = append(networks, netName)
+			}
 		}
 
 		// Get real CPU/memory stats for running containers
@@ -823,8 +825,10 @@ func (h *Handler) listStacksReal(c *gin.Context) {
 
 		// Get network names
 		networks := make([]string, 0)
-		for netName := range ctr.NetworkSettings.Networks {
-			networks = append(networks, netName)
+		if ctr.NetworkSettings != nil {
+			for netName := range ctr.NetworkSettings.Networks {
+				networks = append(networks, netName)
+			}
 		}
 
 		stack.Containers = append(stack.Containers, ContainerResponse{
