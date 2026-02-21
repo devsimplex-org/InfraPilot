@@ -4,6 +4,7 @@ import { ReactNode, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { RefreshCw, Server, Download, Plus, Layers } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { DockerProvider, useDocker } from "@/lib/docker-context";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
@@ -12,6 +13,8 @@ import { Spinner } from "@/components/ui/Spinner";
 import { ContainerPanel } from "@/components/docker/ContainerPanel";
 import { DeploymentPanel } from "@/components/docker/DeploymentPanel";
 import { StackDeployWizard } from "@/components/StackDeployWizard";
+import { api } from "@/lib/api";
+import { Lock } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const tabs = [
@@ -20,7 +23,7 @@ const tabs = [
   { id: "images", label: "Images", href: "/docker/images" },
   { id: "volumes", label: "Volumes", href: "/docker/volumes" },
   { id: "networks", label: "Networks", href: "/docker/networks" },
-  { id: "stacks", label: "Stacks", href: "/docker/stacks" },
+  { id: "stacks", label: "Stacks", href: "/docker/stacks", requiredFeature: "stack_management", tierLabel: "Pro" },
   { id: "deployments", label: "Deployments", href: "/docker/deployments" },
   { id: "logs", label: "Logs", href: "/docker/logs" },
   { id: "registries", label: "Registries", href: "/docker/registries" },
@@ -32,6 +35,12 @@ function DockerLayoutContent({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const { activeAgents, selectedAgent, setSelectedAgent, isLoadingAgents } = useDocker();
   const [showStackDeployWizard, setShowStackDeployWizard] = useState(false);
+
+  const { data: licenseInfo } = useQuery({
+    queryKey: ["licenseTierInfo"],
+    queryFn: () => api.getLicenseTierInfo(),
+    staleTime: 60 * 1000,
+  });
 
   // Check if we're on a detail page (e.g., /docker/containers/[agentId]/[containerId])
   const isDetailPage = pathname.split("/").length > 3;
@@ -170,20 +179,38 @@ function DockerLayoutContent({ children }: { children: ReactNode }) {
       {/* Navigation Tabs */}
       <div className="border-b border-gray-200 dark:border-gray-700">
         <nav className="-mb-px flex space-x-8">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => router.push(tab.href)}
-              className={cn(
-                "whitespace-nowrap border-b-2 py-3 px-1 text-sm font-medium transition-colors",
-                activeTab === tab.id
-                  ? "border-primary-500 text-primary-600 dark:text-primary-400"
-                  : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-              )}
-            >
-              {tab.label}
-            </button>
-          ))}
+          {tabs.map((tab) => {
+            const isLocked =
+              !!tab.requiredFeature &&
+              !!licenseInfo &&
+              !licenseInfo.features.includes(tab.requiredFeature);
+
+            return (
+              <button
+                key={tab.id}
+                onClick={() => router.push(isLocked ? "/settings" : tab.href)}
+                title={isLocked ? `Requires ${tab.tierLabel} — click to manage license` : undefined}
+                className={cn(
+                  "inline-flex items-center gap-1.5 whitespace-nowrap border-b-2 py-3 px-1 text-sm font-medium transition-colors",
+                  isLocked
+                    ? "border-transparent text-gray-400 dark:text-gray-600 cursor-pointer opacity-70"
+                    : activeTab === tab.id
+                    ? "border-primary-500 text-primary-600 dark:text-primary-400"
+                    : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+                )}
+              >
+                {tab.label}
+                {isLocked && (
+                  <>
+                    <Lock className="h-3 w-3" />
+                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-700">
+                      {tab.tierLabel}
+                    </span>
+                  </>
+                )}
+              </button>
+            );
+          })}
         </nav>
       </div>
 
