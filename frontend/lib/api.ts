@@ -593,6 +593,17 @@ export interface SetupLicenseResponse {
   features: string[];
 }
 
+export interface LicenseSettingsResponse {
+  valid: boolean;
+  tier: string;
+  max_agents: number;
+  features: string[];
+  expires_at: string | null;
+  upgrade_url: string;
+  key_display: string; // masked key, e.g. "IP-CE-****-****-WG7U"
+  key_source: "env" | "database" | "setup_mode" | "offline";
+}
+
 // System Settings types
 export interface InfraPilotDomainSettings {
   domain: string;
@@ -4176,6 +4187,14 @@ export const api = {
 
   // License
   getLicenseInfo: () => fetchAPI<LicenseInfo>("/license"),
+
+  // License settings (admin)
+  getLicenseSettings: () => fetchAPI<LicenseSettingsResponse>("/settings/license"),
+  updateLicenseKey: (key: string) =>
+    fetchAPI<LicenseSettingsResponse>("/settings/license", {
+      method: "PUT",
+      body: JSON.stringify({ key }),
+    }),
 
   // SSO Providers (admin)
   getSSOProviders: () => fetchAPI<SSOProvider[]>("/sso/providers"),

@@ -648,6 +648,10 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				settings.PUT("/domain", h.updateInfraPilotDomain)
 				settings.DELETE("/domain", h.deleteInfraPilotDomain)
 
+				// License key management
+				settings.GET("/license", h.getLicenseSettings)
+				settings.PUT("/license", h.updateLicenseKey)
+
 				// Default pages
 				settings.GET("/default-pages", h.listDefaultPages)
 				settings.GET("/default-pages/:type", h.getDefaultPage)
