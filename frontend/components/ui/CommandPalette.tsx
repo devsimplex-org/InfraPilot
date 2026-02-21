@@ -356,7 +356,7 @@ const defaultNavigationItems: CommandItem[] = [
     label: "Users",
     description: "User management",
     icon: Users,
-    href: "/users",
+    href: "/settings/users",
     section: "Platform",
     keywords: ["user", "account", "admin"],
   },

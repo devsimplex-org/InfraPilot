@@ -259,11 +259,11 @@ func (h *Handler) runSecuritySelfCheck(c *gin.Context) {
 	orgID := c.MustGet("org_id").(uuid.UUID)
 
 	type CheckResult struct {
-		CheckName      string
-		Status         string
-		Severity       string
-		Message        string
-		Recommendation *string
+		CheckName      string  `json:"check_name"`
+		Status         string  `json:"status"`
+		Severity       string  `json:"severity"`
+		Message        string  `json:"message"`
+		Recommendation *string `json:"recommendation"`
 	}
 
 	query := `SELECT * FROM run_platform_security_selfcheck($1)`
