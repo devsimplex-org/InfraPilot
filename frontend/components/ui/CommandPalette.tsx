@@ -120,11 +120,11 @@ const defaultNavigationItems: CommandItem[] = [
   {
     id: "feedback",
     label: "Developer Feedback",
-    description: "Feedback and suggestions",
+    description: "VCS integration and scan feedback delivery",
     icon: MessageSquare,
     href: "/feedback",
-    section: "Build",
-    keywords: ["feedback", "developer", "suggestions"],
+    section: "Develop",
+    keywords: ["feedback", "developer", "vcs", "github", "gitlab", "pr"],
   },
   {
     id: "policies",
@@ -306,6 +306,26 @@ const defaultNavigationItems: CommandItem[] = [
     keywords: ["webhook", "integration", "hook"],
   },
 
+  // Security (additions)
+  {
+    id: "exceptions",
+    label: "Risk Exceptions",
+    description: "Manage security risk exceptions and waivers",
+    icon: ShieldAlert,
+    href: "/exceptions",
+    section: "Security",
+    keywords: ["exception", "risk", "waiver", "cve", "approve"],
+  },
+  {
+    id: "maturity",
+    label: "Security Maturity",
+    description: "Team security maturity scores and leaderboard",
+    icon: Trophy,
+    href: "/maturity",
+    section: "Security",
+    keywords: ["maturity", "score", "leaderboard", "assessment"],
+  },
+
   // Monitor
   {
     id: "background-jobs",
@@ -336,6 +356,24 @@ const defaultNavigationItems: CommandItem[] = [
   },
 
   // Platform
+  {
+    id: "infrastructure",
+    label: "Infrastructure",
+    description: "Docker networks, volumes, and system health",
+    icon: HardDrive,
+    href: "/platform/infrastructure",
+    section: "Infrastructure",
+    keywords: ["infrastructure", "networks", "volumes", "health", "docker"],
+  },
+  {
+    id: "ownership",
+    label: "Teams & Ownership",
+    description: "Service ownership and team management",
+    icon: Users,
+    href: "/ownership",
+    section: "Platform",
+    keywords: ["team", "owner", "ownership", "service"],
+  },
   {
     id: "platform-security",
     label: "Platform Security",
