@@ -72,11 +72,11 @@ const navigationSections: NavigationSection[] = [
     icon: Shield,
     color: "text-red-600 dark:text-red-400",
     items: [
-      { name: "Security Posture", href: "/security", icon: Shield, requiredFeature: "advanced_alerts", tierLabel: "Pro" },
+      { name: "Security Posture", href: "/security", icon: Shield, requiredFeature: "stack_management", tierLabel: "Pro" },
       { name: "Vulnerabilities", href: "/vulnerabilities", icon: AlertTriangle, requiredFeature: "vulnerability_scanning", tierLabel: "Pro" },
-      { name: "Alerts", href: "/alerts", icon: Bell, requiredFeature: "advanced_alerts", tierLabel: "Pro" },
-      { name: "Risk Exceptions", href: "/exceptions", icon: ShieldAlert, requiredFeature: "advanced_alerts", tierLabel: "Pro" },
-      { name: "Security Maturity", href: "/maturity", icon: Trophy, requiredFeature: "advanced_alerts", tierLabel: "Pro" },
+      { name: "Alerts", href: "/alerts", icon: Bell, requiredFeature: "stack_management", tierLabel: "Pro" },
+      { name: "Risk Exceptions", href: "/exceptions", icon: ShieldAlert, requiredFeature: "stack_management", tierLabel: "Pro" },
+      { name: "Security Maturity", href: "/maturity", icon: Trophy, requiredFeature: "stack_management", tierLabel: "Pro" },
       { name: "Runtime Security", href: "/runtime-security", icon: ShieldCheck, requiredFeature: "runtime_security", tierLabel: "Enterprise" },
     ],
   },
@@ -88,7 +88,7 @@ const navigationSections: NavigationSection[] = [
     items: [
       { name: "Code Quality", href: "/code-quality", icon: Code2, requiredFeature: "code_quality", tierLabel: "Pro" },
       { name: "Developer Feedback", href: "/feedback", icon: MessageSquare, requiredFeature: "code_quality", tierLabel: "Pro" },
-      { name: "Policies", href: "/policies", icon: FileText, requiredFeature: "advanced_alerts", tierLabel: "Pro" },
+      { name: "Policies", href: "/policies", icon: FileText, requiredFeature: "stack_management", tierLabel: "Pro" },
       { name: "Deployments", href: "/docker/deployments", icon: Package, requiredFeature: "stack_management", tierLabel: "Pro" },
       { name: "Artifacts", href: "/deploy/artifacts", icon: Box, requiredFeature: "vulnerability_scanning", tierLabel: "Pro" },
     ],
@@ -99,9 +99,9 @@ const navigationSections: NavigationSection[] = [
     icon: Activity,
     color: "text-green-600 dark:text-green-400",
     items: [
-      { name: "Background Jobs", href: "/monitor", icon: Activity, requiredFeature: "advanced_alerts", tierLabel: "Pro" },
-      { name: "Metrics & Reports", href: "/monitor/metrics", icon: BarChart3, requiredFeature: "advanced_alerts", tierLabel: "Pro" },
-      { name: "Dependencies", href: "/monitor/dependencies", icon: Globe, requiredFeature: "advanced_alerts", tierLabel: "Pro" },
+      { name: "Background Jobs", href: "/monitor", icon: Activity, requiredFeature: "stack_management", tierLabel: "Pro" },
+      { name: "Metrics & Reports", href: "/monitor/metrics", icon: BarChart3, requiredFeature: "stack_management", tierLabel: "Pro" },
+      { name: "Dependencies", href: "/monitor/dependencies", icon: Globe, requiredFeature: "stack_management", tierLabel: "Pro" },
     ],
   },
   {
