@@ -3,6 +3,14 @@
 import { ReactNode, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { RefreshCw, Server, Download, Plus, Layers } from "lucide-react";
+
+type Tab = {
+  id: string;
+  label: string;
+  href: string;
+  requiredFeature?: string;
+  tierLabel?: string;
+};
 import { useQueryClient } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
 import { DockerProvider, useDocker } from "@/lib/docker-context";
@@ -17,7 +25,7 @@ import { api } from "@/lib/api";
 import { Lock } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const tabGroups = [
+const tabGroups: { id: string; label: string; tabs: Tab[] }[] = [
   {
     id: "resources",
     label: "Resources",
