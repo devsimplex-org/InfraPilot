@@ -348,15 +348,6 @@ const defaultNavigationItems: CommandItem[] = [
 
   // Platform
   {
-    id: "infrastructure",
-    label: "Infrastructure",
-    description: "Docker networks, volumes, and system health",
-    icon: HardDrive,
-    href: "/platform/infrastructure",
-    section: "Infrastructure",
-    keywords: ["infrastructure", "networks", "volumes", "health", "docker"],
-  },
-  {
     id: "ownership",
     label: "Teams & Ownership",
     description: "Service ownership and team management",
