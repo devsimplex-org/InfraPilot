@@ -17,16 +17,39 @@ import { api } from "@/lib/api";
 import { Lock } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const tabs = [
-  { id: "overview", label: "Overview", href: "/docker" },
-  { id: "containers", label: "Containers", href: "/docker/containers" },
-  { id: "images", label: "Images", href: "/docker/images" },
-  { id: "volumes", label: "Volumes", href: "/docker/volumes" },
-  { id: "networks", label: "Networks", href: "/docker/networks" },
-  { id: "stacks", label: "Stacks", href: "/docker/stacks", requiredFeature: "stack_management", tierLabel: "Pro" },
-  { id: "deployments", label: "Deployments", href: "/docker/deployments", requiredFeature: "stack_management", tierLabel: "Pro" },
-  { id: "logs", label: "Logs", href: "/docker/logs" },
-  { id: "registries", label: "Registries", href: "/docker/registries" },
+const tabGroups = [
+  {
+    id: "resources",
+    label: "Resources",
+    tabs: [
+      { id: "overview",    label: "Overview",    href: "/docker" },
+      { id: "containers",  label: "Containers",  href: "/docker/containers" },
+      { id: "images",      label: "Images",      href: "/docker/images" },
+      { id: "volumes",     label: "Volumes",     href: "/docker/volumes" },
+      { id: "networks",    label: "Networks",    href: "/docker/networks" },
+      { id: "logs",        label: "Logs",        href: "/docker/logs" },
+      { id: "registries",  label: "Registries",  href: "/docker/registries" },
+    ],
+  },
+  {
+    id: "management",
+    label: "Management",
+    tabs: [
+      { id: "stacks",      label: "Stacks",      href: "/docker/stacks",      requiredFeature: "stack_management",       tierLabel: "Pro" },
+      { id: "deployments", label: "Deployments", href: "/docker/deployments", requiredFeature: "stack_management",       tierLabel: "Pro" },
+    ],
+  },
+  {
+    id: "security",
+    label: "Security",
+    tabs: [
+      { id: "vulnerabilities", label: "Vulnerabilities", href: "/docker/vulnerabilities",       requiredFeature: "vulnerability_scanning", tierLabel: "Pro" },
+      { id: "cves",            label: "CVEs",            href: "/docker/vulnerabilities/cves",  requiredFeature: "vulnerability_scanning", tierLabel: "Pro" },
+      { id: "artifacts",       label: "Artifacts",       href: "/docker/artifacts",             requiredFeature: "vulnerability_scanning", tierLabel: "Pro" },
+      { id: "scans",           label: "Scans",           href: "/docker/artifacts/scans",       requiredFeature: "vulnerability_scanning", tierLabel: "Pro" },
+      { id: "sboms",           label: "SBOMs",           href: "/docker/artifacts/sboms",       requiredFeature: "vulnerability_scanning", tierLabel: "Pro" },
+    ],
+  },
 ];
 
 function DockerLayoutContent({ children }: { children: ReactNode }) {
@@ -42,12 +65,21 @@ function DockerLayoutContent({ children }: { children: ReactNode }) {
     staleTime: 60 * 1000,
   });
 
-  // Check if we're on a detail page (e.g., /docker/containers/[agentId]/[containerId])
-  const isDetailPage = pathname.split("/").length > 3;
+  // Check if we're on a detail page — but NOT for known tab-level sub-paths
+  const parts = pathname.split("/");
+  const isTabSubPath = parts.length === 4 && (
+    parts[2] === "vulnerabilities" || parts[2] === "artifacts"
+  );
+  const isDetailPage = parts.length > 3 && !isTabSubPath;
 
   // Determine active tab from pathname
   const getActiveTab = () => {
     if (pathname === "/docker") return "overview";
+    if (pathname.startsWith("/docker/vulnerabilities/cves")) return "cves";
+    if (pathname.startsWith("/docker/vulnerabilities")) return "vulnerabilities";
+    if (pathname.startsWith("/docker/artifacts/scans")) return "scans";
+    if (pathname.startsWith("/docker/artifacts/sboms")) return "sboms";
+    if (pathname.startsWith("/docker/artifacts")) return "artifacts";
     const segment = pathname.split("/")[2];
     return segment || "overview";
   };
@@ -176,40 +208,54 @@ function DockerLayoutContent({ children }: { children: ReactNode }) {
         }
       />
 
-      {/* Navigation Tabs */}
+      {/* Navigation Tabs — grouped with separators */}
       <div className="border-b border-gray-200 dark:border-gray-700">
-        <nav className="-mb-px flex space-x-8">
-          {tabs.map((tab) => {
-            const isLocked =
-              !!tab.requiredFeature &&
-              (!licenseInfo || !licenseInfo.features.includes(tab.requiredFeature));
+        <nav className="-mb-px flex items-end">
+          {tabGroups.map((group, groupIndex) => (
+            <div key={group.id} className="flex items-end">
+              {groupIndex > 0 && (
+                <div className="h-5 w-px bg-gray-200 dark:bg-gray-700 mx-2 mb-3 self-end" />
+              )}
+              <div className="flex flex-col">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 px-3 pb-1">
+                  {group.label}
+                </span>
+                <div className="flex">
+                  {group.tabs.map((tab) => {
+                    const isLocked =
+                      !!tab.requiredFeature &&
+                      (!licenseInfo || !licenseInfo.features.includes(tab.requiredFeature));
 
-            return (
-              <button
-                key={tab.id}
-                onClick={() => router.push(isLocked ? "/settings/license" : tab.href)}
-                title={isLocked ? `Requires ${tab.tierLabel} — click to manage license` : undefined}
-                className={cn(
-                  "inline-flex items-center gap-1.5 whitespace-nowrap border-b-2 py-3 px-1 text-sm font-medium transition-colors",
-                  isLocked
-                    ? "border-transparent text-gray-400 dark:text-gray-600 cursor-pointer opacity-70"
-                    : activeTab === tab.id
-                    ? "border-primary-500 text-primary-600 dark:text-primary-400"
-                    : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-                )}
-              >
-                {tab.label}
-                {isLocked && (
-                  <>
-                    <Lock className="h-3 w-3" />
-                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-700">
-                      {tab.tierLabel}
-                    </span>
-                  </>
-                )}
-              </button>
-            );
-          })}
+                    return (
+                      <button
+                        key={tab.id}
+                        onClick={() => router.push(isLocked ? "/settings/license" : tab.href)}
+                        title={isLocked ? `Requires ${tab.tierLabel} — click to manage license` : undefined}
+                        className={cn(
+                          "inline-flex items-center gap-1.5 whitespace-nowrap border-b-2 py-3 px-3 text-sm font-medium transition-colors",
+                          isLocked
+                            ? "border-transparent text-gray-400 dark:text-gray-600 cursor-pointer opacity-70"
+                            : activeTab === tab.id
+                            ? "border-primary-500 text-primary-600 dark:text-primary-400"
+                            : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+                        )}
+                      >
+                        {tab.label}
+                        {isLocked && (
+                          <>
+                            <Lock className="h-3 w-3" />
+                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-700">
+                              {tab.tierLabel}
+                            </span>
+                          </>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          ))}
         </nav>
       </div>
 

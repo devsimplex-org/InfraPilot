@@ -169,8 +169,8 @@ const defaultNavigationItems: CommandItem[] = [
     label: "Vulnerabilities",
     description: "Vulnerability management",
     icon: AlertTriangle,
-    href: "/vulnerabilities",
-    section: "Deploy",
+    href: "/docker/vulnerabilities",
+    section: "Docker",
     keywords: ["vulnerability", "cve", "security"],
   },
   {
@@ -178,8 +178,8 @@ const defaultNavigationItems: CommandItem[] = [
     label: "SBOMs",
     description: "Software Bill of Materials",
     icon: Package,
-    href: "/sboms",
-    section: "Deploy",
+    href: "/docker/artifacts/sboms",
+    section: "Docker",
     keywords: ["sbom", "bom", "dependencies"],
   },
   {
