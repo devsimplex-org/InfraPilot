@@ -245,7 +245,7 @@ const defaultNavigationItems: CommandItem[] = [
     label: "Backups",
     description: "Backup management",
     icon: Archive,
-    href: "/data/backups",
+    href: "/data/databases/backups",
     section: "Data",
     keywords: ["backup", "recovery", "restore"],
   },

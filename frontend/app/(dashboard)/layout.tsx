@@ -59,7 +59,7 @@ const navigationSections: NavigationSection[] = [
     color: "text-cyan-600 dark:text-cyan-400",
     items: [
       { name: "Databases", href: "/data/databases", icon: Database, requiredFeature: "data_governance", tierLabel: "Enterprise" },
-      { name: "Backups", href: "/data/backups", icon: Archive, requiredFeature: "data_governance", tierLabel: "Enterprise" },
+      { name: "Backups", href: "/data/databases/backups", icon: Archive, requiredFeature: "data_governance", tierLabel: "Enterprise" },
       { name: "Secrets", href: "/data/secrets", icon: Key, requiredFeature: "secrets_management", tierLabel: "Pro" },
     ],
   },
