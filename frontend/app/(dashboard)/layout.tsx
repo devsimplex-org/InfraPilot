@@ -52,7 +52,6 @@ const navigationSections: NavigationSection[] = [
       { name: "Dashboard", href: "/", icon: LayoutDashboard },
       { name: "Docker", href: "/docker", icon: Container },
       { name: "Traffic", href: "/traffic", icon: Network },
-      { name: "Infrastructure", href: "/platform/infrastructure", icon: HardDrive },
     ],
   },
   {
