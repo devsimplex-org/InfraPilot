@@ -5,38 +5,69 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard,
   Container,
-  Globe,
-  FileText,
   Bell,
   Settings,
   LogOut,
-  Users,
   Menu,
   X,
-  Activity,
   Network,
   HardDrive,
-  Image,
+  Package,
+  Users,
+  Wrench,
+  Zap,
 } from "lucide-react";
 import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@/lib/auth";
 import { cn, isIPAddress } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { AlertBar } from "@/components/ui/alert-bar";
 import { api } from "@/lib/api";
+import { Navigation, NavigationSection } from "@/components/ui/Navigation";
+import { CommandPalette } from "@/components/ui/CommandPalette";
+import { Spinner } from "@/components/ui/Spinner";
 
-const navigation = [
-  { name: "Overview", href: "/", icon: LayoutDashboard },
-  { name: "Containers", href: "/containers", icon: Container },
-  { name: "Networks", href: "/docker/networks", icon: Network },
-  { name: "Volumes", href: "/docker/volumes", icon: HardDrive },
-  { name: "Images", href: "/docker/images", icon: Image },
-  { name: "Proxies", href: "/proxies", icon: Globe },
-  { name: "Logs", href: "/logs", icon: FileText },
-  { name: "Alerts", href: "/alerts", icon: Bell },
-  { name: "Health", href: "/health", icon: Activity },
-  { name: "Users", href: "/users", icon: Users },
-  { name: "Settings", href: "/settings", icon: Settings },
+const navigationSections: NavigationSection[] = [
+  {
+    id: "infrastructure",
+    label: "Infrastructure",
+    icon: HardDrive,
+    color: "text-blue-600 dark:text-blue-400",
+    items: [
+      { name: "Dashboard", href: "/", icon: LayoutDashboard },
+      { name: "Docker", href: "/docker", icon: Container },
+      { name: "Traffic", href: "/traffic", icon: Network },
+    ],
+  },
+  {
+    id: "deploy",
+    label: "Deploy",
+    icon: Package,
+    color: "text-yellow-600 dark:text-yellow-400",
+    items: [
+      { name: "Deployments", href: "/docker/deployments", icon: Package },
+    ],
+  },
+  {
+    id: "security",
+    label: "Security",
+    icon: Bell,
+    color: "text-red-600 dark:text-red-400",
+    items: [
+      { name: "Alerts", href: "/alerts", icon: Bell },
+    ],
+  },
+  {
+    id: "platform",
+    label: "Platform",
+    icon: Wrench,
+    color: "text-gray-600 dark:text-gray-400",
+    items: [
+      { name: "Users", href: "/settings/users", icon: Users },
+      { name: "Settings", href: "/settings", icon: Settings },
+    ],
+  },
 ];
 
 export default function DashboardLayout({
@@ -50,6 +81,14 @@ export default function DashboardLayout({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isChecking, setIsChecking] = useState(true);
   const [showDomainWarning, setShowDomainWarning] = useState(false);
+
+  // Fetch license tier info to enable feature gating in navigation
+  const { data: licenseInfo } = useQuery({
+    queryKey: ["licenseTierInfo"],
+    queryFn: () => api.getLicenseTierInfo(),
+    staleTime: 60 * 1000, // 1 min — short enough to reflect license changes quickly
+    enabled: !isChecking,
+  });
 
   // Check if accessing via IP address
   useEffect(() => {
@@ -88,6 +127,19 @@ export default function DashboardLayout({
       // Check for token in localStorage
       const token = localStorage.getItem("access_token");
       if (!token && !accessToken) {
+        // Check if setup is required before sending to login
+        try {
+          const res = await fetch("/api/v1/setup/status");
+          if (res.ok) {
+            const status = await res.json();
+            if (status.setup_required) {
+              router.replace("/setup");
+              return;
+            }
+          }
+        } catch {
+          // ignore — fall through to login
+        }
         router.replace("/login");
         return;
       }
@@ -121,7 +173,7 @@ export default function DashboardLayout({
   if (isChecking) {
     return (
       <div className="flex h-screen items-center justify-center bg-gray-100 dark:bg-gray-950">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+        <Spinner.Logo size="xl" label="Loading InfraPilot..." />
       </div>
     );
   }
@@ -146,7 +198,10 @@ export default function DashboardLayout({
         <div className="p-6 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2">
             <img src="/logo.svg" alt="InfraPilot" className="h-8 w-8" />
-            <span className="text-xl font-bold text-gray-900 dark:text-white">InfraPilot</span>
+            <div className="flex flex-col">
+              <span className="text-xl font-bold text-gray-900 dark:text-white leading-tight">InfraPilot</span>
+              <span className="text-[10px] font-medium text-primary-600 dark:text-primary-400 leading-tight">Community Edition</span>
+            </div>
           </Link>
           <button
             onClick={() => setSidebarOpen(false)}
@@ -157,31 +212,25 @@ export default function DashboardLayout({
         </div>
 
         <nav className="flex-1 px-3 overflow-y-auto">
-          <ul className="space-y-1">
-            {navigation.map((item) => {
-              const isActive =
-                pathname === item.href ||
-                (item.href !== "/" && pathname.startsWith(item.href));
-              return (
-                <li key={item.name}>
-                  <Link
-                    href={item.href}
-                    onClick={() => setSidebarOpen(false)}
-                    className={cn(
-                      "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
-                      isActive
-                        ? "bg-primary-600 text-white"
-                        : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800"
-                    )}
-                  >
-                    <item.icon className="h-5 w-5" />
-                    {item.name}
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
+          <Navigation
+            sections={navigationSections}
+            onItemClick={() => setSidebarOpen(false)}
+            enabledFeatures={licenseInfo?.features}
+          />
         </nav>
+
+        {/* Upgrade CTA */}
+        <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-800">
+          <a
+            href="https://infrapilot.org/enterprise"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 w-full px-3 py-2.5 bg-gradient-to-r from-primary-600 to-purple-600 hover:from-primary-700 hover:to-purple-700 text-white text-sm font-medium rounded-lg transition-all"
+          >
+            <Zap className="h-4 w-4 flex-shrink-0" />
+            <span>Upgrade to Pro / Enterprise</span>
+          </a>
+        </div>
 
         {/* Theme toggle */}
         <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-800">
@@ -226,7 +275,10 @@ export default function DashboardLayout({
           </button>
           <Link href="/" className="flex items-center gap-2">
             <img src="/logo.svg" alt="InfraPilot" className="h-6 w-6" />
-            <span className="text-lg font-semibold text-gray-900 dark:text-white">InfraPilot</span>
+            <div className="flex flex-col">
+              <span className="text-lg font-semibold text-gray-900 dark:text-white leading-tight">InfraPilot</span>
+              <span className="text-[10px] font-medium text-primary-600 dark:text-primary-400 leading-tight">Community Edition</span>
+            </div>
           </Link>
           <div className="w-10" />
         </header>
@@ -236,7 +288,7 @@ export default function DashboardLayout({
             <AlertBar
               variant="warning"
               message="You're accessing InfraPilot via IP address. Configure a domain for better security and SSL support."
-              action={{ label: "Set Up Domain", href: "/proxies" }}
+              action={{ label: "Set Up Domain", href: "/settings" }}
               dismissible
               onDismiss={handleDismissWarning}
             />
@@ -244,6 +296,9 @@ export default function DashboardLayout({
           <div className="flex-1 overflow-auto p-4 lg:p-8">{children}</div>
         </main>
       </div>
+
+      {/* Command Palette - accessible via Cmd+K or Ctrl+K */}
+      <CommandPalette />
     </div>
   );
 }

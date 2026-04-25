@@ -166,24 +166,8 @@ func (m *CertManager) RequestCertificate(domain string) error {
 	}
 
 	// Request certificate
-	// For apex domains (like example.com), automatically include www subdomain
-	domains := []string{domain}
-	if !strings.HasPrefix(domain, "*.") && !strings.HasPrefix(domain, "www.") {
-		// Check if this is an apex domain (not a subdomain like api.example.com)
-		parts := strings.Split(domain, ".")
-		if len(parts) == 2 {
-			// It's an apex domain - add www variant
-			wwwDomain := "www." + domain
-			domains = append(domains, wwwDomain)
-			m.logger.Info("Including www subdomain in certificate request",
-				zap.String("domain", domain),
-				zap.String("www_domain", wwwDomain),
-			)
-		}
-	}
-
 	request := certificate.ObtainRequest{
-		Domains: domains,
+		Domains: []string{domain},
 		Bundle:  true,
 	}
 
@@ -199,6 +183,102 @@ func (m *CertManager) RequestCertificate(domain string) error {
 
 	m.logger.Info("SSL certificate obtained successfully",
 		zap.String("domain", domain),
+	)
+
+	return nil
+}
+
+// RequestCertificateMulti requests a new SSL certificate for multiple domains (SAN certificate)
+// The first domain in the list is the primary domain and determines the certificate filename
+func (m *CertManager) RequestCertificateMulti(domains []string) error {
+	if len(domains) == 0 {
+		return fmt.Errorf("at least one domain is required")
+	}
+
+	primaryDomain := domains[0]
+
+	m.logger.Info("Requesting SSL certificate for multiple domains",
+		zap.Strings("domains", domains),
+		zap.String("primary", primaryDomain),
+		zap.Bool("staging", m.Staging),
+	)
+
+	// Get or create user
+	user, err := m.getOrCreateUser()
+	if err != nil {
+		return fmt.Errorf("failed to get user: %w", err)
+	}
+
+	// Create lego config
+	config := lego.NewConfig(user)
+	if m.Staging {
+		config.CADirURL = lego.LEDirectoryStaging
+	} else {
+		config.CADirURL = lego.LEDirectoryProduction
+	}
+	config.Certificate.KeyType = certcrypto.RSA2048
+
+	// Create client
+	client, err := lego.NewClient(config)
+	if err != nil {
+		return fmt.Errorf("failed to create ACME client: %w", err)
+	}
+
+	// Use HTTP-01 challenge with webroot
+	if m.WebRoot != "" {
+		if err := os.MkdirAll(m.WebRoot, 0755); err != nil {
+			return fmt.Errorf("failed to create webroot directory: %w", err)
+		}
+
+		provider, err := webroot.NewHTTPProvider(m.WebRoot)
+		if err != nil {
+			return fmt.Errorf("failed to create webroot provider: %w", err)
+		}
+		err = client.Challenge.SetHTTP01Provider(provider)
+		if err != nil {
+			return fmt.Errorf("failed to set HTTP-01 provider: %w", err)
+		}
+	} else {
+		err = client.Challenge.SetHTTP01Provider(http01.NewProviderServer("", "80"))
+		if err != nil {
+			return fmt.Errorf("failed to set HTTP-01 provider: %w", err)
+		}
+	}
+
+	// Register if needed
+	if user.Registration == nil {
+		reg, err := client.Registration.Register(registration.RegisterOptions{
+			TermsOfServiceAgreed: true,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to register: %w", err)
+		}
+		user.Registration = reg
+
+		if err := m.saveAccount(user); err != nil {
+			m.logger.Warn("Failed to save account", zap.Error(err))
+		}
+	}
+
+	// Request certificate for all domains
+	request := certificate.ObtainRequest{
+		Domains: domains,
+		Bundle:  true,
+	}
+
+	certificates, err := client.Certificate.Obtain(request)
+	if err != nil {
+		return fmt.Errorf("failed to obtain certificate: %w", err)
+	}
+
+	// Save certificates using the primary domain as filename
+	if err := m.saveCertificate(primaryDomain, certificates); err != nil {
+		return fmt.Errorf("failed to save certificate: %w", err)
+	}
+
+	m.logger.Info("SSL certificate obtained successfully for multiple domains",
+		zap.Strings("domains", domains),
+		zap.String("primary", primaryDomain),
 	)
 
 	return nil

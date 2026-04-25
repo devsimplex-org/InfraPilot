@@ -19,9 +19,14 @@ import (
 	"github.com/infrapilot/backend/internal/api"
 	"github.com/infrapilot/backend/internal/auth"
 	"github.com/infrapilot/backend/internal/config"
+	"github.com/infrapilot/backend/internal/crypto"
 	"github.com/infrapilot/backend/internal/db"
 	agentgrpc "github.com/infrapilot/backend/internal/grpc"
+	"github.com/infrapilot/backend/internal/license"
 )
+
+// version is injected at build time via -ldflags.
+var version = "dev"
 
 func main() {
 	// Initialize logger
@@ -68,7 +73,97 @@ func main() {
 		logger.Fatal("Failed to run migrations", zap.Error(err))
 	}
 
-	logger.Info("InfraPilot Community Edition started")
+	// ---------------------------------------------------------------
+	// License validation
+	// ---------------------------------------------------------------
+	var licenseClient *license.Client
+	if os.Getenv("LICENSE_OFFLINE") == "true" && cfg.Env != "production" {
+		licenseClient = license.NewOfflineClient(logger)
+	} else if cfg.LicenseKey != "" {
+		// ENV var set — validate immediately, but fall back to setup mode on failure
+		// so the operator can enter a new key via the UI rather than getting a crash loop.
+		licenseClient, err = license.NewClient(cfg.LicenseKey, cfg.DataDir, version, logger)
+		if err != nil {
+			logger.Warn("Failed to initialize license client — starting in setup mode",
+				zap.Error(err))
+			licenseClient = nil
+		} else {
+			resp, validateErr := licenseClient.Validate()
+			if validateErr != nil {
+				// Network error reaching infrapilot.org — keep the client so it can
+				// retry in the background; features will be restricted until reachable.
+				logger.Warn("License validation failed at startup — features restricted until infrapilot.org is reachable",
+					zap.Error(validateErr))
+			} else if !resp.Valid {
+				// Key is explicitly rejected — drop to setup mode so the user can
+				// enter a valid key via the web UI instead of crash-looping.
+				logger.Warn("LICENSE_KEY is invalid — starting in setup mode",
+					zap.String("error", resp.Error),
+					zap.String("hint", "Visit http://localhost/setup to enter a valid license key"),
+				)
+				licenseClient = nil
+			} else {
+				logger.Info("License validated",
+					zap.String("tier", resp.Tier),
+					zap.Int("max_agents", resp.MaxAgents),
+				)
+			}
+		}
+		if licenseClient == nil {
+			licenseClient = license.NewSetupModeClient(logger)
+		}
+	} else {
+		// Try to load license key from system_settings (saved via setup wizard)
+		var savedKey string
+		pool.QueryRow(ctx, `
+			SELECT setting_value->>'key' FROM system_settings
+			WHERE org_id = '00000000-0000-0000-0000-000000000001'
+			AND setting_key = 'license_key'
+		`).Scan(&savedKey)
+
+		if savedKey != "" {
+			licenseClient, err = license.NewClient(savedKey, cfg.DataDir, version, logger)
+			if err == nil {
+				resp, validateErr := licenseClient.Validate()
+				if validateErr == nil && resp != nil && resp.Valid {
+					logger.Info("License loaded from database", zap.String("tier", resp.Tier))
+				} else if validateErr != nil {
+					// Network error reaching infrapilot.org — keep the client.
+					// HasFeature() returns false until validation succeeds (safe default).
+					// Retries happen automatically, throttled to once per 5 minutes.
+					logger.Warn("License validation failed at startup — features restricted until infrapilot.org is reachable",
+						zap.Error(validateErr))
+				} else {
+					// resp.Valid == false: key is explicitly invalid
+					logger.Warn("License key stored in database is invalid — starting in setup mode",
+						zap.String("reason", resp.Error))
+					licenseClient = nil
+				}
+			} else {
+				logger.Error("Failed to create license client", zap.Error(err))
+				licenseClient = nil
+			}
+		}
+
+		if licenseClient == nil {
+			licenseClient = license.NewSetupModeClient(logger)
+		}
+	}
+
+	logger.Info("InfraPilot started", zap.String("version", version), zap.String("tier", licenseClient.Tier()))
+
+	// Initialize encryption service (optional but recommended)
+	var encryptionSvc *crypto.EncryptionService
+	if cfg.EncryptionKey != "" {
+		var err error
+		encryptionSvc, err = crypto.NewEncryptionService(cfg.EncryptionKey)
+		if err != nil {
+			logger.Fatal("Failed to initialize encryption service", zap.Error(err))
+		}
+		logger.Info("Encryption service initialized")
+	} else {
+		logger.Warn("ENCRYPTION_KEY not set - webhook signature verification and credential encryption will be disabled")
+	}
 
 	// Initialize auth service
 	authService := auth.NewService(cfg.JWTSecret, cfg.JWTExpiry)
@@ -84,7 +179,7 @@ func main() {
 	router.Use(api.CORSMiddleware(cfg.AllowedOrigins))
 
 	// Setup API routes
-	apiHandler := api.NewHandler(pool, authService, logger)
+	apiHandler := api.NewHandler(pool, authService, logger, encryptionSvc, licenseClient, cfg, version)
 	apiHandler.RegisterRoutes(router)
 
 	httpServer := &http.Server{

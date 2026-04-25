@@ -92,7 +92,14 @@ type ImageInfo struct {
 
 // PullImageRequest is the request body for pulling an image
 type PullImageRequest struct {
-	Image string `json:"image" binding:"required"`
+	Image      string  `json:"image" binding:"required"`
+}
+
+// DockerAuthConfig represents authentication for Docker registry operations
+type DockerAuthConfig struct {
+	Username      string `json:"username,omitempty"`
+	Password      string `json:"password,omitempty"`
+	ServerAddress string `json:"server_address,omitempty"`
 }
 
 // ============ Network Handlers ============
@@ -772,10 +779,13 @@ func (h *Handler) pullDockerImage(c *gin.Context) {
 		return
 	}
 
-	cmdPayload, _ := json.Marshal(agentgrpc.DockerResourceCommand{
+	// CE: No authenticated registry support; pull images without auth
+	dockerCmd := agentgrpc.DockerResourceCommand{
 		Action:   agentgrpc.DockerActionPullImage,
 		ImageRef: req.Image,
-	})
+	}
+
+	cmdPayload, _ := json.Marshal(dockerCmd)
 	cmd := &agentgrpc.BackendMessage{
 		RequestId: uuid.New().String(),
 		Type:      "docker",
@@ -807,6 +817,7 @@ func (h *Handler) pullDockerImage(c *gin.Context) {
 
 	c.JSON(http.StatusInternalServerError, gin.H{"error": "unexpected response"})
 }
+
 
 // deleteDockerImage removes a Docker image
 // DELETE /api/v1/agents/:id/docker/images/:imgid

@@ -8,7 +8,7 @@
 #     -v /var/run/docker.sock:/var/run/docker.sock \
 #     -v infrapilot_data:/data \
 #     -e JWT_SECRET=your-secret-key \
-#     devsimplex/infrapilot
+#     ghcr.io/tybali/infrapilot-ce
 # =============================================================
 
 # -------------------------------------------------------------
@@ -25,9 +25,9 @@ RUN cd backend && go mod download
 
 COPY backend/ ./backend/
 
+ARG VERSION=dev
 RUN cd backend && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-    -ldflags="-w -s" \
-    -a -installsuffix cgo \
+    -ldflags="-X main.version=${VERSION} -w -s" \
     -o /backend ./cmd/server
 
 # -------------------------------------------------------------
@@ -46,7 +46,6 @@ COPY agent/ ./agent/
 
 RUN cd agent && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags="-w -s" \
-    -a -installsuffix cgo \
     -o /agent ./cmd/agent
 
 # -------------------------------------------------------------
@@ -83,21 +82,21 @@ FROM alpine:3.21
 # -------------------------------------------------------------
 
 # Human-readable name of the image
-LABEL org.opencontainers.image.title="InfraPilot"
+LABEL org.opencontainers.image.title="InfraPilot CE"
 # Short description shown on Docker Hub search & repo page
-LABEL org.opencontainers.image.description="Open-source control plane for Docker, NGINX, and self-hosted infrastructure"
+LABEL org.opencontainers.image.description="Open-source community edition control plane for Docker, NGINX, and self-hosted infrastructure"
 # Project homepage (can be same as repo or website)
 LABEL org.opencontainers.image.url="https://infrapilot.org"
 # Source code repository (VERY IMPORTANT)
-LABEL org.opencontainers.image.source="https://github.com/devsimplex-org/infrapilot"
+LABEL org.opencontainers.image.source="https://github.com/tybali/infrapilot-ce"
 # Documentation / README link (Docker Hub auto-links this)
-LABEL org.opencontainers.image.documentation="https://github.com/devsimplex-org/infrapilot#readme"
+LABEL org.opencontainers.image.documentation="https://github.com/tybali/infrapilot-ce#readme"
 # License identifier (SPDX format)
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 # Organization / vendor name
-LABEL org.opencontainers.image.vendor="DevSimplex"
+LABEL org.opencontainers.image.vendor="tybali"
 # Author / maintainer (optional but professional)
-LABEL org.opencontainers.image.authors="DevSimplex <hello@devsimplex.com>"
+LABEL org.opencontainers.image.authors="tybali"
 # Image version (should match git tag or release)
 LABEL org.opencontainers.image.version="1.0.0"
 # Build creation time (auto-filled during build)
@@ -112,7 +111,7 @@ LABEL org.opencontainers.image.revision=$VCS_REF
 
 
 
-# Install runtime dependencies
+# Install runtime dependencies (including PostgreSQL 17 + TimescaleDB for nginx log analytics)
 RUN apk add --no-cache \
     ca-certificates \
     tzdata \
@@ -121,13 +120,35 @@ RUN apk add --no-cache \
     npm \
     docker-cli \
     supervisor \
-    postgresql16 \
-    postgresql16-contrib \
+    postgresql17 \
+    postgresql17-contrib \
+    postgresql-timescaledb \
     redis \
     curl \
+    wget \
+    bash \
     su-exec \
     apache2-utils \
     && rm -rf /var/cache/apk/*
+
+# Install Trivy for vulnerability scanning
+RUN wget -q -O /tmp/install-trivy.sh https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh && \
+    chmod +x /tmp/install-trivy.sh && \
+    (/tmp/install-trivy.sh -b /usr/local/bin || (sleep 5 && /tmp/install-trivy.sh -b /usr/local/bin)) && \
+    rm /tmp/install-trivy.sh && \
+    trivy --version
+
+# Install Syft for SBOM generation
+RUN wget -q -O /tmp/install-syft.sh https://raw.githubusercontent.com/anchore/syft/main/install.sh && \
+    chmod +x /tmp/install-syft.sh && \
+    (/tmp/install-syft.sh -b /usr/local/bin || (sleep 5 && /tmp/install-syft.sh -b /usr/local/bin)) && \
+    rm /tmp/install-syft.sh && \
+    syft version
+
+# Install OPA (Open Policy Agent) for policy evaluation
+RUN wget -q -O /usr/local/bin/opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64_static && \
+    chmod +x /usr/local/bin/opa && \
+    opa version
 
 # Create directories
 RUN mkdir -p \

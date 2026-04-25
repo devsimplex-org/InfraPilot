@@ -59,19 +59,28 @@ mkdir -p \
     "$DATA_DIR/redis" \
     "$DATA_DIR/nginx/conf.d" \
     "$DATA_DIR/nginx/logs" \
+    "$DATA_DIR/nginx/logs/domains" \
     "$DATA_DIR/nginx/certs" \
     "$DATA_DIR/letsencrypt" \
     "$DATA_DIR/agent" \
     /var/log/supervisor \
-    /var/log/nginx \
     /run/postgresql \
     /var/www/acme-challenge/.well-known/acme-challenge \
     /var/www/html
 
 # Set permissions
 chmod 755 /var/log/supervisor
-chmod 755 /var/log/nginx
 chmod 755 /run/postgresql
+chmod 755 "$DATA_DIR/nginx/logs"
+chmod 755 "$DATA_DIR/nginx/logs/domains"
+
+# Symlink nginx logs directory for persistence
+mkdir -p "$DATA_DIR/nginx/logs/domains"
+if [ ! -L /var/log/nginx ]; then
+    rm -rf /var/log/nginx
+    ln -s "$DATA_DIR/nginx/logs" /var/log/nginx
+    echo "[*] Nginx logs symlinked to $DATA_DIR/nginx/logs for persistence"
+fi
 
 # Symlink letsencrypt directory for persistence
 if [ ! -L /etc/letsencrypt ]; then
@@ -102,6 +111,13 @@ if [ "$EMBEDDED_DB" = "true" ]; then
         echo "host all all 0.0.0.0/0 md5" >> "$DATA_DIR/postgres/pg_hba.conf"
         sed -i "s/#listen_addresses = 'localhost'/listen_addresses = 'localhost'/" "$DATA_DIR/postgres/postgresql.conf"
         echo "unix_socket_directories = '/run/postgresql'" >> "$DATA_DIR/postgres/postgresql.conf"
+
+        # Enable TimescaleDB extension for nginx log analytics
+        # This allows time-series optimizations for access log storage
+        if ls /usr/lib/postgresql17/timescaledb*.so >/dev/null 2>&1; then
+            echo "[*] Enabling TimescaleDB extension..."
+            echo "shared_preload_libraries = 'timescaledb'" >> "$DATA_DIR/postgres/postgresql.conf"
+        fi
 
         # Start PostgreSQL temporarily
         echo "[*] Starting PostgreSQL for initial setup..."
@@ -177,11 +193,17 @@ http {
     include /etc/nginx/mime.types;
     default_type application/octet-stream;
 
+    # Standard combined log format
     log_format main '$remote_addr - $remote_user [$time_local] "$request" '
                     '$status $body_bytes_sent "$http_referer" '
                     '"$http_user_agent" "$http_x_forwarded_for"';
 
-    access_log /var/log/nginx/access.log main;
+    # Extended log format for InfraPilot analytics (includes request_time and host)
+    log_format infrapilot_analytics '$remote_addr - $remote_user [$time_local] "$request" '
+                                    '$status $body_bytes_sent "$http_referer" '
+                                    '"$http_user_agent" $request_time "$host" "$upstream_addr"';
+
+    access_log /var/log/nginx/access.log infrapilot_analytics;
 
     sendfile on;
     tcp_nopush on;

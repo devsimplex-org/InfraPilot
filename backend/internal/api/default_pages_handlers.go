@@ -233,8 +233,10 @@ func (h *Handler) updateDefaultPage(c *gin.Context) {
 	// Audit log
 	h.auditLog(c, userID, orgID, "settings.default_pages.update", "default_pages", resultPage.ID, req)
 
-	// If this is the welcome page, regenerate the static HTML file on the agent
-	if pageType == "welcome" {
+	// Regenerate static HTML files on the agent when relevant page types change.
+	// Welcome page controls welcome.html; 502/maintenance control 502.html (upstream error fallback).
+	switch pageType {
+	case "welcome", "502", "maintenance":
 		go h.regenerateWelcomePage(orgID)
 	}
 

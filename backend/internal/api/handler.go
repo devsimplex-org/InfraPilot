@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -10,20 +12,34 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/infrapilot/backend/internal/auth"
+	"github.com/infrapilot/backend/internal/config"
+	"github.com/infrapilot/backend/internal/crypto"
 	agentgrpc "github.com/infrapilot/backend/internal/grpc"
+	"github.com/infrapilot/backend/internal/license"
+	"github.com/infrapilot/backend/internal/webhook"
 )
 
 type Handler struct {
-	db     *pgxpool.Pool
-	auth   *auth.Service
-	logger *zap.Logger
+	db            *pgxpool.Pool
+	auth          *auth.Service
+	logger        *zap.Logger
+	webhookService *webhook.Service
+	encryptionSvc *crypto.EncryptionService
+	license       *license.Client
+	cfg           *config.Config
+	version       string
 }
 
-func NewHandler(db *pgxpool.Pool, authService *auth.Service, logger *zap.Logger) *Handler {
+func NewHandler(db *pgxpool.Pool, authService *auth.Service, logger *zap.Logger, encryptionSvc *crypto.EncryptionService, licenseClient *license.Client, cfg *config.Config, version string) *Handler {
 	return &Handler{
-		db:     db,
-		auth:   authService,
-		logger: logger,
+		db:             db,
+		auth:           authService,
+		logger:         logger,
+		webhookService: webhook.NewService(db, logger, encryptionSvc),
+		encryptionSvc:  encryptionSvc,
+		license:        licenseClient,
+		cfg:            cfg,
+		version:        version,
 	}
 }
 
@@ -34,8 +50,14 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	// API v1 routes
 	v1 := r.Group("/api/v1")
 	{
+		// Version (public)
+		v1.GET("/version", func(c *gin.Context) {
+			c.JSON(200, gin.H{"version": h.version, "edition": "community"})
+		})
+
 		// Setup routes (public - only work when no users exist)
 		v1.GET("/setup/status", h.getSetupStatus)
+		v1.POST("/setup/license", h.setupLicense)
 		v1.POST("/setup", h.createInitialAdmin)
 
 		// Auth routes (public)
@@ -52,6 +74,17 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 			authGroup.POST("/mfa/confirm", h.AuthMiddleware(), h.confirmMFASetup)
 			authGroup.POST("/mfa/disable", h.AuthMiddleware(), h.disableMFA)
 			authGroup.POST("/mfa/backup-codes", h.AuthMiddleware(), h.regenerateBackupCodes)
+
+			// Sensitive operation verification (requires auth)
+			authGroup.POST("/verify-password", h.AuthMiddleware(), h.verifyPassword)
+			authGroup.POST("/send-confirmation-otp", h.AuthMiddleware(), h.sendConfirmationOTP)
+			authGroup.POST("/verify-confirmation-otp", h.AuthMiddleware(), h.verifyConfirmationOTP)
+		}
+
+		// Webhook receiver (public - uses signature verification)
+		webhooks := v1.Group("/webhooks")
+		{
+			webhooks.POST("/:id/receive", h.receiveWebhook)
 		}
 
 		// Protected routes
@@ -71,15 +104,22 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				// Proxy hosts
 				agents.GET("/:id/proxies", h.listProxyHosts)
 				agents.POST("/:id/proxies", h.RequireModifyProxy(), h.createProxyHost)
+				agents.POST("/:id/proxies/test-network", h.RequireModifyProxy(), h.testNetworkConnectivity)
 				agents.GET("/:id/proxies/:pid", h.getProxyHost)
 				agents.PUT("/:id/proxies/:pid", h.RequireModifyProxy(), h.updateProxyHost)
 				agents.DELETE("/:id/proxies/:pid", h.RequireModifyProxy(), h.deleteProxyHost)
 				agents.POST("/:id/proxies/:pid/ssl", h.RequireModifyProxy(), h.requestSSL)
 				agents.POST("/:id/proxies/:pid/ssl/wildcard", h.RequireModifyProxy(), h.applyWildcardSSL)
 				agents.GET("/:id/proxies/:pid/config", h.getProxyConfig)
+				agents.POST("/:id/proxies/:pid/config/preview", h.RequireModifyProxy(), h.previewProxyConfig)
 				agents.POST("/:id/proxies/:pid/test", h.RequireModifyProxy(), h.testProxyConfig)
 				agents.GET("/:id/proxies/:pid/security-headers", h.getSecurityHeaders)
 				agents.PUT("/:id/proxies/:pid/security-headers", h.RequireModifyProxy(), h.updateSecurityHeaders)
+
+				// Basic auth users
+				agents.GET("/:id/proxies/:pid/auth-users", h.listAuthUsers)
+				agents.POST("/:id/proxies/:pid/auth-users", h.RequireModifyProxy(), h.createAuthUser)
+				agents.DELETE("/:id/proxies/:pid/auth-users/:uid", h.RequireModifyProxy(), h.deleteAuthUser)
 
 				// Nginx management
 				agents.POST("/:id/nginx/test", h.RequireModifyProxy(), h.testNginxConfig)
@@ -97,6 +137,12 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				agents.POST("/:id/containers/:cid/start", h.RequireModifyContainers(), h.startContainerReal)
 				agents.POST("/:id/containers/:cid/stop", h.RequireModifyContainers(), h.stopContainerReal)
 				agents.POST("/:id/containers/:cid/restart", h.RequireModifyContainers(), h.restartContainerReal)
+				agents.POST("/:id/containers/:cid/pause", h.RequireModifyContainers(), h.pauseContainerReal)
+				agents.POST("/:id/containers/:cid/unpause", h.RequireModifyContainers(), h.unpauseContainerReal)
+				agents.POST("/:id/containers/:cid/kill", h.RequireModifyContainers(), h.killContainerReal)
+				agents.POST("/:id/containers/:cid/rename", h.RequireModifyContainers(), h.renameContainerReal)
+				agents.PUT("/:id/containers/:cid", h.RequireModifyContainers(), h.updateContainerReal)
+				agents.GET("/:id/containers/:cid/inspect", h.inspectContainerReal)
 				agents.DELETE("/:id/containers/:cid", h.RequireModifyContainers(), h.deleteContainerReal)
 				agents.GET("/:id/containers/:cid/logs", h.getContainerLogsReal)
 				agents.GET("/:id/containers/:cid/logs/stream", h.streamContainerLogs)
@@ -138,11 +184,109 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				agents.GET("/:id/logs/unified", h.getUnifiedLogsReal)
 				agents.GET("/:id/logs/stream", h.streamUnifiedLogs)
 
-				// Databases
-				agents.GET("/:id/databases", h.listDatabases)
-				agents.POST("/:id/databases", h.RequireModifyContainers(), h.addDatabase)
-				agents.DELETE("/:id/databases/:did", h.RequireModifyContainers(), h.removeDatabase)
-				agents.GET("/:id/databases/:did/metrics", h.getDatabaseMetrics)
+				// Deployments & Webhooks
+				agents.GET("/:id/deployments", h.listDeployments)
+				agents.POST("/:id/deployments", h.RequireModifyContainers(), h.createDeployment)
+				agents.GET("/:id/deployments/:did", h.getDeployment)
+				agents.GET("/:id/deployments/:did/spine", h.getDeploymentSpine)
+				agents.POST("/:id/deployments/:did/rollback", h.RequireModifyContainers(), h.rollbackDeployment)
+				agents.POST("/:id/deployments/:did/redeploy", h.RequireModifyContainers(), h.redeployDeployment)
+				agents.DELETE("/:id/deployments/:did", h.RequireModifyContainers(), h.deleteDeployment)
+				agents.POST("/:id/deployments/sync", h.syncDeploymentStatus)
+
+				// Managed Stacks (multi-service docker-compose deployments)
+				agents.POST("/:id/stacks/parse", h.RequireModifyContainers(), h.parseComposeYAML)
+				agents.POST("/:id/managed-stacks", h.RequireModifyContainers(), h.createStack)
+				agents.GET("/:id/managed-stacks", h.listManagedStacks)
+				agents.GET("/:id/managed-stacks/:sid", h.getManagedStack)
+				agents.GET("/:id/managed-stacks/:sid/progress", h.getStackProgress)
+				agents.DELETE("/:id/managed-stacks/:sid", h.RequireModifyContainers(), h.deleteManagedStack)
+
+				agents.GET("/:id/webhooks", h.listWebhooks)
+				agents.POST("/:id/webhooks", h.RequireModifyContainers(), h.createWebhook)
+				agents.GET("/:id/webhooks/:wid", h.getWebhook)
+				agents.PUT("/:id/webhooks/:wid", h.RequireModifyContainers(), h.updateWebhook)
+				agents.DELETE("/:id/webhooks/:wid", h.RequireModifyContainers(), h.deleteWebhook)
+				agents.GET("/:id/webhooks/:wid/events", h.listWebhookEvents)
+				agents.POST("/:id/webhooks/:wid/regenerate", h.RequireModifyContainers(), h.regenerateWebhookSecret)
+		}
+
+			// Services view (cross-agent)
+			protected.GET("/services", h.listServices)
+			protected.GET("/services/:name/deployments", h.listServiceDeployments)
+			protected.GET("/services/:name/current", h.getCurrentDeployment)
+
+			// WebSocket helpers
+			protected.GET("/pulls/ws", h.pullWebSocket)
+
+			// License info (authenticated users can see their tier)
+			protected.GET("/license", h.LicenseInfo)
+
+			// Traffic & Exposure Governance (Epic 13)
+			exposure := protected.Group("/exposure")
+			{
+				exposure.GET("/endpoints", h.listExposedEndpoints)
+				exposure.GET("/endpoints/:id", h.getExposedEndpoint)
+				exposure.POST("/endpoints", h.RequireManageAlerts(), h.createExposedEndpoint)
+				exposure.PUT("/endpoints/:id", h.RequireManageAlerts(), h.updateExposedEndpoint)
+				exposure.DELETE("/endpoints/:id", h.RequireManageAlerts(), h.deleteExposedEndpoint)
+				exposure.GET("/summary", h.getExposureSummary)
+				exposure.GET("/map", h.getExposureMap)
+			}
+
+			// Rate Limit Profiles (Epic 13)
+			ratelimits := protected.Group("/ratelimits")
+			{
+				ratelimits.GET("/profiles", h.listRateLimitProfiles)
+				ratelimits.POST("/profiles", h.RequireManageAlerts(), h.createRateLimitProfile)
+				ratelimits.PUT("/profiles/:id", h.RequireManageAlerts(), h.updateRateLimitProfile)
+				ratelimits.DELETE("/profiles/:id", h.RequireManageAlerts(), h.deleteRateLimitProfile)
+			}
+
+			// TLS Governance (Epic 13)
+			tls := protected.Group("/tls")
+			{
+				tls.GET("/posture", h.getTLSPosture)
+				tls.GET("/scans", h.listTLSScans)
+				tls.GET("/config", h.getTLSAlertConfig)
+				tls.PUT("/config", h.RequireManageAlerts(), h.updateTLSAlertConfig)
+			}
+
+			// Traffic Resources & Policies (Epic 13 v2)
+			traffic := protected.Group("/traffic")
+			{
+				// Traffic summary
+				traffic.GET("/summary", h.getTrafficSummary)
+
+				// Traffic Resources
+				traffic.GET("/resources", h.listTrafficResources)
+				traffic.GET("/resources/:id", h.getTrafficResource)
+				traffic.POST("/resources", h.RequireManageAlerts(), h.createTrafficResource)
+				traffic.PUT("/resources/:id", h.RequireManageAlerts(), h.updateTrafficResource)
+				traffic.DELETE("/resources/:id", h.RequireManageAlerts(), h.deleteTrafficResource)
+
+				// Traffic Resource Upstreams
+				traffic.GET("/resources/:id/upstreams", h.listTrafficUpstreams)
+				traffic.POST("/resources/:id/upstreams", h.RequireManageAlerts(), h.createTrafficUpstream)
+
+				// Traffic Resource Apply/Validate/Rollback
+				traffic.POST("/resources/:id/apply", h.RequireManageAlerts(), h.applyTrafficResource)
+				traffic.POST("/resources/:id/dry-run", h.RequireManageAlerts(), h.dryRunTrafficResource)
+				traffic.POST("/resources/:id/rollback", h.RequireManageAlerts(), h.rollbackTrafficResource)
+				traffic.GET("/resources/:id/config-preview", h.getTrafficResourceConfigPreview)
+
+				// Traffic Resource History
+				traffic.GET("/resources/:id/history", h.getTrafficApplyHistory)
+
+				// Traffic Policies
+				traffic.GET("/policies", h.listTrafficPolicies)
+				traffic.GET("/policies/:id", h.getTrafficPolicy)
+				traffic.POST("/policies", h.RequireManageAlerts(), h.createTrafficPolicy)
+				traffic.PUT("/policies/:id", h.RequireManageAlerts(), h.updateTrafficPolicy)
+				traffic.DELETE("/policies/:id", h.RequireManageAlerts(), h.deleteTrafficPolicy)
+
+				// Policy Assignment
+				traffic.POST("/policies/:id/assign", h.RequireManageAlerts(), h.assignTrafficPolicy)
 			}
 
 			// Alerts
@@ -167,9 +311,6 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 			protected.GET("/health/database", h.getDBHealth)
 			protected.GET("/health/system", h.getSystemHealth)
 
-			// Audit
-			protected.GET("/audit", h.getAuditLogsReal)
-
 			// Users (super_admin only)
 			users := protected.Group("/users")
 			users.Use(h.RequireRole(auth.RoleSuperAdmin))
@@ -189,11 +330,19 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				settings.PUT("/domain", h.updateInfraPilotDomain)
 				settings.DELETE("/domain", h.deleteInfraPilotDomain)
 
+				// License key management
+				settings.GET("/license", h.getLicenseSettings)
+				settings.PUT("/license", h.updateLicenseKey)
+
 				// Default pages
 				settings.GET("/default-pages", h.listDefaultPages)
 				settings.GET("/default-pages/:type", h.getDefaultPage)
 				settings.PUT("/default-pages/:type", h.updateDefaultPage)
 				settings.GET("/default-pages/:type/preview", h.previewDefaultPage)
+
+				// Self-update (CE only)
+				settings.GET("/update/check", h.checkForUpdate)
+				settings.POST("/update/apply", h.applyUpdate)
 			}
 
 			// SSL/TLS Management
@@ -206,6 +355,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				ssl.GET("/status", h.getSSLStatus)
 				ssl.PUT("/settings", h.RequireRole(auth.RoleSuperAdmin), h.updateSSLSettings)
 				ssl.POST("/request", h.RequireRole(auth.RoleSuperAdmin), h.requestSSLCertificate)
+			ssl.POST("/upload", h.RequireRole(auth.RoleSuperAdmin), h.uploadSSLCertificate)
 
 				// DNS-01 Challenge (for wildcard certificates)
 				ssl.POST("/dns-challenge/start", h.RequireRole(auth.RoleSuperAdmin), h.startDNSChallenge)
@@ -232,19 +382,24 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 
 		// Log ingestion (agents push logs)
 		v1.POST("/logs/ingest", h.IngestLogs)
+
+		// Nginx log ingestion (agents push nginx access logs)
+		v1.POST("/logs/nginx/ingest", h.IngestNginxLogs)
 	}
 
-	// Protected log routes (require auth)
-	logs := v1.Group("/logs")
-	logs.Use(h.AuthMiddleware())
-	logs.Use(h.OrgMiddleware())
+	// Traffic analytics routes (protected, require auth)
+	analytics := v1.Group("/traffic/analytics")
+	analytics.Use(h.AuthMiddleware())
+	analytics.Use(h.OrgMiddleware())
 	{
-		logs.GET("/persisted", h.GetPersistedLogs)
-		logs.GET("/sources", h.GetLogSources)
-		logs.GET("/retention", h.GetLogRetentionConfig)
-		logs.PUT("/retention", h.RequireRole(auth.RoleSuperAdmin), h.UpdateLogRetentionConfig)
-		logs.GET("/stats", h.GetLogStats)
-		logs.POST("/cleanup", h.RequireRole(auth.RoleSuperAdmin), h.RunLogCleanup)
+		analytics.GET("", h.GetTrafficAnalytics)
+		analytics.GET("/summary", h.GetTrafficAnalyticsSummary)
+		analytics.GET("/top-paths", h.GetTopPaths)
+		analytics.GET("/status-codes", h.GetStatusCodeDistribution)
+		analytics.GET("/domains", h.GetLogDomains)
+		analytics.GET("/methods", h.GetMethodDistribution)
+		analytics.GET("/clients", h.GetTopClients)
+		analytics.GET("/user-agents", h.GetUserAgentStats)
 	}
 }
 
@@ -253,6 +408,7 @@ func (h *Handler) healthCheck(c *gin.Context) {
 	c.JSON(200, gin.H{
 		"status":  "ok",
 		"edition": "community",
+		"version": h.version,
 	})
 }
 
@@ -287,15 +443,18 @@ func (h *Handler) dispatchDefaultPageConfigOnStartup(ctx context.Context) {
 			var domain string
 			var sslEnabled, forceSSL, http2 bool
 			var sslCertPath, sslKeyPath *string
+			var basicAuthEnabled bool
+			var basicAuthRealm string
 
 			err := h.db.QueryRow(ctx, `
 				SELECT ph.id, ph.agent_id, a.org_id, ph.domain, ph.ssl_enabled, ph.force_ssl, ph.http2_enabled,
-				       ph.ssl_cert_path, ph.ssl_key_path
+				       ph.ssl_cert_path, ph.ssl_key_path,
+				       COALESCE(ph.basic_auth_enabled, false), COALESCE(ph.basic_auth_realm, 'Restricted')
 				FROM proxy_hosts ph
 				JOIN agents a ON a.id = ph.agent_id
 				WHERE ph.is_system_proxy = TRUE
 				LIMIT 1
-			`).Scan(&proxyID, &agentID, &orgID, &domain, &sslEnabled, &forceSSL, &http2, &sslCertPath, &sslKeyPath)
+			`).Scan(&proxyID, &agentID, &orgID, &domain, &sslEnabled, &forceSSL, &http2, &sslCertPath, &sslKeyPath, &basicAuthEnabled, &basicAuthRealm)
 
 			if err != nil {
 				// No domain configured, nothing to do
@@ -326,8 +485,14 @@ func (h *Handler) dispatchDefaultPageConfigOnStartup(ctx context.Context) {
 				keyPath = *sslKeyPath
 			}
 
+			// Determine htpasswd path for this proxy (use sanitized domain)
+			htpasswdPath := ""
+			if basicAuthEnabled {
+				htpasswdPath = fmt.Sprintf("/data/nginx/conf.d/.htpasswd_%s", strings.ReplaceAll(domain, ".", "_"))
+			}
+
 			// Dispatch the InfraPilot system proxy config (routes /api to backend)
-			h.dispatchInfraPilotProxyConfigWithCert(ctx, agentID, proxyID, domain, forceSSL, http2, sslEnabled, certPath, keyPath)
+			h.dispatchInfraPilotProxyConfigWithCert(ctx, agentID, proxyID, domain, forceSSL, http2, sslEnabled, certPath, keyPath, basicAuthEnabled, basicAuthRealm, htpasswdPath)
 
 			// Dispatch the default page config (welcome page for IP access)
 			h.dispatchDefaultPageConfig(agentID, orgID, true)

@@ -24,6 +24,13 @@ type Config struct {
 	LetsEncryptEmail string // Email for Let's Encrypt account
 	LetsEncryptStage bool   // Use staging server for testing
 	ACMEWebRoot      string // Webroot for ACME HTTP-01 challenge
+
+	// Nginx log analytics settings
+	NginxLogAnalytics     bool   // Enable nginx access log analytics
+	NginxAccessLogPath    string // Path to nginx access log
+	NginxLogBufferSize    int    // Number of entries to buffer before flush
+	NginxLogFlushInterval int    // Flush interval in seconds
+	NginxLogSkipHealth    bool   // Skip health check endpoints
 }
 
 // IsManagedProxy returns true if InfraPilot should manage the proxy
@@ -52,6 +59,13 @@ func Load() (*Config, error) {
 		LetsEncryptEmail: getEnv("LETSENCRYPT_EMAIL", ""),
 		LetsEncryptStage: getEnvBool("LETSENCRYPT_STAGING", false),
 		ACMEWebRoot:      getEnv("ACME_WEBROOT", "/var/www/acme-challenge"),
+
+		// Nginx log analytics settings
+		NginxLogAnalytics:     getEnvBool("NGINX_LOG_ANALYTICS", true),
+		NginxAccessLogPath:    getEnv("NGINX_ACCESS_LOG_PATH", "/var/log/nginx/access.log"),
+		NginxLogBufferSize:    getEnvInt("NGINX_LOG_BUFFER_SIZE", 500),
+		NginxLogFlushInterval: getEnvInt("NGINX_LOG_FLUSH_INTERVAL", 5),
+		NginxLogSkipHealth:    getEnvBool("NGINX_LOG_SKIP_HEALTH", true),
 	}
 
 	return cfg, nil
