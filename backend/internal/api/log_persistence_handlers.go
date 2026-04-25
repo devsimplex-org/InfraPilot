@@ -520,6 +520,14 @@ func (h *Handler) GetLogStats(c *gin.Context) {
 	})
 }
 
+// nullString converts an empty string to nil for nullable DB columns
+func nullString(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
 // ============================================================
 // Log Cleanup Handler
 // ============================================================
