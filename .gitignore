@@ -10,6 +10,7 @@ out/
 
 # Environment files
 .env
+.env.prod
 .env.local
 .env.*.local
 
@@ -52,3 +53,10 @@ agent/tmp
 backend/tmp
 
 # docsx
+*storybook.log
+storybook-static
+.dev-logs.env.prod
+
+# Backup files
+*.bak
+*.orig

@@ -1,6 +1,12 @@
 package api
 
 import (
+	"bytes"
+	"context"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -411,74 +417,22 @@ func (h *Handler) requestSSLCertificate(c *gin.Context) {
 		return
 	}
 
-	// Verify DNS records before attempting SSL request
-	// For apex domains, both @ and www must be configured
-	parts := strings.Split(req.Domain, ".")
-	isApexDomain := len(parts) == 2 && !strings.HasPrefix(req.Domain, "www.") && !strings.HasPrefix(req.Domain, "*.")
-	expectedIP := getPublicIP()
-
-	if expectedIP != "" && isApexDomain {
-		// Check apex domain
-		apexIPs, err := net.LookupIP(req.Domain)
-		apexConfigured := false
-		if err == nil {
-			for _, ip := range apexIPs {
-				if ip.String() == expectedIP {
-					apexConfigured = true
-					break
-				}
-			}
-		}
-
-		// Check www subdomain
-		wwwDomain := "www." + req.Domain
-		wwwIPs, err := net.LookupIP(wwwDomain)
-		wwwConfigured := false
-		if err == nil {
-			for _, ip := range wwwIPs {
-				if ip.String() == expectedIP {
-					wwwConfigured = true
-					break
-				}
-			}
-		}
-
-		// Both must be configured for apex domains
-		if !apexConfigured || !wwwConfigured {
-			missingRecords := []string{}
-			if !apexConfigured {
-				missingRecords = append(missingRecords, req.Domain+" (@)")
-			}
-			if !wwwConfigured {
-				missingRecords = append(missingRecords, "www."+req.Domain)
-			}
-
-			c.JSON(http.StatusBadRequest, gin.H{
-				"success": false,
-				"error":   fmt.Sprintf("DNS not properly configured. Missing or incorrect A records for: %s. Both @ and www A records must point to %s before requesting SSL certificate.", strings.Join(missingRecords, ", "), expectedIP),
-				"domain":  req.Domain,
-				"apex_configured": apexConfigured,
-				"www_configured": wwwConfigured,
-				"expected_ip": expectedIP,
-			})
-			return
-		}
-
-		h.logger.Info("DNS verification passed for apex domain",
-			zap.String("domain", req.Domain),
-			zap.String("www_domain", wwwDomain),
-			zap.String("expected_ip", expectedIP),
-		)
-	}
+	// Check if the proxy has include_www enabled
+	var includeWWW bool
+	h.db.QueryRow(c.Request.Context(), `
+		SELECT COALESCE(include_www, false) FROM proxy_hosts
+		WHERE agent_id = $1 AND domain = $2
+	`, agentID, req.Domain).Scan(&includeWWW)
 
 	// Send SSL request to agent and wait for response (up to 2 minutes for ACME challenge)
-	cmd := agentgrpc.NewSSLRequestCommand(req.Domain, req.Email, req.DNSProvider, req.Staging)
+	cmd := agentgrpc.NewSSLRequestCommand(req.Domain, req.Email, req.DNSProvider, req.Staging, includeWWW)
 
 	h.logger.Info("Sending SSL request to agent",
 		zap.String("agent_id", agentIDStr),
 		zap.String("domain", req.Domain),
 		zap.String("email", req.Email),
 		zap.Bool("staging", req.Staging),
+		zap.Bool("include_www", includeWWW),
 	)
 
 	resp, err := agentgrpc.SendCommand(agentIDStr, cmd, 120*time.Second)
@@ -507,29 +461,32 @@ func (h *Handler) requestSSLCertificate(c *gin.Context) {
 	if success {
 		// Update proxy_hosts to enable SSL and regenerate nginx config
 		var proxyID uuid.UUID
-		var forceSSL, http2Enabled, isSystemProxy bool
+		var forceSSL, http2Enabled, isSystemProxy, includeWWW bool
+		var upstream, proxyType string
+		var redirectURL *string
+		var redirectCode *int
 		err := h.db.QueryRow(c.Request.Context(), `
 			UPDATE proxy_hosts SET ssl_enabled = true, force_ssl = true, status = 'active', updated_at = NOW()
 			WHERE agent_id = $1 AND domain = $2
-			RETURNING id, force_ssl, http2_enabled, is_system_proxy
-		`, agentID, req.Domain).Scan(&proxyID, &forceSSL, &http2Enabled, &isSystemProxy)
+			RETURNING id, force_ssl, http2_enabled, is_system_proxy, include_www,
+			          COALESCE(upstream_target, ''), COALESCE(proxy_type, 'upstream'), redirect_url, redirect_code
+		`, agentID, req.Domain).Scan(&proxyID, &forceSSL, &http2Enabled, &isSystemProxy, &includeWWW,
+			&upstream, &proxyType, &redirectURL, &redirectCode)
 
 		if err == nil {
 			h.logger.Info("Updated proxy_hosts for SSL",
 				zap.String("domain", req.Domain),
 				zap.String("proxy_id", proxyID.String()),
+				zap.String("proxy_type", proxyType),
 			)
 
 			// Regenerate and dispatch nginx config with SSL enabled
 			if isSystemProxy {
 				go h.dispatchInfraPilotProxyConfig(c.Request.Context(), agentID, proxyID, req.Domain, true, http2Enabled, true)
 			} else {
-				// For regular proxies, get upstream and dispatch
-				var upstream string
-				h.db.QueryRow(c.Request.Context(), `SELECT upstream_target FROM proxy_hosts WHERE id = $1`, proxyID).Scan(&upstream)
-				if upstream != "" {
-					go h.dispatchProxyConfig(c.Request.Context(), agentID, proxyID, req.Domain, upstream, true, http2Enabled, true)
-				}
+				// For regular proxies (upstream or redirect), dispatch full config
+				go h.dispatchProxyConfigFull(c.Request.Context(), agentID, proxyID, req.Domain, upstream,
+					proxyType, redirectURL, redirectCode, forceSSL, http2Enabled, includeWWW, true)
 			}
 		} else {
 			h.logger.Warn("Could not find proxy_host to update SSL status",
@@ -555,7 +512,7 @@ func (h *Handler) requestSSLCertificate(c *gin.Context) {
 }
 
 // dispatchSSLRequestWithOptions sends SSL request with full options
-func (h *Handler) dispatchSSLRequestWithOptions(agentID uuid.UUID, domain, email, dnsProvider string, staging bool) {
+func (h *Handler) dispatchSSLRequestWithOptions(agentID uuid.UUID, domain, email, dnsProvider string, staging, includeWWW bool) {
 	agentIDStr := agentID.String()
 
 	if !agentgrpc.IsAgentConnected(agentIDStr) {
@@ -566,7 +523,7 @@ func (h *Handler) dispatchSSLRequestWithOptions(agentID uuid.UUID, domain, email
 		return
 	}
 
-	cmd := agentgrpc.NewSSLRequestCommand(domain, email, dnsProvider, staging)
+	cmd := agentgrpc.NewSSLRequestCommand(domain, email, dnsProvider, staging, includeWWW)
 
 	if err := agentgrpc.SendCommandAsync(agentIDStr, cmd); err != nil {
 		h.logger.Error("Failed to dispatch SSL request",
@@ -581,6 +538,7 @@ func (h *Handler) dispatchSSLRequestWithOptions(agentID uuid.UUID, domain, email
 		zap.String("domain", domain),
 		zap.String("email", email),
 		zap.Bool("staging", staging),
+		zap.Bool("include_www", includeWWW),
 	)
 }
 
@@ -630,65 +588,18 @@ func (h *Handler) getDNSInstructions(c *gin.Context) {
 		serverIP = "YOUR_SERVER_IP"
 	}
 
-	// Check if this is an apex domain
-	parts := strings.Split(domain, ".")
-	isApexDomain := len(parts) == 2 && !strings.HasPrefix(domain, "www.") && !strings.HasPrefix(domain, "*.")
-
-	records := []gin.H{}
-	var instructions string
-
-	if isApexDomain {
-		// Apex domain needs both @ and www records
-		records = append(records, gin.H{
-			"type":  "A",
-			"name":  "@",
-			"value": serverIP,
-			"ttl":   300,
-		})
-		records = append(records, gin.H{
-			"type":  "A",
-			"name":  "www",
-			"value": serverIP,
-			"ttl":   300,
-		})
-
-		instructions = fmt.Sprintf(`
-To configure SSL for %s:
-
-IMPORTANT: SSL certificate will include BOTH %s and www.%s
-
-1. Add TWO A records pointing to your server:
-
-   Record 1 (Apex domain):
-   - Type: A
-   - Name: @ (or leave blank for apex)
-   - Value: %s
-   - TTL: 300 (or Auto)
-
-   Record 2 (WWW subdomain):
-   - Type: A
-   - Name: www
-   - Value: %s
-   - TTL: 300 (or Auto)
-
-2. Wait for DNS propagation (usually 1-5 minutes, can take up to 48 hours)
-
-3. Verify both records are properly configured using the "Verify DNS" button
-
-4. Click "Request Certificate" to obtain SSL from Let's Encrypt
-
-5. Let's Encrypt will verify BOTH domains via HTTP-01 challenge
-`, domain, domain, domain, serverIP, serverIP)
-	} else {
-		// Subdomain or www - only one record needed
-		records = append(records, gin.H{
-			"type":  "A",
-			"name":  domain,
-			"value": serverIP,
-			"ttl":   300,
-		})
-
-		instructions = fmt.Sprintf(`
+	c.JSON(http.StatusOK, gin.H{
+		"domain":    domain,
+		"server_ip": serverIP,
+		"records": []gin.H{
+			{
+				"type":  "A",
+				"name":  domain,
+				"value": serverIP,
+				"ttl":   300,
+			},
+		},
+		"instructions": fmt.Sprintf(`
 To configure SSL for %s:
 
 1. Add an A record pointing to your server:
@@ -702,20 +613,12 @@ To configure SSL for %s:
 3. Click "Request Certificate" to obtain SSL from Let's Encrypt
 
 4. Let's Encrypt will verify domain ownership via HTTP-01 challenge
-`, domain, domain, serverIP)
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"domain":      domain,
-		"server_ip":   serverIP,
-		"is_apex":     isApexDomain,
-		"records":     records,
-		"instructions": instructions,
+`, domain, domain, serverIP),
 	})
 }
 
 // verifyDNS checks if DNS is properly configured for a domain
-// GET /api/v1/ssl/verify-dns/:domain
+// GET /api/v1/ssl/verify-dns/:domain?include_www=true
 func (h *Handler) verifyDNS(c *gin.Context) {
 	domain := c.Param("domain")
 	if domain == "" {
@@ -723,71 +626,89 @@ func (h *Handler) verifyDNS(c *gin.Context) {
 		return
 	}
 
+	includeWWW := c.Query("include_www") == "true"
+
 	// Get expected IP
 	expectedIP := getPublicIP()
 
-	// Helper function to check a single domain
-	checkDomain := func(checkDomain string) map[string]interface{} {
-		ips, err := net.LookupIP(checkDomain)
-		if err != nil {
-			return map[string]interface{}{
-				"domain":     checkDomain,
-				"configured": false,
-				"error":      fmt.Sprintf("DNS lookup failed: %v", err),
-			}
-		}
-
-		// Check if any IP matches
-		ipStrings := []string{}
-		matches := false
-		for _, ip := range ips {
-			ipStr := ip.String()
-			ipStrings = append(ipStrings, ipStr)
-			if ipStr == expectedIP {
-				matches = true
-			}
-		}
-
-		return map[string]interface{}{
-			"domain":       checkDomain,
-			"configured":   len(ips) > 0,
-			"resolved_ips": ipStrings,
-			"expected_ip":  expectedIP,
-			"matches":      matches,
-		}
+	// Helper to check a single domain
+	type domainResult struct {
+		Domain      string   `json:"domain"`
+		Configured  bool     `json:"configured"`
+		ResolvedIPs []string `json:"resolved_ips"`
+		Matches     bool     `json:"matches"`
+		Error       string   `json:"error,omitempty"`
 	}
 
-	// Check the requested domain
+	checkDomain := func(d string) domainResult {
+		result := domainResult{Domain: d}
+		ips, err := net.LookupIP(d)
+		if err != nil {
+			result.Error = fmt.Sprintf("DNS lookup failed: %v", err)
+			return result
+		}
+
+		result.Configured = len(ips) > 0
+		result.ResolvedIPs = []string{}
+		for _, ip := range ips {
+			ipStr := ip.String()
+			result.ResolvedIPs = append(result.ResolvedIPs, ipStr)
+			if ipStr == expectedIP {
+				result.Matches = true
+			}
+		}
+		return result
+	}
+
+	// Check main domain
 	mainResult := checkDomain(domain)
 
-	// For apex domains (like example.com), also check www subdomain
-	// since SSL certificates will include both
-	var wwwResult map[string]interface{}
-	parts := strings.Split(domain, ".")
-	isApexDomain := len(parts) == 2 && !strings.HasPrefix(domain, "www.") && !strings.HasPrefix(domain, "*.")
-
-	if isApexDomain {
+	// If include_www is enabled, also check www subdomain
+	if includeWWW {
 		wwwDomain := "www." + domain
-		wwwResult = checkDomain(wwwDomain)
+		wwwResult := checkDomain(wwwDomain)
 
-		// Both must match for apex domains
-		bothMatch := mainResult["matches"].(bool) && wwwResult["matches"].(bool)
+		// Both domains must be configured and match for overall success
+		allConfigured := mainResult.Configured && wwwResult.Configured
+		allMatches := mainResult.Matches && wwwResult.Matches
+
+		// Combine resolved IPs for display
+		allIPs := mainResult.ResolvedIPs
+		for _, ip := range wwwResult.ResolvedIPs {
+			// Add only if not already present
+			found := false
+			for _, existingIP := range allIPs {
+				if existingIP == ip {
+					found = true
+					break
+				}
+			}
+			if !found {
+				allIPs = append(allIPs, ip)
+			}
+		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"domain":        domain,
-			"is_apex":       true,
-			"requires_www":  true,
-			"apex_record":   mainResult,
-			"www_record":    wwwResult,
-			"all_configured": bothMatch,
-			"expected_ip":   expectedIP,
-			"message":       "Apex domain requires both @ and www A records pointing to server IP",
+			"domain":       domain,
+			"configured":   allConfigured,
+			"resolved_ips": allIPs,
+			"expected_ip":  expectedIP,
+			"matches":      allMatches,
+			"include_www":  true,
+			"www_result":   wwwResult,
+			"main_result":  mainResult,
 		})
 		return
 	}
 
-	// For non-apex domains (subdomains or www), only check the single domain
-	c.JSON(http.StatusOK, mainResult)
+	// Standard single-domain response
+	c.JSON(http.StatusOK, gin.H{
+		"domain":       domain,
+		"configured":   mainResult.Configured,
+		"resolved_ips": mainResult.ResolvedIPs,
+		"expected_ip":  expectedIP,
+		"matches":      mainResult.Matches,
+	})
 }
 
 // listSSLCertificates returns all registered SSL certificates
@@ -1426,20 +1347,37 @@ func (h *Handler) completeDNSChallenge(c *gin.Context) {
 			)
 		}
 
-		// Update proxy_hosts if applicable
+		// Update proxy_hosts if applicable and regenerate nginx config
 		var proxyID uuid.UUID
-		var forceSSL, http2Enabled, isSystemProxy bool
+		var forceSSL, http2Enabled, isSystemProxy, includeWWW bool
+		var proxyDomain, upstream, proxyType string
+		var redirectURL *string
+		var redirectCode *int
 		err := h.db.QueryRow(c.Request.Context(), `
 			UPDATE proxy_hosts SET ssl_enabled = true, force_ssl = true, status = 'active', updated_at = NOW()
 			WHERE agent_id = $1 AND (domain = $2 OR domain LIKE $3)
-			RETURNING id, force_ssl, http2_enabled, is_system_proxy
-		`, agentID, req.Domain, "%."+strings.TrimPrefix(req.Domain, "*.")).Scan(&proxyID, &forceSSL, &http2Enabled, &isSystemProxy)
+			RETURNING id, domain, force_ssl, http2_enabled, is_system_proxy, include_www,
+			          COALESCE(upstream_target, ''), COALESCE(proxy_type, 'upstream'), redirect_url, redirect_code
+		`, agentID, req.Domain, "%."+strings.TrimPrefix(req.Domain, "*.")).Scan(
+			&proxyID, &proxyDomain, &forceSSL, &http2Enabled, &isSystemProxy, &includeWWW,
+			&upstream, &proxyType, &redirectURL, &redirectCode)
 
 		if err == nil {
 			h.logger.Info("Updated proxy_hosts for wildcard SSL",
 				zap.String("domain", req.Domain),
+				zap.String("proxy_domain", proxyDomain),
 				zap.String("proxy_id", proxyID.String()),
+				zap.String("proxy_type", proxyType),
 			)
+
+			// Regenerate and dispatch nginx config with SSL enabled
+			if isSystemProxy {
+				go h.dispatchInfraPilotProxyConfig(c.Request.Context(), agentID, proxyID, proxyDomain, true, http2Enabled, true)
+			} else {
+				// For regular proxies (upstream or redirect), dispatch full config
+				go h.dispatchProxyConfigFull(c.Request.Context(), agentID, proxyID, proxyDomain, upstream,
+					proxyType, redirectURL, redirectCode, forceSSL, http2Enabled, includeWWW, true)
+			}
 		}
 
 		c.JSON(http.StatusOK, gin.H{
@@ -1569,6 +1507,254 @@ func (h *Handler) verifyDNSTXTRecord(c *gin.Context) {
 		"found":    records,
 		"expected": expectedValue,
 	})
+}
+
+// uploadSSLCertificate accepts raw PEM certificate + key content, validates them,
+// writes them to disk, and optionally applies them to a proxy host.
+// POST /api/v1/ssl/upload
+func (h *Handler) uploadSSLCertificate(c *gin.Context) {
+	orgID := c.MustGet("org_id").(uuid.UUID)
+
+	var req struct {
+		CertPEM string `json:"cert_pem" binding:"required"`
+		KeyPEM  string `json:"key_pem" binding:"required"`
+		AgentID string `json:"agent_id"`
+		ProxyID string `json:"proxy_id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Size limits — 64 KB each
+	const maxPEMSize = 64 * 1024
+	if len(req.CertPEM) > maxPEMSize {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "certificate too large (max 64 KB)"})
+		return
+	}
+	if len(req.KeyPEM) > maxPEMSize {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "private key too large (max 64 KB)"})
+		return
+	}
+
+	// Validate and parse certificate
+	certInfo, cert, err := validateUploadedCertPEM([]byte(req.CertPEM))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid certificate: %v", err)})
+		return
+	}
+
+	// Validate and parse private key
+	privKey, err := validateUploadedKeyPEM([]byte(req.KeyPEM))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid private key: %v", err)})
+		return
+	}
+
+	// Verify the private key matches the certificate's public key
+	if err := verifyCertKeyMatch(cert, privKey); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "private key does not match the certificate"})
+		return
+	}
+
+	// Determine domain for directory name
+	domain := certInfo.Subject
+	if len(certInfo.SANs) > 0 {
+		domain = certInfo.SANs[0]
+	}
+	cleanDomain := strings.TrimPrefix(domain, "*.")
+	// Sanitise directory component — only allow hostname chars
+	for _, ch := range cleanDomain {
+		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+			(ch >= '0' && ch <= '9') || ch == '-' || ch == '.') {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "certificate domain contains invalid characters"})
+			return
+		}
+	}
+
+	// Save to /data/certs/<domain>/
+	certDir := filepath.Join("/data/certs", cleanDomain)
+	if err := os.MkdirAll(certDir, 0700); err != nil {
+		h.logger.Error("Failed to create cert directory", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create certificate directory"})
+		return
+	}
+
+	certPath := filepath.Join(certDir, "fullchain.pem")
+	keyPath := filepath.Join(certDir, "privkey.pem")
+
+	if err := os.WriteFile(certPath, []byte(strings.TrimSpace(req.CertPEM)+"\n"), 0644); err != nil {
+		h.logger.Error("Failed to write certificate", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save certificate"})
+		return
+	}
+	if err := os.WriteFile(keyPath, []byte(strings.TrimSpace(req.KeyPEM)+"\n"), 0600); err != nil {
+		os.Remove(certPath)
+		h.logger.Error("Failed to write private key", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save private key"})
+		return
+	}
+
+	h.logger.Info("Custom SSL certificate uploaded",
+		zap.String("domain", domain),
+		zap.String("issuer", certInfo.Issuer),
+		zap.Time("expires_at", certInfo.ExpiresAt),
+	)
+
+	// Optionally apply directly to a proxy host
+	if req.AgentID != "" && req.ProxyID != "" {
+		agentID, err1 := uuid.Parse(req.AgentID)
+		proxyID, err2 := uuid.Parse(req.ProxyID)
+		if err1 == nil && err2 == nil {
+			var proxyDomain, upstream string
+			err = h.db.QueryRow(c.Request.Context(), `
+				SELECT ph.domain, ph.upstream_target
+				FROM proxy_hosts ph
+				JOIN agents a ON ph.agent_id = a.id
+				WHERE ph.id = $1 AND ph.agent_id = $2 AND a.org_id = $3
+			`, proxyID, agentID, orgID).Scan(&proxyDomain, &upstream)
+
+			if err == nil {
+				_, err = h.db.Exec(c.Request.Context(), `
+					UPDATE proxy_hosts SET
+						ssl_enabled   = true,
+						force_ssl     = true,
+						http2_enabled = true,
+						ssl_source    = 'external',
+						ssl_cert_path = $1,
+						ssl_key_path  = $2,
+						status        = 'active',
+						updated_at    = NOW()
+					WHERE id = $3
+				`, certPath, keyPath, proxyID)
+				if err != nil {
+					h.logger.Error("Failed to update proxy SSL settings", zap.Error(err))
+				} else {
+					go h.dispatchProxyConfigWithCert(context.Background(), agentID, proxyID,
+						proxyDomain, upstream, true, true, true, certPath, keyPath)
+				}
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"cert_path":   certPath,
+		"key_path":    keyPath,
+		"domain":      domain,
+		"issuer":      certInfo.Issuer,
+		"expires_at":  certInfo.ExpiresAt.Format(time.RFC3339),
+		"sans":        certInfo.SANs,
+		"is_wildcard": certInfo.IsWildcard,
+		"message":     "Certificate uploaded and validated successfully",
+	})
+}
+
+// validateUploadedCertPEM validates and parses PEM-encoded certificate content.
+// Returns parsed CertificateInfo, the x509.Certificate, and any validation error.
+func validateUploadedCertPEM(data []byte) (*CertificateInfo, *x509.Certificate, error) {
+	data = bytes.TrimSpace(data)
+
+	// Must start with PEM certificate header — reject anything else outright
+	if !bytes.HasPrefix(data, []byte("-----BEGIN CERTIFICATE-----")) {
+		return nil, nil, fmt.Errorf("must start with -----BEGIN CERTIFICATE----- (got non-certificate PEM or binary data)")
+	}
+
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return nil, nil, fmt.Errorf("failed to decode PEM block — check for encoding errors")
+	}
+	if block.Type != "CERTIFICATE" {
+		return nil, nil, fmt.Errorf("expected PEM type CERTIFICATE, got %q", block.Type)
+	}
+
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid X.509 structure: %w", err)
+	}
+
+	info := &CertificateInfo{
+		Subject:   cert.Subject.CommonName,
+		Issuer:    cert.Issuer.CommonName,
+		SANs:      cert.DNSNames,
+		ExpiresAt: cert.NotAfter,
+	}
+	for _, san := range cert.DNSNames {
+		if strings.HasPrefix(san, "*.") {
+			info.IsWildcard = true
+			break
+		}
+	}
+	return info, cert, nil
+}
+
+// validateUploadedKeyPEM validates a PEM-encoded private key.
+// Accepts PKCS#8 (PRIVATE KEY), PKCS#1 RSA (RSA PRIVATE KEY), SEC1 EC (EC PRIVATE KEY).
+// Returns the parsed key or an error — does NOT accept encrypted keys.
+func validateUploadedKeyPEM(data []byte) (crypto.PrivateKey, error) {
+	data = bytes.TrimSpace(data)
+
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return nil, fmt.Errorf("failed to decode PEM block — check for encoding errors")
+	}
+
+	// Reject encrypted keys
+	if strings.Contains(block.Type, "ENCRYPTED") || block.Headers["Proc-Type"] != "" {
+		return nil, fmt.Errorf("encrypted private keys are not supported — please decrypt the key first")
+	}
+
+	switch block.Type {
+	case "PRIVATE KEY": // PKCS#8 (RSA, EC, Ed25519)
+		key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("invalid PKCS#8 private key: %w", err)
+		}
+		return key, nil
+	case "RSA PRIVATE KEY": // PKCS#1
+		key, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("invalid RSA private key: %w", err)
+		}
+		return key, nil
+	case "EC PRIVATE KEY": // SEC1
+		key, err := x509.ParseECPrivateKey(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("invalid EC private key: %w", err)
+		}
+		return key, nil
+	default:
+		return nil, fmt.Errorf("unsupported PEM type %q — expected PRIVATE KEY, RSA PRIVATE KEY, or EC PRIVATE KEY", block.Type)
+	}
+}
+
+// verifyCertKeyMatch checks that a private key corresponds to the certificate's public key
+// by marshalling both public keys to DER and comparing byte-for-byte.
+func verifyCertKeyMatch(cert *x509.Certificate, privKey crypto.PrivateKey) error {
+	var privPub crypto.PublicKey
+	switch k := privKey.(type) {
+	case *rsa.PrivateKey:
+		privPub = &k.PublicKey
+	case *ecdsa.PrivateKey:
+		privPub = &k.PublicKey
+	case ed25519.PrivateKey:
+		privPub = k.Public()
+	default:
+		return fmt.Errorf("unsupported private key type %T", privKey)
+	}
+
+	certPubDER, err := x509.MarshalPKIXPublicKey(cert.PublicKey)
+	if err != nil {
+		return fmt.Errorf("failed to encode certificate public key: %w", err)
+	}
+	privPubDER, err := x509.MarshalPKIXPublicKey(privPub)
+	if err != nil {
+		return fmt.Errorf("failed to encode private key public part: %w", err)
+	}
+
+	if !bytes.Equal(certPubDER, privPubDER) {
+		return fmt.Errorf("key mismatch")
+	}
+	return nil
 }
 
 // parseCertificateFile reads and parses a PEM certificate file

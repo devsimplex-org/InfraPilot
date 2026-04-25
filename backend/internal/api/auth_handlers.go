@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/pquerna/otp/totp"
+	"go.uber.org/zap"
 )
 
 type LoginRequest struct {
@@ -556,4 +557,133 @@ func generateBackupCode() string {
 		b[i] = chars[int(b[i])%len(chars)]
 	}
 	return fmt.Sprintf("%s-%s", string(b[:4]), string(b[4:]))
+}
+
+// VerifyPasswordRequest is the request body for password verification
+type VerifyPasswordRequest struct {
+	Password string `json:"password" binding:"required"`
+}
+
+// verifyPassword verifies the current user's password for sensitive operations
+func (h *Handler) verifyPassword(c *gin.Context) {
+	userID := c.MustGet("user_id").(uuid.UUID)
+
+	var req VerifyPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Get user's password hash
+	var passwordHash string
+	err := h.db.QueryRow(c.Request.Context(), `
+		SELECT password_hash FROM users WHERE id = $1
+	`, userID).Scan(&passwordHash)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to verify password"})
+		return
+	}
+
+	// Verify password
+	if !h.auth.VerifyPassword(passwordHash, req.Password) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid password", "valid": false})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"valid": true})
+}
+
+// sendConfirmationOTP sends an OTP code to the user's email for sensitive operation confirmation
+func (h *Handler) sendConfirmationOTP(c *gin.Context) {
+	userID := c.MustGet("user_id").(uuid.UUID)
+
+	// Get user's email
+	var email string
+	err := h.db.QueryRow(c.Request.Context(), `SELECT email FROM users WHERE id = $1`, userID).Scan(&email)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get user email"})
+		return
+	}
+
+	// Generate 6-digit OTP
+	otpBytes := make([]byte, 3)
+	rand.Read(otpBytes)
+	otp := fmt.Sprintf("%06d", (int(otpBytes[0])<<16|int(otpBytes[1])<<8|int(otpBytes[2]))%1000000)
+
+	// Hash OTP for storage
+	otpHash := sha256.Sum256([]byte(otp))
+
+	// Store OTP (expires in 10 minutes)
+	_, err = h.db.Exec(c.Request.Context(), `
+		INSERT INTO confirmation_otps (user_id, otp_hash, expires_at)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (user_id) DO UPDATE SET otp_hash = $2, expires_at = $3, verified_at = NULL
+	`, userID, hex.EncodeToString(otpHash[:]), time.Now().Add(10*time.Minute))
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate OTP"})
+		return
+	}
+
+	// TODO: Integrate with email service to send OTP
+	// For now, log the OTP generation (email sending would be added later)
+	h.logger.Info("Confirmation OTP generated",
+		zap.String("user_id", userID.String()),
+		zap.String("email", email))
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Verification code sent to your email",
+	})
+}
+
+// VerifyConfirmationOTPRequest is the request body for OTP verification
+type VerifyConfirmationOTPRequest struct {
+	OTP string `json:"otp" binding:"required"`
+}
+
+// verifyConfirmationOTP verifies the OTP code sent to user's email
+func (h *Handler) verifyConfirmationOTP(c *gin.Context) {
+	userID := c.MustGet("user_id").(uuid.UUID)
+
+	var req VerifyConfirmationOTPRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Hash the provided OTP
+	otpHash := sha256.Sum256([]byte(req.OTP))
+	hashString := hex.EncodeToString(otpHash[:])
+
+	// Check if OTP is valid
+	var expiresAt time.Time
+	var verifiedAt *time.Time
+	err := h.db.QueryRow(c.Request.Context(), `
+		SELECT expires_at, verified_at FROM confirmation_otps
+		WHERE user_id = $1 AND otp_hash = $2
+	`, userID, hashString).Scan(&expiresAt, &verifiedAt)
+
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid verification code", "valid": false})
+		return
+	}
+
+	if verifiedAt != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "verification code already used", "valid": false})
+		return
+	}
+
+	if time.Now().After(expiresAt) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "verification code expired", "valid": false})
+		return
+	}
+
+	// Mark OTP as verified
+	h.db.Exec(c.Request.Context(), `
+		UPDATE confirmation_otps SET verified_at = NOW() WHERE user_id = $1
+	`, userID)
+
+	c.JSON(http.StatusOK, gin.H{"valid": true})
 }

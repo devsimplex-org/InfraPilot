@@ -129,6 +129,33 @@ type ResourceLimits struct {
 	PidsLimit   int64  `json:"pids_limit"`
 }
 
+// isManagementContainer checks if the given container is the InfraPilot management container itself
+// This prevents users from accidentally stopping/deleting the container that runs this application
+func isManagementContainer(ctx context.Context, cli *client.Client, containerID string) (bool, string) {
+	info, err := cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return false, ""
+	}
+
+	// Check container name (remove leading slash)
+	name := strings.TrimPrefix(info.Name, "/")
+
+	// Protected container names
+	protectedNames := []string{"infrapilot", "infrapilot-ee", "infrapilot_ee"}
+	for _, protected := range protectedNames {
+		if name == protected {
+			return true, name
+		}
+	}
+
+	// Also check if image is the infrapilot image
+	if strings.Contains(info.Config.Image, "infrapilot") {
+		return true, name
+	}
+
+	return false, name
+}
+
 // listContainersReal fetches containers from Docker daemon with real-time stats
 // NOTE: This is for local development only. In production, this should
 // query the database which is populated by the agent via gRPC.
@@ -181,8 +208,10 @@ func (h *Handler) listContainersReal(c *gin.Context) {
 
 		// Get network names
 		networks := make([]string, 0)
-		for netName := range ctr.NetworkSettings.Networks {
-			networks = append(networks, netName)
+		if ctr.NetworkSettings != nil {
+			for netName := range ctr.NetworkSettings.Networks {
+				networks = append(networks, netName)
+			}
 		}
 
 		// Get real CPU/memory stats for running containers
@@ -344,6 +373,15 @@ func (h *Handler) stopContainerReal(c *gin.Context) {
 	}
 	defer cli.Close()
 
+	// Prevent stopping the management container
+	if isManagement, name := isManagementContainer(ctx, cli, containerID); isManagement {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":   "Cannot stop management container",
+			"message": "Stopping the InfraPilot container (" + name + ") would lock you out of the system",
+		})
+		return
+	}
+
 	timeout := 10 // seconds
 	if err := cli.ContainerStop(ctx, containerID, container.StopOptions{Timeout: &timeout}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to stop container: " + err.Error()})
@@ -430,6 +468,26 @@ func (h *Handler) deleteContainerReal(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":         "container name does not match",
 			"expected_name": containerName,
+		})
+		return
+	}
+
+	// Prevent deleting the management container
+	protectedNames := []string{"infrapilot", "infrapilot-ee", "infrapilot_ee"}
+	for _, protected := range protectedNames {
+		if containerName == protected {
+			c.JSON(http.StatusForbidden, gin.H{
+				"error":   "Cannot delete management container",
+				"message": "Deleting the InfraPilot container (" + containerName + ") would lock you out of the system",
+			})
+			return
+		}
+	}
+	// Also check if image is the infrapilot image
+	if strings.Contains(info.Config.Image, "infrapilot") {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":   "Cannot delete management container",
+			"message": "Deleting the InfraPilot container (" + containerName + ") would lock you out of the system",
 		})
 		return
 	}
@@ -767,8 +825,10 @@ func (h *Handler) listStacksReal(c *gin.Context) {
 
 		// Get network names
 		networks := make([]string, 0)
-		for netName := range ctr.NetworkSettings.Networks {
-			networks = append(networks, netName)
+		if ctr.NetworkSettings != nil {
+			for netName := range ctr.NetworkSettings.Networks {
+				networks = append(networks, netName)
+			}
 		}
 
 		stack.Containers = append(stack.Containers, ContainerResponse{
@@ -800,4 +860,245 @@ func (h *Handler) listStacksReal(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, result)
+}
+
+// pauseContainerReal pauses a running Docker container
+func (h *Handler) pauseContainerReal(c *gin.Context) {
+	containerID := c.Param("cid")
+
+	if blocked, message := h.evaluateContainerPolicy(c, containerID, "pause"); blocked {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Action blocked by policy", "message": message})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+
+	cli, err := getDockerClient()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to connect to Docker"})
+		return
+	}
+	defer cli.Close()
+
+	if err := cli.ContainerPause(ctx, containerID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to pause container: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "container paused", "container_id": containerID})
+}
+
+// unpauseContainerReal unpauses a paused Docker container
+func (h *Handler) unpauseContainerReal(c *gin.Context) {
+	containerID := c.Param("cid")
+
+	if blocked, message := h.evaluateContainerPolicy(c, containerID, "unpause"); blocked {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Action blocked by policy", "message": message})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+
+	cli, err := getDockerClient()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to connect to Docker"})
+		return
+	}
+	defer cli.Close()
+
+	if err := cli.ContainerUnpause(ctx, containerID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to unpause container: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "container unpaused", "container_id": containerID})
+}
+
+// killContainerReal sends a signal to a Docker container
+func (h *Handler) killContainerReal(c *gin.Context) {
+	containerID := c.Param("cid")
+
+	var req struct {
+		Signal string `json:"signal"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		req.Signal = "SIGKILL" // Default signal
+	}
+
+	if blocked, message := h.evaluateContainerPolicy(c, containerID, "kill"); blocked {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Action blocked by policy", "message": message})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+
+	cli, err := getDockerClient()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to connect to Docker"})
+		return
+	}
+	defer cli.Close()
+
+	// Prevent killing the management container
+	if isManagement, name := isManagementContainer(ctx, cli, containerID); isManagement {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":   "Cannot kill management container",
+			"message": "Killing the InfraPilot container (" + name + ") would lock you out of the system",
+		})
+		return
+	}
+
+	if err := cli.ContainerKill(ctx, containerID, req.Signal); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to send signal: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "signal sent", "container_id": containerID, "signal": req.Signal})
+}
+
+// renameContainerReal renames a Docker container
+func (h *Handler) renameContainerReal(c *gin.Context) {
+	containerID := c.Param("cid")
+
+	var req struct {
+		NewName string `json:"new_name" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "new_name is required"})
+		return
+	}
+
+	if blocked, message := h.evaluateContainerPolicy(c, containerID, "rename"); blocked {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Action blocked by policy", "message": message})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+
+	cli, err := getDockerClient()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to connect to Docker"})
+		return
+	}
+	defer cli.Close()
+
+	// Get current name for response
+	info, err := cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "container not found"})
+		return
+	}
+	oldName := strings.TrimPrefix(info.Name, "/")
+
+	if err := cli.ContainerRename(ctx, containerID, req.NewName); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to rename container: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":      "container renamed",
+		"container_id": containerID,
+		"old_name":     oldName,
+		"new_name":     req.NewName,
+	})
+}
+
+// updateContainerReal updates container configuration (restart policy, resources)
+func (h *Handler) updateContainerReal(c *gin.Context) {
+	containerID := c.Param("cid")
+
+	var req struct {
+		RestartPolicy string `json:"restart_policy"` // no, always, on-failure, unless-stopped
+		MaxRetries    int    `json:"max_retries"`    // for on-failure policy
+		MemoryLimit   int64  `json:"memory_limit"`   // in bytes
+		MemorySwap    int64  `json:"memory_swap"`    // in bytes
+		CPUShares     int64  `json:"cpu_shares"`
+		CPUQuota      int64  `json:"cpu_quota"`
+		CPUPeriod     int64  `json:"cpu_period"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	if blocked, message := h.evaluateContainerPolicy(c, containerID, "update"); blocked {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Action blocked by policy", "message": message})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+
+	cli, err := getDockerClient()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to connect to Docker"})
+		return
+	}
+	defer cli.Close()
+
+	// Build update config
+	updateConfig := container.UpdateConfig{}
+
+	// Restart policy
+	if req.RestartPolicy != "" {
+		updateConfig.RestartPolicy = container.RestartPolicy{
+			Name:              container.RestartPolicyMode(req.RestartPolicy),
+			MaximumRetryCount: req.MaxRetries,
+		}
+	}
+
+	// Resource limits
+	if req.MemoryLimit > 0 {
+		updateConfig.Resources.Memory = req.MemoryLimit
+	}
+	if req.MemorySwap != 0 {
+		updateConfig.Resources.MemorySwap = req.MemorySwap
+	}
+	if req.CPUShares > 0 {
+		updateConfig.Resources.CPUShares = req.CPUShares
+	}
+	if req.CPUQuota > 0 {
+		updateConfig.Resources.CPUQuota = req.CPUQuota
+	}
+	if req.CPUPeriod > 0 {
+		updateConfig.Resources.CPUPeriod = req.CPUPeriod
+	}
+
+	_, err = cli.ContainerUpdate(ctx, containerID, updateConfig)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update container: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":      "container updated",
+		"container_id": containerID,
+	})
+}
+
+// inspectContainerReal returns raw Docker inspect data for advanced users
+func (h *Handler) inspectContainerReal(c *gin.Context) {
+	containerID := c.Param("cid")
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+	defer cancel()
+
+	cli, err := getDockerClient()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to connect to Docker"})
+		return
+	}
+	defer cli.Close()
+
+	info, err := cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "container not found: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, info)
 }

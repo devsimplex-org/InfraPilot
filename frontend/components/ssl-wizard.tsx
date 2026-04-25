@@ -24,27 +24,45 @@ import {
 } from "lucide-react";
 
 interface SSLWizardProps {
+  /** Primary domain for the certificate */
   domain: string;
+  /** Additional domains (for Traffic Resources with multiple domains) */
+  domains?: string[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess?: () => void;
-  // For regular proxy hosts (not system domain)
+  // For regular proxy hosts
   agentId?: string;
   proxyId?: string;
+  // For traffic resources
+  resourceId?: string;
+  // Whether to include www subdomain in SSL cert
+  includeWWW?: boolean;
 }
 
-type WizardStep = "check" | "source" | "wildcard" | "dns" | "email" | "request" | "dns_challenge" | "dns_verify" | "complete";
+/** Resource type for unified handling */
+type ResourceType = "proxy" | "resource" | "system";
+
+type WizardStep = "check" | "source" | "wildcard" | "dns" | "email" | "request" | "dns_challenge" | "dns_verify" | "upload" | "complete";
 
 export function SSLWizard({
   domain,
+  domains = [],
   open,
   onOpenChange,
   onSuccess,
   agentId,
   proxyId,
+  resourceId,
+  includeWWW = false,
 }: SSLWizardProps) {
-  // Check if this is for a regular proxy (not system domain)
-  const isRegularProxy = !!(agentId && proxyId);
+  // Determine resource type
+  const resourceType: ResourceType = resourceId ? "resource" : (agentId && proxyId) ? "proxy" : "system";
+  const isRegularProxy = resourceType === "proxy";
+  const isTrafficResource = resourceType === "resource";
+
+  // All domains for this certificate (primary + additional)
+  const allDomains = [domain, ...domains.filter(d => d !== domain)];
   const [step, setStep] = useState<WizardStep>("check");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -79,6 +97,11 @@ export function SSLWizard({
   } | null>(null);
   const [txtVerified, setTxtVerified] = useState(false);
 
+  // Custom certificate upload state
+  const [uploadCertPEM, setUploadCertPEM] = useState("");
+  const [uploadKeyPEM, setUploadKeyPEM] = useState("");
+  const [uploadValidationError, setUploadValidationError] = useState<string | null>(null);
+
   // Reset state when dialog opens/closes
   useEffect(() => {
     if (open) {
@@ -98,6 +121,9 @@ export function SSLWizard({
       setError(null);
       setDNSChallenge(null);
       setTxtVerified(false);
+      setUploadCertPEM("");
+      setUploadKeyPEM("");
+      setUploadValidationError(null);
       // Start certificate check
       checkCertificate();
     }
@@ -130,7 +156,7 @@ export function SSLWizard({
     setError(null);
     try {
       const [dnsCheck, instructions] = await Promise.all([
-        api.verifyDNS(domain),
+        api.verifyDNS(domain, includeWWW),
         api.getDNSInstructions(domain),
       ]);
       setDnsResult(dnsCheck);
@@ -320,6 +346,50 @@ export function SSLWizard({
     navigator.clipboard.writeText(text);
   };
 
+  const uploadCertificate = async () => {
+    setUploadValidationError(null);
+
+    // Client-side PEM header checks before sending to server
+    const trimmedCert = uploadCertPEM.trim();
+    const trimmedKey = uploadKeyPEM.trim();
+
+    if (!trimmedCert.startsWith("-----BEGIN CERTIFICATE-----")) {
+      setUploadValidationError("Certificate must be in PEM format and start with -----BEGIN CERTIFICATE-----");
+      return;
+    }
+    const validKeyHeaders = ["-----BEGIN PRIVATE KEY-----", "-----BEGIN RSA PRIVATE KEY-----", "-----BEGIN EC PRIVATE KEY-----"];
+    if (!validKeyHeaders.some(h => trimmedKey.startsWith(h))) {
+      setUploadValidationError("Private key must be in PEM format (PRIVATE KEY, RSA PRIVATE KEY, or EC PRIVATE KEY)");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setRequestStatus("pending");
+    try {
+      const response = await api.uploadSSLCertificate({
+        cert_pem: trimmedCert,
+        key_pem: trimmedKey,
+        ...(agentId && proxyId ? { agent_id: agentId, proxy_id: proxyId } : {}),
+      });
+      if (response.error) {
+        setRequestStatus("error");
+        setError(response.error);
+        return;
+      }
+      setRequestStatus("success");
+      setResultMessage(`Certificate for ${response.domain} uploaded successfully (issued by ${response.issuer}, expires ${new Date(response.expires_at).toLocaleDateString()})`);
+      setStep("complete");
+      onSuccess?.();
+    } catch (err: unknown) {
+      setRequestStatus("error");
+      const e = err as { message?: string; error?: string };
+      setError(e?.error || e?.message || "Failed to upload certificate");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const goToStep = (newStep: WizardStep) => {
     setError(null);
     if (newStep === "wildcard") {
@@ -408,6 +478,13 @@ export function SSLWizard({
         { key: "dns_verify", label: "Verify", icon: Check },
       ];
     }
+    if (sslSource === "external") {
+      return [
+        { key: "check", label: "Check", icon: Shield },
+        { key: "source", label: "Source", icon: FileKey },
+        { key: "upload", label: "Upload", icon: Lock },
+      ];
+    }
     // Let's Encrypt HTTP-01 flow
     return [
       { key: "check", label: "Check", icon: Shield },
@@ -422,11 +499,17 @@ export function SSLWizard({
   const currentStepIndex = steps.findIndex((s) => s.key === step);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center"
+      onClick={(e) => e.stopPropagation()}
+    >
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/50"
-        onClick={() => onOpenChange(false)}
+        onClick={(e) => {
+          e.stopPropagation();
+          onOpenChange(false);
+        }}
       />
 
       {/* Dialog */}
@@ -445,7 +528,10 @@ export function SSLWizard({
             </div>
           </div>
           <button
-            onClick={() => onOpenChange(false)}
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenChange(false);
+            }}
             className="p-2 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
           >
             <X className="h-5 w-5" />
@@ -590,7 +676,7 @@ export function SSLWizard({
 
                   {/* Actions */}
                   <div className="flex justify-between pt-4">
-                    <Button variant="secondary" onClick={() => onOpenChange(false)}>
+                    <Button variant="secondary" onClick={(e) => { e?.stopPropagation(); onOpenChange(false); }}>
                       Cancel
                     </Button>
                     <div className="flex gap-2">
@@ -717,6 +803,38 @@ export function SSLWizard({
                     </div>
                   </div>
                 </button>
+
+                {/* Upload custom certificate option */}
+                <button
+                  onClick={() => setSSLSource("external")}
+                  className={cn(
+                    "w-full p-4 rounded-lg border text-left transition-colors",
+                    sslSource === "external"
+                      ? "border-primary-500 bg-primary-50 dark:bg-primary-900/20"
+                      : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
+                  )}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className={cn(
+                      "w-5 h-5 rounded-full border-2 flex items-center justify-center mt-0.5",
+                      sslSource === "external"
+                        ? "border-primary-500"
+                        : "border-gray-300 dark:border-gray-600"
+                    )}>
+                      {sslSource === "external" && (
+                        <div className="w-2.5 h-2.5 rounded-full bg-primary-500" />
+                      )}
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-900 dark:text-white">
+                        Upload custom certificate
+                      </p>
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                        Paste your own certificate and private key (DigiCert, Sectigo, ZeroSSL, internal CA, etc.)
+                      </p>
+                    </div>
+                  </div>
+                </button>
               </div>
 
               {/* Actions */}
@@ -731,6 +849,8 @@ export function SSLWizard({
                       goToStep("wildcard");
                     } else if (sslSource === "dns_challenge") {
                       goToStep("email");
+                    } else if (sslSource === "external") {
+                      goToStep("upload");
                     } else {
                       goToStep("dns");
                     }
@@ -738,6 +858,76 @@ export function SSLWizard({
                   icon={ArrowRight}
                 >
                   Continue
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Step: Upload Custom Certificate */}
+          {step === "upload" && (
+            <div className="space-y-4">
+              <div className="text-center mb-2">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                  Upload Certificate
+                </h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Paste your PEM-encoded certificate and private key below
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Certificate (PEM)
+                </label>
+                <textarea
+                  value={uploadCertPEM}
+                  onChange={(e) => { setUploadCertPEM(e.target.value); setUploadValidationError(null); }}
+                  placeholder={"-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----"}
+                  rows={7}
+                  spellCheck={false}
+                  className="w-full px-3 py-2 font-mono text-xs bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none"
+                />
+                <p className="mt-1 text-xs text-gray-500">Include the full chain (cert + intermediates) if applicable</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Private Key (PEM)
+                </label>
+                <textarea
+                  value={uploadKeyPEM}
+                  onChange={(e) => { setUploadKeyPEM(e.target.value); setUploadValidationError(null); }}
+                  placeholder={"-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"}
+                  rows={7}
+                  spellCheck={false}
+                  className="w-full px-3 py-2 font-mono text-xs bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none"
+                />
+                <p className="mt-1 text-xs text-gray-500">Unencrypted key only — RSA, EC, and PKCS#8 supported</p>
+              </div>
+
+              {uploadValidationError && (
+                <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-400">
+                  {uploadValidationError}
+                </div>
+              )}
+
+              {error && (
+                <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-400">
+                  {error}
+                </div>
+              )}
+
+              <div className="flex justify-between pt-2">
+                <Button variant="secondary" onClick={() => goToStep("source")} icon={ArrowLeft}>
+                  Back
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={uploadCertificate}
+                  disabled={loading || !uploadCertPEM.trim() || !uploadKeyPEM.trim()}
+                  icon={loading ? Loader2 : Lock}
+                >
+                  {loading ? "Uploading..." : "Upload & Apply"}
                 </Button>
               </div>
             </div>
@@ -911,22 +1101,69 @@ export function SSLWizard({
                     </div>
                   </div>
 
+                  {/* Show individual domain results when include_www is enabled */}
+                  {includeWWW && (dnsResult as any).www_result && (
+                    <div className="space-y-2">
+                      <div className={cn(
+                        "p-3 rounded-lg border flex items-center gap-2",
+                        (dnsResult as any).main_result?.matches
+                          ? "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800"
+                          : "bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800"
+                      )}>
+                        {(dnsResult as any).main_result?.matches ? (
+                          <Check className="h-4 w-4 text-green-500" />
+                        ) : (
+                          <X className="h-4 w-4 text-yellow-500" />
+                        )}
+                        <span className="text-sm">{domain}: {(dnsResult as any).main_result?.resolved_ips?.join(", ") || "Not resolved"}</span>
+                      </div>
+                      <div className={cn(
+                        "p-3 rounded-lg border flex items-center gap-2",
+                        (dnsResult as any).www_result?.matches
+                          ? "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800"
+                          : "bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800"
+                      )}>
+                        {(dnsResult as any).www_result?.matches ? (
+                          <Check className="h-4 w-4 text-green-500" />
+                        ) : (
+                          <X className="h-4 w-4 text-yellow-500" />
+                        )}
+                        <span className="text-sm">www.{domain}: {(dnsResult as any).www_result?.resolved_ips?.join(", ") || "Not resolved"}</span>
+                      </div>
+                    </div>
+                  )}
+
                   {/* DNS Instructions */}
                   {!dnsResult.matches && (
                     <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
                       <h4 className="font-medium text-gray-900 dark:text-white mb-2">
-                        Add this DNS record:
+                        Add {includeWWW ? "these DNS records" : "this DNS record"}:
                       </h4>
-                      <div className="bg-white dark:bg-gray-900 p-3 rounded font-mono text-sm flex items-center justify-between border border-gray-200 dark:border-gray-700">
-                        <span className="text-gray-900 dark:text-white">
-                          A {domain} {serverIP || dnsResult.expected_ip}
-                        </span>
-                        <button
-                          onClick={() => copyToClipboard(`${domain} A ${serverIP || dnsResult.expected_ip}`)}
-                          className="p-1 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300"
-                        >
-                          <Copy className="h-4 w-4" />
-                        </button>
+                      <div className="space-y-2">
+                        <div className="bg-white dark:bg-gray-900 p-3 rounded font-mono text-sm flex items-center justify-between border border-gray-200 dark:border-gray-700">
+                          <span className="text-gray-900 dark:text-white">
+                            A {domain} {serverIP || dnsResult.expected_ip}
+                          </span>
+                          <button
+                            onClick={() => copyToClipboard(`${domain} A ${serverIP || dnsResult.expected_ip}`)}
+                            className="p-1 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300"
+                          >
+                            <Copy className="h-4 w-4" />
+                          </button>
+                        </div>
+                        {includeWWW && (
+                          <div className="bg-white dark:bg-gray-900 p-3 rounded font-mono text-sm flex items-center justify-between border border-gray-200 dark:border-gray-700">
+                            <span className="text-gray-900 dark:text-white">
+                              A www.{domain} {serverIP || dnsResult.expected_ip}
+                            </span>
+                            <button
+                              onClick={() => copyToClipboard(`www.${domain} A ${serverIP || dnsResult.expected_ip}`)}
+                              className="p-1 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300"
+                            >
+                              <Copy className="h-4 w-4" />
+                            </button>
+                          </div>
+                        )}
                       </div>
                       <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
                         DNS changes can take 1-48 hours to propagate. Usually 1-5 minutes.
@@ -1232,15 +1469,24 @@ export function SSLWizard({
                   Request Certificate
                 </h3>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Ready to request SSL certificate for {domain}
+                  Ready to request SSL certificate for {includeWWW ? `${domain} and www.${domain}` : domain}
                 </p>
               </div>
 
               <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 space-y-3">
-                <div className="flex items-center gap-2">
-                  <Globe className="h-4 w-4 text-gray-400" />
-                  <span className="font-medium text-gray-700 dark:text-gray-300">Domain:</span>
-                  <span className="text-gray-900 dark:text-white">{domain}</span>
+                <div className="flex items-start gap-2">
+                  <Globe className="h-4 w-4 text-gray-400 mt-0.5" />
+                  <span className="font-medium text-gray-700 dark:text-gray-300">{includeWWW ? "Domains:" : "Domain:"}</span>
+                  <div className="text-gray-900 dark:text-white">
+                    {includeWWW ? (
+                      <div className="flex flex-col">
+                        <span>{domain}</span>
+                        <span>www.{domain}</span>
+                      </div>
+                    ) : (
+                      <span>{domain}</span>
+                    )}
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <Mail className="h-4 w-4 text-gray-400" />
@@ -1301,14 +1547,14 @@ export function SSLWizard({
                   SSL Certificate Issued!
                 </h3>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                  {resultMessage || `SSL certificate has been issued for ${domain}`}
+                  {resultMessage || `SSL certificate has been issued for ${includeWWW ? `${domain} and www.${domain}` : domain}`}
                 </p>
               </div>
 
               <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800 text-sm text-left space-y-2">
                 <p className="flex items-center gap-2 text-green-700 dark:text-green-400">
                   <Check className="h-4 w-4" />
-                  <span>Certificate successfully issued by Let's Encrypt</span>
+                  <span>{sslSource === "external" ? "Certificate uploaded and installed" : "Certificate successfully issued by Let's Encrypt"}</span>
                 </p>
                 <p className="flex items-center gap-2 text-green-700 dark:text-green-400">
                   <Check className="h-4 w-4" />
@@ -1334,7 +1580,7 @@ export function SSLWizard({
                 </a>
               </p>
 
-              <Button variant="primary" onClick={() => onOpenChange(false)} className="mt-4">
+              <Button variant="primary" onClick={(e) => { e?.stopPropagation(); onOpenChange(false); }} className="mt-4">
                 Done
               </Button>
             </div>

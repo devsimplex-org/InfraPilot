@@ -3,11 +3,29 @@ FROM golang:1.24-alpine
 
 WORKDIR /app
 
-# Install Air for hot reload (v1.61.0 supports Go 1.24)
+# Install Air for hot reload
 RUN go install github.com/air-verse/air@v1.61.0
 
-# Install dependencies
-RUN apk add --no-cache git docker-cli
+# Install system dependencies
+RUN apk add --no-cache git docker-cli curl bash wget
+
+# Install Trivy and Syft from Alpine edge/community (they're not in main)
+# For dev environment, we'll use the official installer scripts with retry logic
+RUN wget -q -O /tmp/install-trivy.sh https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh && \
+    chmod +x /tmp/install-trivy.sh && \
+    /tmp/install-trivy.sh -b /usr/local/bin || \
+    (sleep 5 && /tmp/install-trivy.sh -b /usr/local/bin) && \
+    rm /tmp/install-trivy.sh
+
+RUN wget -q -O /tmp/install-syft.sh https://raw.githubusercontent.com/anchore/syft/main/install.sh && \
+    chmod +x /tmp/install-syft.sh && \
+    /tmp/install-syft.sh -b /usr/local/bin || \
+    (sleep 5 && /tmp/install-syft.sh -b /usr/local/bin) && \
+    rm /tmp/install-syft.sh
+
+# Install OPA (Open Policy Agent) for policy evaluation
+RUN wget -q -O /usr/local/bin/opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64_static && \
+    chmod +x /usr/local/bin/opa
 
 # Copy go mod files
 COPY go.mod go.sum* ./

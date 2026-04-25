@@ -279,8 +279,22 @@ func (h *Handler) updateInfraPilotDomain(c *gin.Context) {
 	// Audit log
 	h.auditLog(c, userID, orgID, "settings.infrapilot_domain.update", "system_settings", proxyID, req)
 
+	// Fetch basic auth settings from proxy_hosts
+	var basicAuthEnabled bool
+	var basicAuthRealm string
+	h.db.QueryRow(c.Request.Context(), `
+		SELECT COALESCE(basic_auth_enabled, false), COALESCE(basic_auth_realm, 'Restricted')
+		FROM proxy_hosts WHERE id = $1
+	`, proxyID).Scan(&basicAuthEnabled, &basicAuthRealm)
+
+	// Determine htpasswd path for this proxy (use sanitized domain)
+	htpasswdPath := ""
+	if basicAuthEnabled {
+		htpasswdPath = fmt.Sprintf("/data/nginx/conf.d/.htpasswd_%s", strings.ReplaceAll(req.Domain, ".", "_"))
+	}
+
 	// Dispatch the special InfraPilot nginx config to the agent
-	go h.dispatchInfraPilotProxyConfigWithCert(c.Request.Context(), agentID, proxyID, req.Domain, req.ForceSSL, req.HTTP2Enabled, req.SSLEnabled, certPath, keyPath)
+	go h.dispatchInfraPilotProxyConfigWithCert(c.Request.Context(), agentID, proxyID, req.Domain, req.ForceSSL, req.HTTP2Enabled, req.SSLEnabled, certPath, keyPath, basicAuthEnabled, basicAuthRealm, htpasswdPath)
 
 	// Update default.conf to serve welcome page for direct IP access
 	go h.dispatchDefaultPageConfig(agentID, orgID, true)
@@ -354,11 +368,11 @@ func (h *Handler) deleteInfraPilotDomain(c *gin.Context) {
 
 // dispatchInfraPilotProxyConfig sends the special InfraPilot nginx config to the agent (legacy, no custom cert)
 func (h *Handler) dispatchInfraPilotProxyConfig(ctx interface{}, agentID, proxyID uuid.UUID, domain string, forceSSL, http2, sslEnabled bool) {
-	h.dispatchInfraPilotProxyConfigWithCert(ctx, agentID, proxyID, domain, forceSSL, http2, sslEnabled, "", "")
+	h.dispatchInfraPilotProxyConfigWithCert(ctx, agentID, proxyID, domain, forceSSL, http2, sslEnabled, "", "", false, "", "")
 }
 
 // dispatchInfraPilotProxyConfigWithCert sends the special InfraPilot nginx config with optional custom cert paths
-func (h *Handler) dispatchInfraPilotProxyConfigWithCert(ctx interface{}, agentID, proxyID uuid.UUID, domain string, forceSSL, http2, sslEnabled bool, certPath, keyPath string) {
+func (h *Handler) dispatchInfraPilotProxyConfigWithCert(ctx interface{}, agentID, proxyID uuid.UUID, domain string, forceSSL, http2, sslEnabled bool, certPath, keyPath string, basicAuthEnabled bool, basicAuthRealm, htpasswdPath string) {
 	agentIDStr := agentID.String()
 
 	if !agentgrpc.IsAgentConnected(agentIDStr) {
@@ -370,10 +384,10 @@ func (h *Handler) dispatchInfraPilotProxyConfigWithCert(ctx interface{}, agentID
 	}
 
 	// Generate special InfraPilot nginx config that routes /api to backend
-	config := generateInfraPilotNginxConfig(domain, forceSSL, http2, sslEnabled, certPath, keyPath)
+	config := generateInfraPilotNginxConfig(domain, forceSSL, http2, sslEnabled, certPath, keyPath, basicAuthEnabled, basicAuthRealm, htpasswdPath)
 
-	// Build config path
-	configPath := filepath.Join("/etc/nginx/sites", domain+".conf")
+	// Build config path (same location as regular proxies)
+	configPath := filepath.Join("/data/nginx/conf.d", domain+".conf")
 
 	// Create command with config content
 	cmdPayload, _ := json.Marshal(agentgrpc.NginxCommand{
@@ -406,7 +420,8 @@ func (h *Handler) dispatchInfraPilotProxyConfigWithCert(ctx interface{}, agentID
 // generateInfraPilotNginxConfig creates the special nginx config for InfraPilot's domain
 // This routes /api/* to backend and everything else to frontend
 // certPath and keyPath are optional - if empty, defaults to Let's Encrypt paths for the domain
-func generateInfraPilotNginxConfig(domain string, forceSSL, http2, sslEnabled bool, certPath, keyPath string) string {
+// basicAuthEnabled, basicAuthRealm, and htpasswdPath control basic authentication
+func generateInfraPilotNginxConfig(domain string, forceSSL, http2, sslEnabled bool, certPath, keyPath string, basicAuthEnabled bool, basicAuthRealm, htpasswdPath string) string {
 	var config strings.Builder
 
 	// If no cert path specified, determine the correct Let's Encrypt path
@@ -428,10 +443,13 @@ func generateInfraPilotNginxConfig(domain string, forceSSL, http2, sslEnabled bo
 				effectiveKeyPath = wildcardKeyPath
 			}
 		}
-		// If no wildcard cert found, use exact domain path
+		// If no wildcard cert found, only use exact domain path if cert actually exists
 		if effectiveCertPath == "" {
-			effectiveCertPath = fmt.Sprintf("/etc/letsencrypt/live/%s/fullchain.pem", domain)
-			effectiveKeyPath = fmt.Sprintf("/etc/letsencrypt/live/%s/privkey.pem", domain)
+			exactCertPath := fmt.Sprintf("/etc/letsencrypt/live/%s/fullchain.pem", domain)
+			if _, err := os.Stat(exactCertPath); err == nil {
+				effectiveCertPath = exactCertPath
+				effectiveKeyPath = fmt.Sprintf("/etc/letsencrypt/live/%s/privkey.pem", domain)
+			}
 		}
 	}
 
@@ -449,9 +467,12 @@ func generateInfraPilotNginxConfig(domain string, forceSSL, http2, sslEnabled bo
 	config.WriteString("    listen 80;\n")
 	config.WriteString("    listen [::]:80;\n")
 	config.WriteString(fmt.Sprintf("    server_name %s;\n\n", domain))
+	// Per-domain logging for analytics
+	config.WriteString(fmt.Sprintf("    access_log /var/log/nginx/domains/%s.access.log infrapilot_analytics;\n", domain))
+	config.WriteString(fmt.Sprintf("    error_log /var/log/nginx/domains/%s.error.log warn;\n\n", domain))
 
-	if sslEnabled && forceSSL {
-		// ACME challenge must always be accessible for certificate renewals
+	if sslEnabled && forceSSL && effectiveCertPath != "" {
+		// Cert exists: ACME challenge support for renewals + redirect to HTTPS
 		config.WriteString("    # ACME challenge for Let's Encrypt (renewals)\n")
 		config.WriteString("    location /.well-known/acme-challenge/ {\n")
 		config.WriteString("        root /var/www/acme-challenge;\n")
@@ -462,12 +483,19 @@ func generateInfraPilotNginxConfig(domain string, forceSSL, http2, sslEnabled bo
 		config.WriteString("    }\n")
 		config.WriteString("}\n\n")
 	} else {
-		writeInfraPilotLocations(&config)
+		if sslEnabled {
+			// SSL requested but cert not yet available — serve ACME challenge for initial issuance
+			config.WriteString("    # ACME challenge for Let's Encrypt (initial issuance)\n")
+			config.WriteString("    location /.well-known/acme-challenge/ {\n")
+			config.WriteString("        root /var/www/acme-challenge;\n")
+			config.WriteString("    }\n\n")
+		}
+		writeInfraPilotLocations(&config, basicAuthEnabled, basicAuthRealm, htpasswdPath)
 		config.WriteString("}\n\n")
 	}
 
-	// HTTPS server block (if SSL enabled)
-	if sslEnabled {
+	// HTTPS server block (only if SSL enabled AND cert actually exists)
+	if sslEnabled && effectiveCertPath != "" {
 		config.WriteString("server {\n")
 		config.WriteString("    listen 443 ssl;\n")
 		config.WriteString("    listen [::]:443 ssl;\n")
@@ -475,6 +503,9 @@ func generateInfraPilotNginxConfig(domain string, forceSSL, http2, sslEnabled bo
 			config.WriteString("    http2 on;\n")
 		}
 		config.WriteString(fmt.Sprintf("    server_name %s;\n\n", domain))
+		// Per-domain logging for analytics
+		config.WriteString(fmt.Sprintf("    access_log /var/log/nginx/domains/%s.access.log infrapilot_analytics;\n", domain))
+		config.WriteString(fmt.Sprintf("    error_log /var/log/nginx/domains/%s.error.log warn;\n\n", domain))
 
 		// SSL configuration - use effective paths (custom, wildcard, or exact domain)
 		config.WriteString(fmt.Sprintf("    ssl_certificate %s;\n", effectiveCertPath))
@@ -493,7 +524,7 @@ func generateInfraPilotNginxConfig(domain string, forceSSL, http2, sslEnabled bo
 		config.WriteString("    add_header X-Content-Type-Options \"nosniff\" always;\n")
 		config.WriteString("    add_header X-XSS-Protection \"1; mode=block\" always;\n\n")
 
-		writeInfraPilotLocations(&config)
+		writeInfraPilotLocations(&config, basicAuthEnabled, basicAuthRealm, htpasswdPath)
 		config.WriteString("}\n")
 	}
 
@@ -502,10 +533,13 @@ func generateInfraPilotNginxConfig(domain string, forceSSL, http2, sslEnabled bo
 
 // writeInfraPilotLocations writes the location blocks for InfraPilot
 // Uses localhost addresses for single-container deployment mode
-func writeInfraPilotLocations(config *strings.Builder) {
-	// API routes to backend
-	config.WriteString("    # API routes to backend\n")
+func writeInfraPilotLocations(config *strings.Builder, basicAuthEnabled bool, basicAuthRealm, htpasswdPath string) {
+	// API routes to backend (no basic auth - uses JWT)
+	config.WriteString("    # API routes to backend (JWT auth, no basic auth)\n")
 	config.WriteString("    location /api/ {\n")
+	if basicAuthEnabled {
+		config.WriteString("        auth_basic off;\n")
+	}
 	config.WriteString("        proxy_pass http://127.0.0.1:8080;\n")
 	config.WriteString("        proxy_http_version 1.1;\n")
 	config.WriteString("        proxy_set_header Host $host;\n")
@@ -521,6 +555,10 @@ func writeInfraPilotLocations(config *strings.Builder) {
 	// Frontend (everything else)
 	config.WriteString("    # Frontend\n")
 	config.WriteString("    location / {\n")
+	if basicAuthEnabled && htpasswdPath != "" {
+		config.WriteString(fmt.Sprintf("        auth_basic \"%s\";\n", basicAuthRealm))
+		config.WriteString(fmt.Sprintf("        auth_basic_user_file %s;\n", htpasswdPath))
+	}
 	config.WriteString("        proxy_pass http://127.0.0.1:3000;\n")
 	config.WriteString("        proxy_http_version 1.1;\n")
 	config.WriteString("        proxy_set_header Host $host;\n")
@@ -531,9 +569,12 @@ func writeInfraPilotLocations(config *strings.Builder) {
 	config.WriteString("        proxy_set_header Connection \"upgrade\";\n")
 	config.WriteString("    }\n\n")
 
-	// ACME challenge for Let's Encrypt
+	// ACME challenge for Let's Encrypt (no auth)
 	config.WriteString("    # ACME challenge for Let's Encrypt\n")
 	config.WriteString("    location /.well-known/acme-challenge/ {\n")
+	if basicAuthEnabled {
+		config.WriteString("        auth_basic off;\n")
+	}
 	config.WriteString("        root /var/www/acme-challenge;\n")
 	config.WriteString("    }\n")
 }
@@ -593,6 +634,23 @@ func (h *Handler) dispatchDefaultPageConfig(agentID uuid.UUID, orgID uuid.UUID, 
 		return
 	}
 
+	// Write 502.html — served by nginx when any upstream container is down.
+	// Uses the user-configured 502/maintenance page, or a built-in fallback.
+	errorHTML := h.getErrorPageHTML(orgID)
+	errorPayload, _ := json.Marshal(agentgrpc.NginxCommand{
+		Action:        agentgrpc.NginxActionWriteConfig,
+		ConfigContent: errorHTML,
+		ConfigPath:    "/var/www/html/502.html",
+	})
+	errorCmd := &agentgrpc.BackendMessage{
+		RequestId: uuid.New().String(),
+		Type:      "nginx",
+		Command:   errorPayload,
+	}
+	if err := agentgrpc.SendCommandAsync(agentIDStr, errorCmd); err != nil {
+		h.logger.Error("Failed to dispatch error page HTML", zap.Error(err))
+	}
+
 	// Generate and dispatch updated default.conf
 	defaultConf := generateDefaultNginxConfig(domainConfigured)
 	confPayload, _ := json.Marshal(agentgrpc.NginxCommand{
@@ -615,6 +673,30 @@ func (h *Handler) dispatchDefaultPageConfig(agentID uuid.UUID, orgID uuid.UUID, 
 		zap.String("agent_id", agentIDStr),
 		zap.Bool("domain_configured", domainConfigured),
 	)
+}
+
+// getErrorPageHTML returns the HTML to serve when an upstream is unavailable (502/503/504).
+// Priority: enabled 502 page → enabled maintenance page → built-in default.
+func (h *Handler) getErrorPageHTML(orgID uuid.UUID) string {
+	ctx := context.Background()
+
+	for _, pageType := range []string{"502", "maintenance"} {
+		var page DefaultPage
+		err := h.db.QueryRow(ctx, `
+			SELECT page_type, enabled, title, heading, message, show_logo, custom_css
+			FROM default_pages
+			WHERE org_id = $1 AND page_type = $2
+		`, orgID, pageType).Scan(
+			&page.PageType, &page.Enabled, &page.Title, &page.Heading,
+			&page.Message, &page.ShowLogo, &page.CustomCSS,
+		)
+		if err == nil && page.Enabled {
+			return generateDefaultPageHTML(page)
+		}
+	}
+
+	// Neither is configured/enabled — render the built-in 502 template.
+	return generateDefaultPageHTML(defaultPageTemplates["502"])
 }
 
 // getWelcomePageHTML retrieves the welcome page HTML from database or returns default

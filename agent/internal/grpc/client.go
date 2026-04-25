@@ -43,17 +43,22 @@ type BackendMessage struct {
 }
 
 type AgentMessage struct {
-	RequestId string      `json:"request_id"`
-	Response  interface{} `json:"response"`
+	RequestId string          `json:"request_id"`
+	Type      string          `json:"type,omitempty"` // "pull_progress" for streaming updates, empty for final response
+	Response  interface{}     `json:"response,omitempty"`
+	Data      json.RawMessage `json:"data,omitempty"` // Used for progress data
 }
 
 type NginxCommand struct {
-	Action        string `json:"action"`
-	ConfigContent string `json:"config_content"`
-	ConfigPath    string `json:"config_path"`
-	Domain        string `json:"domain"`
-	Email         string `json:"email"`
-	DNSProvider   string `json:"dns_provider"`
+	Action          string `json:"action"`
+	ConfigContent   string `json:"config_content"`
+	ConfigPath      string `json:"config_path"`
+	Domain          string `json:"domain"`
+	Email           string `json:"email"`
+	DNSProvider     string `json:"dns_provider"`
+	IncludeWWW      bool   `json:"include_www"`
+	HtpasswdContent string `json:"htpasswd_content"`
+	HtpasswdPath    string `json:"htpasswd_path"`
 }
 
 type NetworkCommand struct {
@@ -121,6 +126,16 @@ func (c *Client) SendError(requestID string, code int, message string) {
 			Code:    code,
 			Message: message,
 		},
+	}
+}
+
+// SendProgress sends a progress update to the backend (for streaming operations)
+func (c *Client) SendProgress(requestID string, msgType string, data interface{}) {
+	dataBytes, _ := json.Marshal(data)
+	c.sendCh <- &AgentMessage{
+		RequestId: requestID,
+		Type:      msgType,
+		Data:      dataBytes,
 	}
 }
 
@@ -306,6 +321,45 @@ func (c *Client) handleWebSocketConnection(ctx context.Context, conn *websocket.
 					return
 				}
 				c.logger.Debug("WebSocket ping sent")
+			}
+		}
+	}()
+
+	// Start goroutine to send progress messages from sendCh
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg, ok := <-c.sendCh:
+				if !ok {
+					return
+				}
+
+				data, err := json.Marshal(msg)
+				if err != nil {
+					c.logger.Error("Failed to marshal send message", zap.Error(err))
+					continue
+				}
+
+				c.streamMu.Lock()
+				err = conn.WriteMessage(websocket.TextMessage, data)
+				c.streamMu.Unlock()
+
+				if err != nil {
+					c.logger.Error("Failed to send message via WebSocket",
+						zap.String("request_id", msg.RequestId),
+						zap.String("type", msg.Type),
+						zap.Error(err),
+					)
+					done <- fmt.Errorf("send error: %w", err)
+					return
+				}
+
+				c.logger.Info("Sent progress message via WebSocket",
+					zap.String("request_id", msg.RequestId),
+					zap.String("type", msg.Type),
+				)
 			}
 		}
 	}()

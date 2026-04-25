@@ -5,27 +5,26 @@
 # Usage:
 #   docker compose -f docker-compose.dev.yml up
 #
-# Dashboard: http://localhost
-# API:       http://localhost/api/v1
-#
+# Note: No ports exposed - services communicate within Docker network
+# For local dev with host access, use: ./scripts/dev.sh dev
 # =============================================================
 
 services:
   # =============================================================
-  # PostgreSQL Database
+  # PostgreSQL Database with TimescaleDB for nginx log analytics
   # =============================================================
   postgres:
-    image: postgres:16-alpine
+    image: timescale/timescaledb:latest-pg16
     container_name: infrapilot-dev-postgres
     environment:
       POSTGRES_USER: infrapilot
       POSTGRES_PASSWORD: infrapilot
       POSTGRES_DB: infrapilot
-    ports:
-      - "5432:5432"
+    # ports:
+    #   - "5432:5432"  # Uncomment if you need direct host access (e.g., database GUI)
     volumes:
       - postgres_dev_data:/var/lib/postgresql/data
-      - ./backend/internal/db/migrations:/docker-entrypoint-initdb.d:ro
+      # Migrations are run by the backend app, not initdb
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U infrapilot"]
       interval: 5s
@@ -40,8 +39,8 @@ services:
   redis:
     image: redis:7-alpine
     container_name: infrapilot-dev-redis
-    ports:
-      - "6379:6379"
+    # ports:
+    #   - "6379:6379"  # Uncomment if you need direct host access
     volumes:
       - redis_dev_data:/data
     healthcheck:
@@ -53,26 +52,6 @@ services:
       - infrapilot-dev
 
   # =============================================================
-  # Nginx (Managed Proxy)
-  # =============================================================
-  nginx:
-    image: nginx:stable-alpine
-    container_name: infrapilot-dev-nginx
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - nginx_dev_default_conf:/etc/nginx/conf.d
-      - nginx_dev_conf:/etc/nginx/sites
-      - nginx_dev_certs:/etc/letsencrypt
-      - acme_webroot:/var/www/acme-challenge
-    depends_on:
-      - frontend
-      - backend
-    networks:
-      - infrapilot-dev
-
-  # =============================================================
   # Backend API (Hot Reload with Air)
   # =============================================================
   backend:
@@ -80,17 +59,14 @@ services:
       context: ./backend
       dockerfile: Dockerfile.dev
     container_name: infrapilot-dev-backend
-    ports:
-      - "8080:8080"
-      - "9090:9090"
     environment:
       ENV: development
       HTTP_PORT: 8080
       GRPC_PORT: 9090
-      DATABASE_URL: postgres://infrapilot:infrapilot@postgres:5432/infrapilot?sslmode=disable
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgres://infrapilot:infrapilot@infrapilot-dev-postgres:5432/infrapilot?sslmode=disable
+      REDIS_URL: redis://infrapilot-dev-redis:6379
       JWT_SECRET: dev-secret-key-for-development-only-32chars
-      ALLOWED_ORIGINS: http://localhost
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost}
     volumes:
       - ./backend:/app
       - go_mod_cache:/go/pkg/mod
@@ -112,7 +88,8 @@ services:
       dockerfile: Dockerfile.dev
     container_name: infrapilot-dev-frontend
     environment:
-      NEXT_PUBLIC_API_URL: /api/v1
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api/v1}
+      BACKEND_URL: http://backend:8080
       WATCHPACK_POLLING: "true"
     volumes:
       - ./frontend:/app
@@ -138,25 +115,45 @@ services:
       # ENROLLMENT_TOKEN: "your-enrollment-token-here"
       BACKEND_GRPC_ADDR: backend:9090
       BACKEND_HTTP_URL: http://backend:8080
-      NGINX_CONTAINER_NAME: infrapilot-dev-nginx
-      NGINX_CONFIG_PATH: /etc/nginx/sites
-      PROXY_MODE: managed
       DATA_DIR: /var/lib/infrapilot-agent
       LOG_PERSISTENCE: "true"
-      ACME_WEBROOT: /var/www/acme-challenge
-      CERT_DIR: /etc/letsencrypt
+      # Nginx log analytics - streams access logs to backend
+      NGINX_LOG_ANALYTICS: "true"
+      NGINX_ACCESS_LOG_PATH: /var/log/nginx/access.log
     volumes:
       - ./agent:/app
       - /var/run/docker.sock:/var/run/docker.sock
-      - nginx_dev_conf:/etc/nginx/sites
-      - nginx_dev_certs:/etc/letsencrypt
-      - nginx_dev_default_conf:/etc/nginx/conf.d
-      - acme_webroot:/var/www/acme-challenge
       - go_mod_cache:/go/pkg/mod
       - agent_dev_data:/var/lib/infrapilot-agent
+      # Mount nginx logs from the nginx container for analytics
+      - nginx_dev_logs:/var/log/nginx:ro
     depends_on:
       - backend
       - nginx
+    networks:
+      - infrapilot-dev
+
+  # =============================================================
+  # Nginx - Managed by Agent for network attachments
+  # =============================================================
+  nginx:
+    image: nginx:stable-alpine
+    container_name: infrapilot-nginx
+    # No ports exposed - external nginx on host handles traffic
+    # This container is for agent to manage network attachments
+    # Remove default stdout symlinks and create actual log files for analytics
+    command: >
+      sh -c "rm -f /var/log/nginx/access.log /var/log/nginx/error.log &&
+             mkdir -p /var/log/nginx/domains &&
+             touch /var/log/nginx/access.log /var/log/nginx/error.log &&
+             chmod 644 /var/log/nginx/access.log /var/log/nginx/error.log &&
+             chmod 755 /var/log/nginx/domains &&
+             nginx -g 'daemon off;'"
+    volumes:
+      - ./deployments/nginx-dev.conf:/etc/nginx/nginx.conf:ro
+      - nginx_dev_conf:/etc/nginx/sites
+      - nginx_dev_certs:/etc/letsencrypt
+      - nginx_dev_logs:/var/log/nginx
     networks:
       - infrapilot-dev
 
@@ -167,9 +164,8 @@ networks:
 volumes:
   postgres_dev_data:
   redis_dev_data:
-  nginx_dev_conf:
-  nginx_dev_certs:
-  nginx_dev_default_conf:
-  acme_webroot:
   go_mod_cache:
   agent_dev_data:
+  nginx_dev_conf:
+  nginx_dev_certs:
+  nginx_dev_logs:
