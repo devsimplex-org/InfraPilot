@@ -60,3 +60,6 @@ storybook-static
 # Backup files
 *.bak
 *.orig
+
+DEV-PROD-SETUP.md
+.dev-logs

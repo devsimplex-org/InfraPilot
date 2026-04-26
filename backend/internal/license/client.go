@@ -125,6 +125,21 @@ func (c *Client) Validate() (*ValidationResponse, error) {
 		return nil, wrappedErr
 	}
 
+	// For community-tier licenses, ensure all local CommunityFeatures are
+	// included regardless of what infrapilot.org returns — the API may lag
+	// behind local feature additions.
+	if resp.Valid && resp.Tier == "community" {
+		featureSet := make(map[string]struct{}, len(resp.Features))
+		for _, f := range resp.Features {
+			featureSet[f] = struct{}{}
+		}
+		for _, f := range CommunityFeatures() {
+			if _, ok := featureSet[f]; !ok {
+				resp.Features = append(resp.Features, f)
+			}
+		}
+	}
+
 	c.mu.Lock()
 	c.cached = resp
 	c.cachedAt = time.Now()
