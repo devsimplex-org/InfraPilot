@@ -6,13 +6,10 @@ import {
   RefreshCw,
   Plus,
   Globe,
-  Shield,
-  Network,
   FileText,
-  Activity,
-  Settings,
-  Layers,
   BarChart3,
+  Zap,
+  Layers,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -30,8 +27,6 @@ const tabGroups = [
     label: "Traffic Governance",
     tabs: [
       { id: "overview", label: "Overview", href: "/traffic", icon: Layers },
-      { id: "resources", label: "Resources", href: "/traffic/resources", icon: Network },
-      { id: "policies", label: "Policies", href: "/traffic/policies", icon: Shield },
     ],
   },
   {
@@ -44,13 +39,10 @@ const tabGroups = [
     ],
   },
   {
-    id: "exposure",
-    label: "Exposure",
+    id: "upgrade",
+    label: "Pro / Enterprise",
     tabs: [
-      { id: "exposure", label: "Exposure", href: "/traffic/exposure", icon: Activity },
-      { id: "endpoints", label: "Endpoints", href: "/traffic/exposure/endpoints", icon: Globe },
-      { id: "ratelimits", label: "Rate Limits", href: "/traffic/exposure/ratelimits", icon: Settings },
-      { id: "tls", label: "TLS Posture", href: "/traffic/exposure/tls", icon: Shield },
+      { id: "upgrade", label: "Upgrade", href: "/traffic/upgrade", icon: Zap },
     ],
   },
 ];
@@ -71,13 +63,11 @@ export default function TrafficLayout({ children }: { children: ReactNode }) {
 
   // Set default agent
   const activeAgents = agents?.filter((a) => a.status === "active") || [];
-  const effectiveAgent = selectedAgent || activeAgents[0]?.id;
 
-  // Check if we're on a detail or create page (e.g., /traffic/resources/[id] or /traffic/resources/create)
-  // Exposure sub-tabs (/traffic/exposure/endpoints etc.) must NOT be treated as sub-pages
+  // Check if we're on a detail or create page (e.g., /traffic/proxies/create)
   const pathParts = pathname.split("/").filter(Boolean);
-  const knownSegments = ["resources", "policies", "proxies", "logs", "analytics", "exposure"];
-  const isSubPage = pathParts.length > 2 && pathParts[1] !== "exposure" && !knownSegments.includes(pathParts[2]);
+  const knownSegments = ["proxies", "logs", "analytics", "upgrade"];
+  const isSubPage = pathParts.length > 2 && !knownSegments.includes(pathParts[2]);
 
   // Determine active tab from pathname
   const getActiveTab = () => {
@@ -85,49 +75,16 @@ export default function TrafficLayout({ children }: { children: ReactNode }) {
     if (pathname === "/traffic/proxies" || pathname.startsWith("/traffic/proxies/")) return "proxies";
     if (pathname === "/traffic/analytics" || pathname.startsWith("/traffic/analytics/")) return "analytics";
     if (pathname === "/traffic/logs" || pathname.startsWith("/traffic/logs/")) return "logs";
-    if (pathname === "/traffic/exposure") return "exposure";
-    if (pathname === "/traffic/exposure/endpoints") return "endpoints";
-    if (pathname === "/traffic/exposure/ratelimits") return "ratelimits";
-    if (pathname === "/traffic/exposure/tls") return "tls";
+    if (pathname === "/traffic/upgrade") return "upgrade";
     const segment = pathname.split("/")[2];
     return segment || "overview";
   };
 
   const activeTab = getActiveTab();
 
-  // Check which group the active tab belongs to
-  const getActiveGroup = () => {
-    for (const group of tabGroups) {
-      if (group.tabs.some((t) => t.id === activeTab)) {
-        return group.id;
-      }
-    }
-    return "governance";
-  };
-
   // Get action button based on active tab
   const getActionButton = () => {
     switch (activeTab) {
-      case "resources":
-        return (
-          <button
-            onClick={() => router.push("/traffic/resources/create")}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors text-sm font-medium"
-          >
-            <Plus className="w-4 h-4" />
-            New Resource
-          </button>
-        );
-      case "policies":
-        return (
-          <button
-            onClick={() => router.push("/traffic/policies/create")}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors text-sm font-medium"
-          >
-            <Plus className="w-4 h-4" />
-            New Policy
-          </button>
-        );
       case "proxies":
         return (
           <button
@@ -148,7 +105,7 @@ export default function TrafficLayout({ children }: { children: ReactNode }) {
       <div className="space-y-6">
         <PageHeader
           title="Traffic"
-          description="Manage traffic routing, policies, and nginx configuration"
+          description="Manage traffic routing and nginx configuration"
           breadcrumbs={<Breadcrumb items={[{ label: "Overview" }, { label: "Traffic" }]} />}
         />
         <Spinner.LogoPage label="Loading..." />
@@ -172,13 +129,13 @@ export default function TrafficLayout({ children }: { children: ReactNode }) {
       {/* Page Header */}
       <PageHeader
         title="Traffic"
-        description="Manage traffic routing, policies, and nginx configuration"
+        description="Manage traffic routing and nginx configuration"
         breadcrumbs={<Breadcrumb items={[{ label: "Overview" }, { label: "Traffic" }]} />}
         action={
           <div className="flex items-center gap-3">
             {activeAgents.length > 1 && (
               <select
-                value={effectiveAgent || ""}
+                value={selectedAgent || activeAgents[0]?.id || ""}
                 onChange={(e) => setSelectedAgent(e.target.value)}
                 className="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-2 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
               >
@@ -216,6 +173,7 @@ export default function TrafficLayout({ children }: { children: ReactNode }) {
                 <div className="flex">
                   {group.tabs.map((tab) => {
                     const Icon = tab.icon;
+                    const isUpgrade = tab.id === "upgrade";
                     return (
                       <button
                         key={tab.id}
@@ -223,8 +181,12 @@ export default function TrafficLayout({ children }: { children: ReactNode }) {
                         className={cn(
                           "flex items-center gap-1.5 whitespace-nowrap border-b-2 py-3 px-3 text-sm font-medium transition-colors",
                           activeTab === tab.id
-                            ? "border-primary-500 text-primary-600 dark:text-primary-400"
-                            : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+                            ? isUpgrade
+                              ? "border-purple-500 text-purple-600 dark:text-purple-400"
+                              : "border-primary-500 text-primary-600 dark:text-primary-400"
+                            : isUpgrade
+                              ? "border-transparent text-purple-500 hover:border-purple-300 hover:text-purple-600 dark:text-purple-400 dark:hover:text-purple-300"
+                              : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
                         )}
                       >
                         <Icon className="w-4 h-4" />

@@ -222,7 +222,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 			// License info (authenticated users can see their tier)
 			protected.GET("/license", h.LicenseInfo)
 
-			// Traffic & Exposure Governance (Epic 13)
+			// Exposure & Rate Limits (used by /run/exposure section)
 			exposure := protected.Group("/exposure")
 			{
 				exposure.GET("/endpoints", h.listExposedEndpoints)
@@ -234,7 +234,6 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				exposure.GET("/map", h.getExposureMap)
 			}
 
-			// Rate Limit Profiles (Epic 13)
 			ratelimits := protected.Group("/ratelimits")
 			{
 				ratelimits.GET("/profiles", h.listRateLimitProfiles)
@@ -243,7 +242,6 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				ratelimits.DELETE("/profiles/:id", h.RequireManageAlerts(), h.deleteRateLimitProfile)
 			}
 
-			// TLS Governance (Epic 13)
 			tls := protected.Group("/tls")
 			{
 				tls.GET("/posture", h.getTLSPosture)
@@ -252,41 +250,10 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				tls.PUT("/config", h.RequireManageAlerts(), h.updateTLSAlertConfig)
 			}
 
-			// Traffic Resources & Policies (Epic 13 v2)
+			// Traffic (CE: summary only; resources & policies are Pro/Enterprise)
 			traffic := protected.Group("/traffic")
 			{
-				// Traffic summary
 				traffic.GET("/summary", h.getTrafficSummary)
-
-				// Traffic Resources
-				traffic.GET("/resources", h.listTrafficResources)
-				traffic.GET("/resources/:id", h.getTrafficResource)
-				traffic.POST("/resources", h.RequireManageAlerts(), h.createTrafficResource)
-				traffic.PUT("/resources/:id", h.RequireManageAlerts(), h.updateTrafficResource)
-				traffic.DELETE("/resources/:id", h.RequireManageAlerts(), h.deleteTrafficResource)
-
-				// Traffic Resource Upstreams
-				traffic.GET("/resources/:id/upstreams", h.listTrafficUpstreams)
-				traffic.POST("/resources/:id/upstreams", h.RequireManageAlerts(), h.createTrafficUpstream)
-
-				// Traffic Resource Apply/Validate/Rollback
-				traffic.POST("/resources/:id/apply", h.RequireManageAlerts(), h.applyTrafficResource)
-				traffic.POST("/resources/:id/dry-run", h.RequireManageAlerts(), h.dryRunTrafficResource)
-				traffic.POST("/resources/:id/rollback", h.RequireManageAlerts(), h.rollbackTrafficResource)
-				traffic.GET("/resources/:id/config-preview", h.getTrafficResourceConfigPreview)
-
-				// Traffic Resource History
-				traffic.GET("/resources/:id/history", h.getTrafficApplyHistory)
-
-				// Traffic Policies
-				traffic.GET("/policies", h.listTrafficPolicies)
-				traffic.GET("/policies/:id", h.getTrafficPolicy)
-				traffic.POST("/policies", h.RequireManageAlerts(), h.createTrafficPolicy)
-				traffic.PUT("/policies/:id", h.RequireManageAlerts(), h.updateTrafficPolicy)
-				traffic.DELETE("/policies/:id", h.RequireManageAlerts(), h.deleteTrafficPolicy)
-
-				// Policy Assignment
-				traffic.POST("/policies/:id/assign", h.RequireManageAlerts(), h.assignTrafficPolicy)
 			}
 
 			// Alerts
