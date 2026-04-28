@@ -92,7 +92,7 @@ func main() {
 
 	// Start heartbeat loop using enrollment manager (fingerprint-based)
 	if enrollmentMgr.IsEnrolled() {
-		enrollmentMgr.StartHeartbeatLoop(ctx, time.Duration(cfg.HeartbeatInterval)*time.Second)
+		enrollmentMgr.StartHeartbeatLoop(ctx, time.Duration(cfg.HeartbeatInterval)*time.Second, metricsCollector)
 	} else {
 		// Fallback: start metrics-only heartbeat loop if using legacy agent ID
 		go func() {

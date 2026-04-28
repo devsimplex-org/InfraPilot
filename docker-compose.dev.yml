@@ -108,6 +108,7 @@ services:
       context: ./agent
       dockerfile: Dockerfile.dev
     container_name: infrapilot-dev-agent
+    hostname: local-agent
     environment:
       # For development, we use a static agent ID
       # In production/SaaS, remove AGENT_ID and set ENROLLMENT_TOKEN instead

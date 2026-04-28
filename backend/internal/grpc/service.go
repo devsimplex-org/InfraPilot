@@ -240,10 +240,29 @@ func (s *AgentService) Heartbeat(ctx context.Context, req *HeartbeatRequest) (*H
 		return nil, status.Error(codes.InvalidArgument, "invalid agent ID")
 	}
 
-	// Update last seen
-	_, err = s.db.Exec(ctx, `
-		UPDATE agents SET last_seen_at = NOW() WHERE id = $1
-	`, agentID)
+	// Update last seen and persist host resource metrics
+	if req.Metrics != nil {
+		_, err = s.db.Exec(ctx, `
+			UPDATE agents SET
+				last_seen_at      = NOW(),
+				cpu_percent       = $2,
+				memory_used_mb    = $3,
+				memory_total_mb   = $4,
+				disk_used_mb      = $5,
+				disk_total_mb     = $6,
+				uptime_seconds    = $7
+			WHERE id = $1
+		`, agentID,
+			req.Metrics.CpuPercent,
+			req.Metrics.MemoryUsedMb,
+			req.Metrics.MemoryTotalMb,
+			req.Metrics.DiskUsedMb,
+			req.Metrics.DiskTotalMb,
+			req.Metrics.UptimeSeconds,
+		)
+	} else {
+		_, err = s.db.Exec(ctx, `UPDATE agents SET last_seen_at = NOW() WHERE id = $1`, agentID)
+	}
 
 	if err != nil {
 		return nil, status.Error(codes.Internal, "heartbeat failed")

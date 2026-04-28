@@ -13,6 +13,7 @@ import {
   Shield,
   Download,
   Lock,
+  Rocket,
 } from "lucide-react";
 import { api, DockerImage } from "@/lib/api";
 import { useDocker, formatSize } from "@/lib/docker-context";
@@ -25,6 +26,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { Button } from "@/components/ui/page-layout";
 import { cn } from "@/lib/utils";
 import { FilterToolbar } from "@/components/ui/FilterToolbar";
+import { DeployWizard } from "@/components/DeployWizard";
 
 export default function DockerImagesPage() {
   const queryClient = useQueryClient();
@@ -35,6 +37,7 @@ export default function DockerImagesPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<{ total: number; completed: number; failed: string[] } | null>(null);
+  const [deployTarget, setDeployTarget] = useState<DockerImage | null>(null);
 
   // Fetch images
   const { data: images, isLoading } = useQuery({
@@ -179,6 +182,22 @@ export default function DockerImagesPage() {
         <ContainerListPopover containers={value} onContainerClick={openContainerPanel} label="container" />
       ),
     },
+    {
+      key: "actions",
+      header: "",
+      width: "60px",
+      render: (_: unknown, row: DockerImage) => (
+        row.tags.length > 0 ? (
+          <button
+            onClick={(e) => { e.stopPropagation(); setDeployTarget(row); }}
+            className="p-1.5 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 rounded"
+            title="Deploy container from this image"
+          >
+            <Rocket className="h-4 w-4" />
+          </button>
+        ) : null
+      ),
+    },
   ];
 
   if (!selectedAgent) {
@@ -254,6 +273,16 @@ export default function DockerImagesPage() {
           }
         />
       )}
+
+      {/* Deploy Wizard — triggered from image row */}
+      <DeployWizard
+        isOpen={!!deployTarget}
+        onClose={() => setDeployTarget(null)}
+        imageRepository={deployTarget?.tags[0]?.split(":")[0] || ""}
+        imageTag={deployTarget?.tags[0]?.split(":")[1] || "latest"}
+        imageDigest={deployTarget?.id}
+        onSuccess={() => setDeployTarget(null)}
+      />
 
       {/* Bulk Delete Modal */}
       {showBulkDeleteModal && (
