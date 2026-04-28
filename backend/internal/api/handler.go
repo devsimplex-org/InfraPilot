@@ -343,6 +343,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 		v1.POST("/agents/enroll", h.EnrollAgent)
 		v1.GET("/agents/enroll/status", h.GetEnrollmentStatus)
 		v1.POST("/agents/heartbeat", h.AgentHeartbeat)
+		v1.POST("/agents/:id/heartbeat", h.AgentHeartbeatByID) // legacy / unenrolled path
 
 		// Agent WebSocket command stream
 		v1.GET("/agents/:id/ws/commands", h.agentCommandStream)

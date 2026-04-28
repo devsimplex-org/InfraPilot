@@ -269,12 +269,23 @@ func (h *Handler) GetEnrollmentStatus(c *gin.Context) {
 	})
 }
 
-// AgentHeartbeat updates the agent's last seen timestamp
+// agentMetricsPayload holds the common metric fields sent by agents on heartbeat
+type agentMetricsPayload struct {
+	CPUPercent    float64 `json:"cpu_percent"`
+	MemoryUsedMB  int64   `json:"memory_used_mb"`
+	MemoryTotalMB int64   `json:"memory_total_mb"`
+	DiskUsedMB    int64   `json:"disk_used_mb"`
+	DiskTotalMB   int64   `json:"disk_total_mb"`
+	UptimeSeconds int64   `json:"uptime_seconds"`
+}
+
+// AgentHeartbeat updates the agent's last seen timestamp (fingerprint-based, enrolled agents)
 // POST /api/v1/agents/heartbeat
 func (h *Handler) AgentHeartbeat(c *gin.Context) {
 	var req struct {
 		Fingerprint string `json:"fingerprint" binding:"required"`
 		Version     string `json:"version,omitempty"`
+		agentMetricsPayload
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -284,12 +295,20 @@ func (h *Handler) AgentHeartbeat(c *gin.Context) {
 
 	result, err := h.db.Exec(c.Request.Context(), `
 		UPDATE agents SET
-			last_seen_at = NOW(),
-			status = 'active',
-			version = COALESCE($2, version),
-			updated_at = NOW()
+			last_seen_at    = NOW(),
+			status          = 'active',
+			version         = COALESCE($2, version),
+			cpu_percent     = $3,
+			memory_used_mb  = $4,
+			memory_total_mb = $5,
+			disk_used_mb    = $6,
+			disk_total_mb   = $7,
+			uptime_seconds  = $8,
+			updated_at      = NOW()
 		WHERE fingerprint = $1
-	`, req.Fingerprint, req.Version)
+	`, req.Fingerprint, req.Version,
+		req.CPUPercent, req.MemoryUsedMB, req.MemoryTotalMB,
+		req.DiskUsedMB, req.DiskTotalMB, req.UptimeSeconds)
 
 	if err != nil {
 		h.logger.Error("Failed to update heartbeat", zap.Error(err))
@@ -299,6 +318,49 @@ func (h *Handler) AgentHeartbeat(c *gin.Context) {
 
 	if result.RowsAffected() == 0 {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Agent not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+// AgentHeartbeatByID updates metrics for the legacy / unenrolled agent path (agent_id in URL)
+// POST /api/v1/agents/:id/heartbeat
+func (h *Handler) AgentHeartbeatByID(c *gin.Context) {
+	agentIDStr := c.Param("id")
+	agentID, err := uuid.Parse(agentIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid agent ID"})
+		return
+	}
+
+	var req struct {
+		Hostname string `json:"hostname"`
+		agentMetricsPayload
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	_, err = h.db.Exec(c.Request.Context(), `
+		UPDATE agents SET
+			last_seen_at    = NOW(),
+			status          = 'active',
+			hostname        = CASE WHEN $2 <> '' THEN $2 ELSE hostname END,
+			cpu_percent     = $3,
+			memory_used_mb  = $4,
+			memory_total_mb = $5,
+			disk_used_mb    = $6,
+			disk_total_mb   = $7,
+			uptime_seconds  = $8
+		WHERE id = $1
+	`, agentID, req.Hostname,
+		req.CPUPercent, req.MemoryUsedMB, req.MemoryTotalMB,
+		req.DiskUsedMB, req.DiskTotalMB, req.UptimeSeconds)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "heartbeat failed"})
 		return
 	}
 

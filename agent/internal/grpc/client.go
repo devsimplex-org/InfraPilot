@@ -1,9 +1,11 @@
 package grpc
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"runtime"
@@ -161,7 +163,6 @@ func (c *Client) Register(ctx context.Context, hostname string) (string, error) 
 }
 
 func (c *Client) Heartbeat(ctx context.Context, agentID string, sysMetrics *metrics.SystemMetrics, containers []docker.ContainerInfo) error {
-	// In production, use generated protobuf client
 	c.logger.Debug("Sending heartbeat",
 		zap.String("agent_id", agentID),
 		zap.Float64("cpu_percent", sysMetrics.CPUPercent),
@@ -169,7 +170,44 @@ func (c *Client) Heartbeat(ctx context.Context, agentID string, sysMetrics *metr
 		zap.Int("container_count", len(containers)),
 	)
 
-	// Placeholder for actual gRPC call
+	// Post metrics via HTTP heartbeat endpoint (legacy / unenrolled path)
+	backendHTTPURL := os.Getenv("BACKEND_HTTP_URL")
+	if backendHTTPURL == "" {
+		backendHTTPURL = "http://backend:8080"
+	}
+
+	hostname, _ := os.Hostname()
+	payload := map[string]interface{}{
+		"agent_id":        agentID,
+		"hostname":        hostname,
+		"cpu_percent":     sysMetrics.CPUPercent,
+		"memory_used_mb":  sysMetrics.MemoryUsedMB,
+		"memory_total_mb": sysMetrics.MemoryTotalMB,
+		"disk_used_mb":    sysMetrics.DiskUsedMB,
+		"disk_total_mb":   sysMetrics.DiskTotalMB,
+		"uptime_seconds":  sysMetrics.UptimeSeconds,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal heartbeat: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST",
+		fmt.Sprintf("%s/api/v1/agents/%s/heartbeat", backendHTTPURL, agentID),
+		bytes.NewReader(body),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create heartbeat request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("heartbeat request failed: %w", err)
+	}
+	resp.Body.Close()
+
 	return nil
 }
 

@@ -2,7 +2,7 @@
 
 import { ReactNode, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { RefreshCw, Server, Download, Plus, Layers } from "lucide-react";
+import { RefreshCw, Server, Download, Plus, Layers, Rocket, X, Loader2, CheckCircle, AlertTriangle } from "lucide-react";
 
 type Tab = {
   id: string;
@@ -11,7 +11,8 @@ type Tab = {
   requiredFeature?: string;
   tierLabel?: string;
 };
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useMutation } from "@tanstack/react-query";
+import { api } from "@/lib/api";
 import { DockerProvider, useDocker } from "@/lib/docker-context";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
@@ -20,6 +21,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { ContainerPanel } from "@/components/docker/ContainerPanel";
 import { DeploymentPanel } from "@/components/docker/DeploymentPanel";
 import { StackDeployWizard } from "@/components/StackDeployWizard";
+import { DeployWizard } from "@/components/DeployWizard";
 import { cn } from "@/lib/utils";
 
 const tabGroups: { id: string; label: string; tabs: Tab[] }[] = [
@@ -51,6 +53,38 @@ function DockerLayoutContent({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const { activeAgents, selectedAgent, setSelectedAgent, isLoadingAgents } = useDocker();
   const [showStackDeployWizard, setShowStackDeployWizard] = useState(false);
+  const [showDeployWizard, setShowDeployWizard] = useState(false);
+  const [showPullModal, setShowPullModal] = useState(false);
+  const [pullInput, setPullInput] = useState("");
+  const [pullStage, setPullStage] = useState<"idle" | "pulling" | "success" | "error">("idle");
+  const [pullError, setPullError] = useState<string | null>(null);
+
+  const pullMutation = useMutation({
+    mutationFn: () => api.pullDockerImage(selectedAgent!, pullInput.trim()),
+    onSuccess: () => {
+      setPullStage("success");
+      queryClient.invalidateQueries({ queryKey: ["docker-images"] });
+    },
+    onError: (e: Error) => {
+      setPullError(e.message || "Pull failed");
+      setPullStage("error");
+    },
+  });
+
+  const handlePull = () => {
+    if (!pullInput.trim() || !selectedAgent) return;
+    setPullStage("pulling");
+    setPullError(null);
+    pullMutation.mutate();
+  };
+
+  const closePullModal = () => {
+    if (pullStage === "pulling") return;
+    setShowPullModal(false);
+    setPullInput("");
+    setPullStage("idle");
+    setPullError(null);
+  };
 
   // Check if we're on a detail page
   const parts = pathname.split("/");
@@ -81,11 +115,21 @@ function DockerLayoutContent({ children }: { children: ReactNode }) {
       case "images":
         return (
           <button
-            onClick={() => router.push("/docker/images?action=pull")}
+            onClick={() => setShowPullModal(true)}
             className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors text-sm font-medium"
           >
             <Download className="w-4 h-4" />
             Pull Image
+          </button>
+        );
+      case "deployments":
+        return (
+          <button
+            onClick={() => setShowDeployWizard(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors text-sm font-medium"
+          >
+            <Rocket className="w-4 h-4" />
+            Deploy Container
           </button>
         );
       case "volumes":
@@ -145,10 +189,8 @@ function DockerLayoutContent({ children }: { children: ReactNode }) {
         {children}
         <ContainerPanel />
         <DeploymentPanel />
-        <StackDeployWizard
-          isOpen={showStackDeployWizard}
-          onClose={() => setShowStackDeployWizard(false)}
-        />
+        <StackDeployWizard isOpen={showStackDeployWizard} onClose={() => setShowStackDeployWizard(false)} />
+        <DeployWizard isOpen={showDeployWizard} onClose={() => setShowDeployWizard(false)} onSuccess={() => { setShowDeployWizard(false); router.push("/docker/deployments"); }} />
       </>
     );
   }
@@ -235,6 +277,97 @@ function DockerLayoutContent({ children }: { children: ReactNode }) {
         isOpen={showStackDeployWizard}
         onClose={() => setShowStackDeployWizard(false)}
       />
+
+      {/* Deploy Container Wizard */}
+      <DeployWizard
+        isOpen={showDeployWizard}
+        onClose={() => setShowDeployWizard(false)}
+        onSuccess={() => { setShowDeployWizard(false); router.push("/docker/deployments"); }}
+      />
+
+      {/* Pull Image Modal */}
+      {showPullModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={closePullModal} />
+          <div className="relative bg-white dark:bg-gray-900 rounded-xl shadow-xl w-full max-w-md mx-4 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-primary-100 dark:bg-primary-900/30 rounded-lg">
+                  <Download className="h-5 w-5 text-primary-600 dark:text-primary-400" />
+                </div>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Pull Image</h3>
+              </div>
+              <button onClick={closePullModal} disabled={pullStage === "pulling"} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 disabled:opacity-50">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {pullStage === "success" ? (
+              <div className="text-center py-4">
+                <div className="w-12 h-12 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center mx-auto mb-3">
+                  <CheckCircle className="h-6 w-6 text-green-600 dark:text-green-400" />
+                </div>
+                <p className="font-medium text-gray-900 dark:text-white mb-1">Image pulled successfully</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">{pullInput}</p>
+                <div className="flex gap-3 justify-center mt-5">
+                  <button onClick={closePullModal} className="px-4 py-2 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium">
+                    Close
+                  </button>
+                  <button
+                    onClick={() => { closePullModal(); setShowDeployWizard(true); }}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg text-sm font-medium"
+                  >
+                    <Rocket className="h-4 w-4" />
+                    Deploy Now
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Image name <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={pullInput}
+                      onChange={(e) => setPullInput(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && handlePull()}
+                      placeholder="e.g. nginx:latest or postgres:16"
+                      disabled={pullStage === "pulling"}
+                      autoFocus
+                      className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white placeholder-gray-400 font-mono text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:opacity-60"
+                    />
+                  </div>
+                  {pullStage === "error" && (
+                    <div className="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                      <AlertTriangle className="h-4 w-4 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+                      <p className="text-sm text-red-600 dark:text-red-400">{pullError}</p>
+                    </div>
+                  )}
+                </div>
+                <div className="flex justify-end gap-3 mt-6">
+                  <button onClick={closePullModal} className="px-4 py-2 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium">
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handlePull}
+                    disabled={!pullInput.trim() || pullStage === "pulling"}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+                  >
+                    {pullStage === "pulling" ? (
+                      <><Loader2 className="h-4 w-4 animate-spin" />Pulling...</>
+                    ) : (
+                      <><Download className="h-4 w-4" />Pull</>
+                    )}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

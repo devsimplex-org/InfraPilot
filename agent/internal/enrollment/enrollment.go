@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/infrapilot/agent/internal/metrics"
 	"go.uber.org/zap"
 )
 
@@ -46,8 +47,14 @@ type EnrollmentResponse struct {
 
 // HeartbeatRequest is sent to the backend heartbeat endpoint
 type HeartbeatRequest struct {
-	Fingerprint string `json:"fingerprint"`
-	Version     string `json:"version,omitempty"`
+	Fingerprint   string  `json:"fingerprint"`
+	Version       string  `json:"version,omitempty"`
+	CPUPercent    float64 `json:"cpu_percent,omitempty"`
+	MemoryUsedMB  int64   `json:"memory_used_mb,omitempty"`
+	MemoryTotalMB int64   `json:"memory_total_mb,omitempty"`
+	DiskUsedMB    int64   `json:"disk_used_mb,omitempty"`
+	DiskTotalMB   int64   `json:"disk_total_mb,omitempty"`
+	UptimeSeconds int64   `json:"uptime_seconds,omitempty"`
 }
 
 // Manager handles agent enrollment and credential management
@@ -292,8 +299,8 @@ func (m *Manager) verifyEnrollment(ctx context.Context) error {
 	return nil
 }
 
-// SendHeartbeat sends a heartbeat to the backend
-func (m *Manager) SendHeartbeat(ctx context.Context) error {
+// SendHeartbeat sends a heartbeat to the backend including current system metrics
+func (m *Manager) SendHeartbeat(ctx context.Context, sysMetrics *metrics.SystemMetrics) error {
 	if !m.IsEnrolled() {
 		return fmt.Errorf("agent not enrolled")
 	}
@@ -301,6 +308,14 @@ func (m *Manager) SendHeartbeat(ctx context.Context) error {
 	req := HeartbeatRequest{
 		Fingerprint: m.credentials.Fingerprint,
 		Version:     agentVersion,
+	}
+	if sysMetrics != nil {
+		req.CPUPercent = sysMetrics.CPUPercent
+		req.MemoryUsedMB = sysMetrics.MemoryUsedMB
+		req.MemoryTotalMB = sysMetrics.MemoryTotalMB
+		req.DiskUsedMB = sysMetrics.DiskUsedMB
+		req.DiskTotalMB = sysMetrics.DiskTotalMB
+		req.UptimeSeconds = sysMetrics.UptimeSeconds
 	}
 
 	body, err := json.Marshal(req)
@@ -336,7 +351,7 @@ func (m *Manager) SendHeartbeat(ctx context.Context) error {
 }
 
 // StartHeartbeatLoop starts a background heartbeat loop
-func (m *Manager) StartHeartbeatLoop(ctx context.Context, interval time.Duration) {
+func (m *Manager) StartHeartbeatLoop(ctx context.Context, interval time.Duration, collector *metrics.Collector) {
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
@@ -347,7 +362,11 @@ func (m *Manager) StartHeartbeatLoop(ctx context.Context, interval time.Duration
 				m.logger.Info("Heartbeat loop stopped")
 				return
 			case <-ticker.C:
-				if err := m.SendHeartbeat(ctx); err != nil {
+				var sysMetrics *metrics.SystemMetrics
+				if collector != nil {
+					sysMetrics = collector.CollectSystemMetrics()
+				}
+				if err := m.SendHeartbeat(ctx, sysMetrics); err != nil {
 					m.logger.Error("Heartbeat failed", zap.Error(err))
 
 					// If re-enrollment required, try to re-enroll
