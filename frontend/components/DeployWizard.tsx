@@ -39,7 +39,7 @@ import {
 export interface DeployWizardProps {
   isOpen: boolean;
   onClose: () => void;
-  imageRepository: string;
+  imageRepository?: string;
   imageTag?: string;
   imageDigest?: string;
   registryId?: string;
@@ -100,6 +100,8 @@ export function DeployWizard({
   const [serviceName, setServiceName] = useState("");
   const [environment, setEnvironment] = useState("dev");
   const [tag, setTag] = useState(imageTag || "latest");
+  // When no imageRepository is pre-filled, user types the full image ref here (e.g. nginx:latest)
+  const [imageInput, setImageInput] = useState("");
 
   // Step 2: Environment
   const [envVars, setEnvVars] = useState<EnvVar[]>([]);
@@ -153,6 +155,7 @@ export function DeployWizard({
       setServiceName("");
       setEnvironment("dev");
       setTag(imageTag || "latest");
+      setImageInput("");
       setEnvVars([]);
       setSecretMethod("env_vars");
       setEnvFileContent("");
@@ -190,10 +193,18 @@ export function DeployWizard({
     },
   });
 
+  // Derive effective image repo + tag (either from props or from freeform imageInput)
+  const effectiveRepo = imageRepository || imageInput.split(":")[0] || "";
+  const effectiveTag = imageRepository
+    ? (tag || "latest")
+    : (imageInput.includes(":") ? imageInput.split(":").slice(1).join(":") || "latest" : tag || "latest");
+
   // Generate suggested service name
   const getSuggestedServiceName = () => {
-    const parts = imageRepository.split("/");
-    const name = parts[parts.length - 1] || "service";
+    const src = imageRepository || imageInput;
+    if (!src) return "service";
+    const parts = src.split("/");
+    const name = (parts[parts.length - 1] || "service").split(":")[0];
     return name.replace(/[^a-zA-Z0-9-]/g, "-").toLowerCase();
   };
 
@@ -403,7 +414,7 @@ export function DeployWizard({
   const canGoNext = () => {
     switch (currentStep) {
       case "basics":
-        return serviceName.trim() !== "" && defaultAgent;
+        return serviceName.trim() !== "" && !!defaultAgent && (!!imageRepository || imageInput.trim() !== "");
       case "environment":
         return envVars.every((e) => e.key.trim() !== "");
       case "networks":
@@ -493,8 +504,8 @@ export function DeployWizard({
     const request: CreateDeploymentRequest = {
       service_name: serviceName.trim(),
       environment,
-      image_repository: imageRepository,
-      image_tag: tag || undefined,
+      image_repository: effectiveRepo,
+      image_tag: effectiveTag || undefined,
       image_digest: imageDigest || undefined,
       container_config:
         Object.keys(containerConfig).length > 0 ? containerConfig : undefined,
@@ -515,7 +526,7 @@ export function DeployWizard({
   };
 
   // Full image reference for display
-  const fullImageRef = tag ? `${imageRepository}:${tag}` : imageRepository;
+  const fullImageRef = effectiveRepo ? `${effectiveRepo}:${effectiveTag}` : "";
 
   return (
     <Transition.Root show={isOpen} as={Fragment}>
@@ -606,15 +617,17 @@ export function DeployWizard({
 
                 {/* Body */}
                 <div className="px-6 py-4 max-h-[60vh] overflow-y-auto">
-                  {/* Image Info */}
-                  <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                    <div className="flex items-center gap-2 text-sm">
-                      <Package className="h-4 w-4 text-gray-400" />
-                      <span className="font-mono text-gray-900 dark:text-white truncate">
-                        {fullImageRef}
-                      </span>
+                  {/* Image Info — only shown when pre-filled from images page */}
+                  {imageRepository && (
+                    <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                      <div className="flex items-center gap-2 text-sm">
+                        <Package className="h-4 w-4 text-gray-400" />
+                        <span className="font-mono text-gray-900 dark:text-white truncate">
+                          {fullImageRef}
+                        </span>
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   {/* Wizard Steps */}
                   {stage === "wizard" && (
@@ -628,6 +641,25 @@ export function DeployWizard({
                                 <AlertTriangle className="h-4 w-4" />
                                 <span>No active agents available. Please add an agent first.</span>
                               </div>
+                            </div>
+                          )}
+
+                          {/* Image input — only when not pre-filled from images page */}
+                          {!imageRepository && (
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                Image <span className="text-red-500">*</span>
+                              </label>
+                              <input
+                                type="text"
+                                value={imageInput}
+                                onChange={(e) => setImageInput(e.target.value)}
+                                placeholder="e.g. nginx:latest or myregistry.com/app:1.0"
+                                className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white placeholder-gray-400 font-mono text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                              />
+                              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                Docker Hub image or full registry URL with optional tag
+                              </p>
                             </div>
                           )}
 
@@ -662,18 +694,21 @@ export function DeployWizard({
                             </select>
                           </div>
 
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                              Image Tag
-                            </label>
-                            <input
-                              type="text"
-                              value={tag}
-                              onChange={(e) => setTag(e.target.value)}
-                              placeholder="latest"
-                              className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                            />
-                          </div>
+                          {/* Tag field — shown when pre-filled from images page, or when imageInput has no tag */}
+                          {(imageRepository || !imageInput.includes(":")) && (
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                Image Tag
+                              </label>
+                              <input
+                                type="text"
+                                value={tag}
+                                onChange={(e) => setTag(e.target.value)}
+                                placeholder="latest"
+                                className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                              />
+                            </div>
+                          )}
                         </div>
                       )}
 
@@ -1309,7 +1344,7 @@ export function DeployWizard({
                           <Button
                             variant="primary"
                             onClick={handleDeploy}
-                            disabled={!serviceName.trim() || !defaultAgent}
+                            disabled={!serviceName.trim() || !defaultAgent || !effectiveRepo}
                           >
                             <Rocket className="h-4 w-4 mr-1" />
                             Deploy

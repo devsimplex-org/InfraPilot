@@ -2,7 +2,7 @@
 
 import { ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Globe, Crown, Shield, FileText, Users, Server } from "lucide-react";
+import { Globe, Crown, Shield, FileText, Users, Server, Activity } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { cn } from "@/lib/utils";
@@ -14,6 +14,7 @@ const tabs = [
   { id: "agents", label: "Agents", href: "/settings/agents", icon: Server },
   { id: "security", label: "Security", href: "/settings/security", icon: Shield },
   { id: "pages", label: "Default Pages", href: "/settings/pages", icon: FileText },
+  { id: "health", label: "System Health", href: "/settings/health", icon: Activity },
 ];
 
 export default function SettingsLayout({ children }: { children: ReactNode }) {

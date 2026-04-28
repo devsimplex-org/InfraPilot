@@ -40,6 +40,13 @@ export interface Agent {
   last_seen_at: string | null;
   created_at: string;
   enrollment_token?: string;
+  // Resource metrics — populated on each heartbeat
+  cpu_percent: number;
+  memory_used_mb: number;
+  memory_total_mb: number;
+  disk_used_mb: number;
+  disk_total_mb: number;
+  uptime_seconds: number;
 }
 
 export interface Container {

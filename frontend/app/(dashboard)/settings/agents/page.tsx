@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Server,
@@ -27,6 +27,30 @@ const statusConfig: Record<Agent["status"], { label: string; color: string; dot:
   pending: { label: "Pending", color: "text-yellow-600 dark:text-yellow-400", dot: "bg-yellow-500" },
   offline: { label: "Offline", color: "text-gray-500 dark:text-gray-400", dot: "bg-gray-400" },
 };
+
+function formatMB(mb: number): string {
+  if (mb >= 1024 * 1024) return `${(mb / (1024 * 1024)).toFixed(1)} TB`;
+  if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;
+  return `${mb} MB`;
+}
+
+function ResourceBar({ label, pct, detail, colorClass = "bg-blue-500" }: {
+  label: string;
+  pct: number;
+  detail: string;
+  colorClass?: string;
+}) {
+  const barColor = pct > 85 ? "bg-red-500" : pct > 65 ? "bg-amber-500" : colorClass;
+  return (
+    <div className="flex items-center gap-2 min-w-0">
+      <span className="text-[11px] text-gray-400 dark:text-gray-500 w-8 shrink-0 font-medium">{label}</span>
+      <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 min-w-0 overflow-hidden">
+        <div className={`${barColor} h-1.5 rounded-full transition-all duration-500`} style={{ width: `${Math.min(100, pct)}%` }} />
+      </div>
+      <span className="text-[11px] text-gray-500 dark:text-gray-400 shrink-0 w-28 text-right tabular-nums">{detail}</span>
+    </div>
+  );
+}
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -185,44 +209,76 @@ export default function SettingsAgentsPage() {
               <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
                 {agents.map((agent) => {
                   const s = statusConfig[agent.status];
+                  const hasMetrics = agent.status === "active" && agent.memory_total_mb > 0;
+                  const cpuPct = agent.cpu_percent ?? 0;
+                  const ramPct = agent.memory_total_mb > 0 ? (agent.memory_used_mb / agent.memory_total_mb) * 100 : 0;
+                  const diskPct = agent.disk_total_mb > 0 ? (agent.disk_used_mb / agent.disk_total_mb) * 100 : 0;
                   return (
-                    <tr key={agent.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors">
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <Server className="h-4 w-4 text-gray-400 flex-shrink-0" />
-                          <span className="text-gray-900 dark:text-white font-medium">{agent.name}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
-                        {agent.hostname || <span className="text-gray-400 italic">not connected</span>}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${s.color}`}>
-                          <span className={`h-1.5 w-1.5 rounded-full ${s.dot}`} />
-                          {s.label}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400 font-mono">
-                        {agent.version || "\u2014"}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
-                        {agent.last_seen_at ? new Date(agent.last_seen_at).toLocaleString() : "Never"}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
-                        {new Date(agent.created_at).toLocaleDateString()}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-2">
-                          <button
-                            onClick={() => setDeleteConfirm(agent)}
-                            className="p-2 text-gray-600 dark:text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
-                            title="Remove agent"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
+                    <React.Fragment key={agent.id}>
+                      <tr className={`hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors ${hasMetrics ? "border-b-0" : ""}`}>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <Server className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                            <span className="text-gray-900 dark:text-white font-medium">{agent.name}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                          {agent.hostname || <span className="text-gray-400">{agent.status === "active" ? "unknown" : "not connected"}</span>}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${s.color}`}>
+                            <span className={`h-1.5 w-1.5 rounded-full ${s.dot}`} />
+                            {s.label}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400 font-mono">
+                          {agent.version || "\u2014"}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                          {agent.last_seen_at ? new Date(agent.last_seen_at).toLocaleString() : "Never"}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                          {new Date(agent.created_at).toLocaleDateString()}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={() => setDeleteConfirm(agent)}
+                              className="p-2 text-gray-600 dark:text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                              title="Remove agent"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                      {hasMetrics && (
+                        <tr className="bg-gray-50/60 dark:bg-gray-800/20 hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors">
+                          <td colSpan={7} className="px-4 pb-3 pt-1">
+                            <div className="grid grid-cols-3 gap-x-6 gap-y-1 pl-6 pr-2">
+                              <ResourceBar
+                                label="CPU"
+                                pct={cpuPct}
+                                detail={`${cpuPct.toFixed(1)}%`}
+                                colorClass="bg-blue-500"
+                              />
+                              <ResourceBar
+                                label="RAM"
+                                pct={ramPct}
+                                detail={`${formatMB(agent.memory_used_mb)} / ${formatMB(agent.memory_total_mb)}`}
+                                colorClass="bg-violet-500"
+                              />
+                              <ResourceBar
+                                label="Disk"
+                                pct={diskPct}
+                                detail={`${formatMB(agent.disk_used_mb)} / ${formatMB(agent.disk_total_mb)}`}
+                                colorClass="bg-emerald-500"
+                              />
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })}
               </tbody>
