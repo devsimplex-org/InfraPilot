@@ -1095,26 +1095,40 @@ func (h *Handler) getCurrentDeployment(c *gin.Context) {
 	serviceName := c.Param("name")
 	environment := c.Query("environment")
 
-	if environment == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "environment parameter is required"})
-		return
-	}
-
 	var d Deployment
-	err := h.db.QueryRow(c.Request.Context(), `
-		SELECT id, org_id, agent_id, service_name, environment,
-		       image_repository, image_tag, image_digest,
-		       git_commit, status, container_id, deployed_at, created_at
-		FROM deployments
-		WHERE org_id = $1 AND service_name = $2 AND environment = $3
-		  AND status = 'running'
-		ORDER BY deployed_at DESC
-		LIMIT 1
-	`, orgID, serviceName, environment).Scan(
-		&d.ID, &d.OrgID, &d.AgentID, &d.ServiceName, &d.Environment,
-		&d.ImageRepository, &d.ImageTag, &d.ImageDigest,
-		&d.GitCommit, &d.Status, &d.ContainerID, &d.DeployedAt, &d.CreatedAt,
-	)
+	var err error
+
+	if environment != "" {
+		err = h.db.QueryRow(c.Request.Context(), `
+			SELECT id, org_id, agent_id, service_name, environment,
+			       image_repository, image_tag, image_digest,
+			       git_commit, status, container_id, container_name, deployed_at, created_at
+			FROM deployments
+			WHERE org_id = $1 AND service_name = $2 AND environment = $3
+			  AND status = 'running'
+			ORDER BY deployed_at DESC
+			LIMIT 1
+		`, orgID, serviceName, environment).Scan(
+			&d.ID, &d.OrgID, &d.AgentID, &d.ServiceName, &d.Environment,
+			&d.ImageRepository, &d.ImageTag, &d.ImageDigest,
+			&d.GitCommit, &d.Status, &d.ContainerID, &d.ContainerName, &d.DeployedAt, &d.CreatedAt,
+		)
+	} else {
+		// No env specified — return the most recently running deployment across all envs
+		err = h.db.QueryRow(c.Request.Context(), `
+			SELECT id, org_id, agent_id, service_name, environment,
+			       image_repository, image_tag, image_digest,
+			       git_commit, status, container_id, container_name, deployed_at, created_at
+			FROM deployments
+			WHERE org_id = $1 AND service_name = $2 AND status = 'running'
+			ORDER BY deployed_at DESC
+			LIMIT 1
+		`, orgID, serviceName).Scan(
+			&d.ID, &d.OrgID, &d.AgentID, &d.ServiceName, &d.Environment,
+			&d.ImageRepository, &d.ImageTag, &d.ImageDigest,
+			&d.GitCommit, &d.Status, &d.ContainerID, &d.ContainerName, &d.DeployedAt, &d.CreatedAt,
+		)
+	}
 
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "no running deployment found"})
