@@ -35,6 +35,7 @@ const tabGroups: { id: string; label: string; tabs: Tab[] }[] = [
       { id: "volumes",     label: "Volumes",     href: "/docker/volumes" },
       { id: "networks",    label: "Networks",    href: "/docker/networks" },
       { id: "logs",        label: "Logs",        href: "/docker/logs" },
+      { id: "registries",  label: "Registries",  href: "/docker/registries" },
     ],
   },
   {
@@ -43,7 +44,6 @@ const tabGroups: { id: string; label: string; tabs: Tab[] }[] = [
     tabs: [
       { id: "stacks",      label: "Stacks",      href: "/docker/stacks" },
       { id: "deployments", label: "Deployments", href: "/docker/deployments" },
-      { id: "registries",  label: "Registries",  href: "/docker/registries" },
     ],
   },
 ];
