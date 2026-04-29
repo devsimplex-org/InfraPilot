@@ -538,6 +538,42 @@ func (h *Handler) deployContainerToAgent(ctx context.Context, orgID, deploymentI
 		options["pull_latest"] = containerConfig.PullLatest
 	}
 
+	// Inject registry auth credentials if a matching registry is configured
+	if h.registryService != nil {
+		if reg, err := h.registryService.GetRegistryByImageRef(ctx, orgID, imageRef); err == nil {
+			if creds, err := h.registryService.GetDecryptedCredentials(ctx, orgID, reg.ID); err == nil {
+				authMap := map[string]string{}
+				namespace := ""
+				if reg.Namespace != nil {
+					namespace = *reg.Namespace
+				}
+				switch reg.Provider {
+				case "ghcr":
+					authMap["username"] = namespace
+					authMap["password"] = creds.Token
+					authMap["server_address"] = "ghcr.io"
+				case "dockerhub":
+					authMap["username"] = creds.Username
+					authMap["password"] = creds.Password
+					authMap["server_address"] = "https://index.docker.io/v1/"
+				case "gcr":
+					authMap["username"] = "_json_key"
+					authMap["password"] = creds.Token
+					authMap["server_address"] = "gcr.io"
+				case "ecr", "acr":
+					authMap["username"] = creds.Username
+					authMap["password"] = creds.Password
+					if namespace != "" {
+						authMap["server_address"] = namespace
+					}
+				}
+				if len(authMap) > 0 {
+					options["auth"] = authMap
+				}
+			}
+		}
+	}
+
 	optionsJSON, err := json.Marshal(options)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal options: %w", err)
