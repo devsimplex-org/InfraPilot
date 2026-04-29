@@ -261,8 +261,8 @@ export default function AlertHistoryPage() {
                     <div className="flex items-center gap-4 text-sm text-gray-500 mt-1 flex-wrap">
                       {entry.rule_name  && <span>Rule: {entry.rule_name}</span>}
                       {entry.agent_name && <span>Agent: {entry.agent_name}</span>}
-                      {entry.metadata?.container_name && (
-                        <span>Container: {String(entry.metadata.container_name as string)}</span>
+                      {!!entry.metadata?.container_name && (
+                        <span>Container: {String(entry.metadata.container_name)}</span>
                       )}
                       <span className="flex items-center gap-1">
                         <Clock className="h-3 w-3" />
