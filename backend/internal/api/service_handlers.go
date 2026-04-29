@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -342,9 +343,10 @@ func (h *Handler) deployService(c *gin.Context) {
 		WHERE id = $2
 	`, imageTag, svc.ID)
 
-	// Run the deployment pipeline
+	// Run the deployment pipeline (must use Background context — request context
+	// is cancelled as soon as the HTTP response is sent)
 	go h.runDeploymentPipeline(
-		c.Request.Context(), orgID, deploymentID,
+		context.Background(), orgID, deploymentID,
 		svc.ImageRepository, imageTag, imageDigest,
 		containerConfig, true, // skipScanning=true for CE
 	)
