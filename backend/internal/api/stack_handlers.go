@@ -698,6 +698,12 @@ func (h *Handler) createStack(c *gin.Context) {
 	// Marshal variables to JSON
 	variablesJSON, _ := json.Marshal(req.Variables)
 
+	// Remove previous stacks with the same name+environment so redeploys don't accumulate rows
+	_, _ = h.db.Exec(c.Request.Context(), `
+		DELETE FROM stacks
+		WHERE org_id = $1 AND agent_id = $2 AND name = $3 AND environment = $4
+	`, orgID, agentID, req.Name, req.Environment)
+
 	// Create stack record
 	var stackID uuid.UUID
 	err = h.db.QueryRow(c.Request.Context(), `
