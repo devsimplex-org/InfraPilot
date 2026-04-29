@@ -25,6 +25,7 @@ set -e
 #   --agent       Build and push agent only
 #   --all-in-one  Build and push legacy all-in-one image only
 #   --no-push     Build images but don't push to registry
+#   --no-cache    Build without Docker layer cache
 #   --platform    Target platform (e.g., linux/amd64,linux/arm64)
 #
 # Examples:
@@ -57,11 +58,16 @@ BUILD_AGENT=true
 BUILD_ALL_IN_ONE=true
 PUSH=true
 PLATFORM=""
+NO_CACHE=""
 
 # Process options
 shift || true
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --no-cache)
+            NO_CACHE="--no-cache"
+            shift
+            ;;
         --backend)
             BUILD_BACKEND=true
             BUILD_FRONTEND=false
@@ -149,7 +155,7 @@ push_both() {
 if [ "$BUILD_BACKEND" = true ]; then
     echo -e "${YELLOW}Building Backend API...${NC}"
     docker build \
-        $PLATFORM \
+        $PLATFORM $NO_CACHE \
         --build-arg VERSION="${VERSION}" \
         -t "${DH_PREFIX}-backend:${VERSION}" \
         -f deployments/backend.Dockerfile \
@@ -168,7 +174,7 @@ fi
 if [ "$BUILD_FRONTEND" = true ]; then
     echo -e "${YELLOW}Building Frontend Dashboard...${NC}"
     docker build \
-        $PLATFORM \
+        $PLATFORM $NO_CACHE \
         -t "${DH_PREFIX}-frontend:${VERSION}" \
         -f deployments/frontend.Dockerfile \
         ./frontend
@@ -186,7 +192,7 @@ fi
 if [ "$BUILD_AGENT" = true ]; then
     echo -e "${YELLOW}Building Agent Controller...${NC}"
     docker build \
-        $PLATFORM \
+        $PLATFORM $NO_CACHE \
         -t "${DH_PREFIX}-agent:${VERSION}" \
         -f deployments/agent.Dockerfile \
         ./agent
@@ -204,7 +210,7 @@ fi
 if [ "$BUILD_ALL_IN_ONE" = true ]; then
     echo -e "${YELLOW}Building All-in-One (legacy)...${NC}"
     docker build \
-        $PLATFORM \
+        $PLATFORM $NO_CACHE \
         --build-arg VERSION="${VERSION}" \
         -t "${DH_PREFIX}:${VERSION}" \
         -f Dockerfile \

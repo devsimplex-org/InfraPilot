@@ -211,11 +211,6 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				agents.POST("/:id/webhooks/:wid/regenerate", h.RequireModifyContainers(), h.regenerateWebhookSecret)
 		}
 
-			// Services view (cross-agent)
-			protected.GET("/services", h.listServices)
-			protected.GET("/services/:name/deployments", h.listServiceDeployments)
-			protected.GET("/services/:name/current", h.getCurrentDeployment)
-
 			// WebSocket helpers
 			protected.GET("/pulls/ws", h.pullWebSocket)
 
@@ -286,6 +281,24 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 				users.POST("", h.createUserReal)
 				users.PUT("/:id", h.updateUserReal)
 				users.DELETE("/:id", h.deleteUserReal)
+			}
+
+			// API Keys (any authenticated user manages their own keys)
+			protected.GET("/api-keys", h.listAPIKeys)
+			protected.POST("/api-keys", h.createAPIKey)
+			protected.DELETE("/api-keys/:id", h.deleteAPIKey)
+
+			// Services — canonical deploy interface for CLI, webhooks, and UI
+			services := protected.Group("/services")
+			{
+				services.GET("", h.listServices)
+				services.PUT("", h.upsertService)
+				services.GET("/:name", h.getService)
+				services.DELETE("/:name", h.deleteService)
+				services.POST("/:name/deploy", h.deployService)
+				services.POST("/:name/rollback", h.rollbackService)
+				services.GET("/:name/deployments", h.listServiceDeployments)
+				services.GET("/:name/current", h.getCurrentDeployment)
 			}
 
 			// System Settings (super_admin only)

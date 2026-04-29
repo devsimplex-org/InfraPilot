@@ -995,41 +995,6 @@ func (h *Handler) deleteDeployment(c *gin.Context) {
 	})
 }
 
-// ==================== List Services ====================
-
-// listServices returns unique services across all agents
-func (h *Handler) listServices(c *gin.Context) {
-	orgID := c.MustGet("org_id").(uuid.UUID)
-
-	rows, err := h.db.Query(c.Request.Context(), `
-		SELECT DISTINCT service_name, environment
-		FROM deployments
-		WHERE org_id = $1
-		ORDER BY service_name, environment
-	`, orgID)
-	if err != nil {
-		h.logger.Error("Failed to list services", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list services"})
-		return
-	}
-	defer rows.Close()
-
-	type ServiceEnv struct {
-		Service     string `json:"service"`
-		Environment string `json:"environment"`
-	}
-
-	services := []ServiceEnv{}
-	for rows.Next() {
-		var s ServiceEnv
-		if err := rows.Scan(&s.Service, &s.Environment); err != nil {
-			continue
-		}
-		services = append(services, s)
-	}
-
-	c.JSON(http.StatusOK, services)
-}
 
 // ==================== List Service Deployments ====================
 

@@ -370,7 +370,7 @@ export interface AlertChannel {
   id: string;
   org_id: string;
   name: string;
-  channel_type: "smtp" | "slack" | "webhook";
+  channel_type: "smtp" | "slack" | "webhook" | "discord" | "teams";
   config: Record<string, unknown>;
   enabled: boolean;
   created_at: string;
@@ -3445,6 +3445,21 @@ export interface ServiceProgress {
   order: number;
 }
 
+export interface APIKey {
+  id: string;
+  org_id: string;
+  user_id: string;
+  name: string;
+  key_prefix: string;
+  last_used_at?: string;
+  created_at: string;
+  expires_at?: string;
+}
+
+export interface APIKeyWithSecret extends APIKey {
+  key: string; // Only returned on creation
+}
+
 // API methods
 export const api = {
   // Setup (first-run)
@@ -3737,7 +3752,7 @@ export const api = {
 
   createAlertChannel: (data: {
     name: string;
-    channel_type: "smtp" | "slack" | "webhook";
+    channel_type: "smtp" | "slack" | "webhook" | "discord" | "teams";
     config: Record<string, unknown>;
     enabled?: boolean;
   }) =>
@@ -5988,4 +6003,17 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ otp }),
     }),
+
+  // API Keys
+  listAPIKeys: () =>
+    fetchAPI<APIKey[]>(`/api-keys`),
+
+  createAPIKey: (name: string, expiresAt?: string) =>
+    fetchAPI<APIKeyWithSecret>(`/api-keys`, {
+      method: "POST",
+      body: JSON.stringify({ name, expires_at: expiresAt ?? null }),
+    }),
+
+  deleteAPIKey: (id: string) =>
+    fetchAPI<{ message: string }>(`/api-keys/${id}`, { method: "DELETE" }),
 };

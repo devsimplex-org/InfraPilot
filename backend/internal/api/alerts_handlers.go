@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -148,7 +149,7 @@ func (h *Handler) createAlertChannelReal(c *gin.Context) {
 	}
 
 	// Validate channel type
-	validTypes := map[string]bool{"smtp": true, "slack": true, "webhook": true}
+	validTypes := map[string]bool{"smtp": true, "slack": true, "webhook": true, "discord": true, "teams": true}
 	if !validTypes[req.ChannelType] {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid channel_type, must be smtp, slack, or webhook"})
 		return
@@ -377,7 +378,9 @@ func (h *Handler) createAlertRuleReal(c *gin.Context) {
 		"container_stopped":  true,
 		"high_cpu":           true,
 		"high_memory":        true,
-		"ssl_expiring":       true,
+		"oom_kill":           true,
+		"ssl_expiry":         true,
+		"high_error_rate":    true,
 		"agent_offline":      true,
 	}
 	if !validTypes[req.RuleType] {
@@ -519,8 +522,8 @@ func (h *Handler) getAlertHistoryReal(c *gin.Context) {
 	// Get limit from query params (default 100)
 	limit := 100
 	if l := c.Query("limit"); l != "" {
-		if _, err := json.Number(l).Int64(); err == nil {
-			limit = int(json.Number(l).String()[0])
+		if n, err := strconv.Atoi(l); err == nil && n > 0 {
+			limit = n
 		}
 	}
 
