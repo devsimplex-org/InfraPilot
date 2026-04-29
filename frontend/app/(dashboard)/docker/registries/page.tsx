@@ -54,6 +54,10 @@ export default function DockerRegistriesPage() {
   const [selectedRegistry, setSelectedRegistry] = useState<ContainerRegistry | null>(null);
   const [selectedRepo, setSelectedRepo] = useState<string | null>(null);
   const [copiedImage, setCopiedImage] = useState<string | null>(null);
+  const [deployTarget, setDeployTarget] = useState<{ imageRef: string; repo: string; tag: string } | null>(null);
+  const [deployServiceName, setDeployServiceName] = useState("");
+  const [deployEnv, setDeployEnv] = useState<"dev" | "staging" | "prod">("dev");
+  const [deployResult, setDeployResult] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: "",
     provider: "ghcr" as RegistryProvider,
@@ -175,6 +179,19 @@ export default function DockerRegistriesPage() {
     mutationFn: (id: string) => api.testRegistryConnection(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["registries"] });
+    },
+  });
+
+  const deployFromRegistryMutation = useMutation({
+    mutationFn: () => {
+      if (!deployTarget || !deployServiceName.trim() || !selectedAgent) throw new Error("Missing required fields");
+      // Derive tag from imageRef (last part after colon)
+      const tag = deployTarget.tag;
+      return api.deployService(deployServiceName.trim(), deployEnv, { image_tag: tag });
+    },
+    onSuccess: (data) => {
+      setDeployResult(data.message ?? "Deployment started");
+      queryClient.invalidateQueries({ queryKey: ["services"] });
     },
   });
 
@@ -450,6 +467,21 @@ export default function DockerRegistriesPage() {
                           >
                             {copiedImage === imageRef ? <CheckCircle className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
                           </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (selectedRegistry && selectedRepo) {
+                                setDeployTarget({ imageRef, repo: selectedRepo, tag: tag.name });
+                                setDeployServiceName(selectedRepo.split("/").pop() ?? selectedRepo);
+                                setDeployResult(null);
+                                deployFromRegistryMutation.reset();
+                              }
+                            }}
+                            className="p-2 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400"
+                            title="Deploy this image"
+                          >
+                            <Rocket className="h-4 w-4" />
+                          </button>
                         </div>
                       </div>
                     );
@@ -575,6 +607,97 @@ export default function DockerRegistriesPage() {
                 </div>
               )}
             </form>
+          </div>
+        </div>
+      )}
+      {/* Deploy from Registry Modal */}
+      {deployTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => { if (!deployFromRegistryMutation.isPending) { setDeployTarget(null); setDeployResult(null); deployFromRegistryMutation.reset(); } }} />
+          <div className="relative bg-white dark:bg-gray-900 rounded-xl shadow-xl w-full max-w-md mx-4 p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2 bg-primary-100 dark:bg-primary-900/30 rounded-lg">
+                <Rocket className="h-5 w-5 text-primary-600 dark:text-primary-400" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Deploy Image</h3>
+                <p className="text-xs font-mono text-gray-500 dark:text-gray-400 truncate max-w-[280px]">{deployTarget.imageRef}</p>
+              </div>
+            </div>
+
+            {deployResult ? (
+              <div className="text-center py-4">
+                <CheckCircle className="h-10 w-10 text-green-500 mx-auto mb-3" />
+                <p className="font-medium text-gray-900 dark:text-white mb-1">Deployment started</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">{deployResult}</p>
+                <button
+                  onClick={() => { setDeployTarget(null); setDeployResult(null); deployFromRegistryMutation.reset(); }}
+                  className="mt-5 px-4 py-2 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium"
+                >
+                  Close
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Service Name</label>
+                    <input
+                      type="text"
+                      value={deployServiceName}
+                      onChange={(e) => setDeployServiceName(e.target.value)}
+                      placeholder="e.g. my-app"
+                      className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    />
+                    <p className="text-xs text-gray-400 mt-1">Creates or updates the service definition</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Environment</label>
+                    <div className="flex gap-2">
+                      {(["dev", "staging", "prod"] as const).map((env) => (
+                        <button
+                          key={env}
+                          type="button"
+                          onClick={() => setDeployEnv(env)}
+                          className={cn(
+                            "flex-1 py-2 text-sm font-medium rounded-lg border transition-colors",
+                            deployEnv === env
+                              ? "bg-primary-600 border-primary-600 text-white"
+                              : "bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:border-primary-400"
+                          )}
+                        >
+                          {env}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {deployFromRegistryMutation.isError && (
+                    <p className="text-sm text-red-600 dark:text-red-400">
+                      {(deployFromRegistryMutation.error as Error)?.message ?? "Deploy failed"}
+                    </p>
+                  )}
+                </div>
+                <div className="flex justify-end gap-3 mt-6">
+                  <button
+                    onClick={() => { setDeployTarget(null); setDeployResult(null); deployFromRegistryMutation.reset(); }}
+                    className="px-4 py-2 text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg font-medium"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => deployFromRegistryMutation.mutate()}
+                    disabled={deployFromRegistryMutation.isPending || !deployServiceName.trim() || !selectedAgent}
+                    className="inline-flex items-center gap-2 px-4 py-2 text-sm bg-primary-600 hover:bg-primary-700 text-white rounded-lg font-medium disabled:opacity-50"
+                  >
+                    {deployFromRegistryMutation.isPending ? (
+                      <><RefreshCw className="h-4 w-4 animate-spin" />Deploying...</>
+                    ) : (
+                      <><Rocket className="h-4 w-4" />Deploy</>
+                    )}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

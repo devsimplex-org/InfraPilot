@@ -989,6 +989,26 @@ export interface UpdatePolicyRequest {
 }
 
 // Deployments & Security Scanning
+export interface ServiceConfig {
+  id: string;
+  org_id: string;
+  agent_id: string;
+  service_name: string;
+  environment: string;
+  image_repository: string;
+  image_tag: string;
+  git_repo?: string;
+  webhook_id?: string;
+  created_at: string;
+  updated_at: string;
+  // Runtime info joined from latest deployment
+  status?: string;
+  current_tag?: string;
+  deployed_at?: string;
+  container_name?: string;
+  container_id?: string;
+}
+
 export interface Deployment {
   id: string;
   org_id: string;
@@ -4590,7 +4610,14 @@ export const api = {
     }),
 
   // Services view (cross-agent)
-  listServices: () => fetchAPI<Array<{ service_name: string; environment: string; agent_count: number }>>("/services"),
+  listServices: () => fetchAPI<ServiceConfig[]>("/services"),
+  deployService: (name: string, env: string, body: { image_tag?: string } = {}) =>
+    fetchAPI<{ deployment_id: string; service: string; environment: string; image: string; message: string }>(
+      `/services/${encodeURIComponent(name)}/deploy?env=${env}`,
+      { method: "POST", body: JSON.stringify(body) }
+    ),
+  deleteService: (name: string, env: string) =>
+    fetchAPI<{ message: string }>(`/services/${encodeURIComponent(name)}?env=${env}`, { method: "DELETE" }),
 
   listServiceDeployments: (serviceName: string) =>
     fetchAPI<Deployment[]>(`/services/${serviceName}/deployments`),

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -333,8 +334,23 @@ func (h *Handler) createDeploymentFromWebhook(ctx context.Context, config *webho
 		imageDigest = *metadata.ImageDigest
 	}
 
-	// Start deployment pipeline in background (scan → SBOM → policy → deploy)
-	go h.runDeploymentPipeline(context.Background(), orgID, deployment.ID, metadata.ImageRepo, metadata.ImageTag, imageDigest, nil, false)
+	// Load container config from service_config if one exists for this service+env
+	var containerConfig *DeploymentContainerConfig
+	var cfgJSON []byte
+	if err := h.db.QueryRow(ctx, `
+		SELECT container_config FROM service_configs
+		WHERE org_id = $1 AND agent_id = $2 AND service_name = $3 AND environment = $4
+	`, orgID, agentID, config.ServiceName, config.Environment).Scan(&cfgJSON); err == nil {
+		if len(cfgJSON) > 0 {
+			var cfg DeploymentContainerConfig
+			if json.Unmarshal(cfgJSON, &cfg) == nil {
+				containerConfig = &cfg
+			}
+		}
+	}
+
+	// Start deployment pipeline in background
+	go h.runDeploymentPipeline(context.Background(), orgID, deployment.ID, metadata.ImageRepo, metadata.ImageTag, imageDigest, containerConfig, false)
 
 	return deployment.ID, nil
 }

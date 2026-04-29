@@ -42,6 +42,7 @@ const tabGroups: { id: string; label: string; tabs: Tab[] }[] = [
     id: "management",
     label: "Management",
     tabs: [
+      { id: "services",    label: "Services",    href: "/docker/services" },
       { id: "stacks",      label: "Stacks",      href: "/docker/stacks" },
       { id: "deployments", label: "Deployments", href: "/docker/deployments" },
     ],
@@ -103,6 +104,16 @@ function DockerLayoutContent({ children }: { children: ReactNode }) {
   // Get action button based on active tab
   const getActionButton = () => {
     switch (activeTab) {
+      case "services":
+        return (
+          <button
+            onClick={() => setShowDeployWizard(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors text-sm font-medium"
+          >
+            <Rocket className="w-4 h-4" />
+            Deploy Service
+          </button>
+        );
       case "stacks":
         return (
           <button
