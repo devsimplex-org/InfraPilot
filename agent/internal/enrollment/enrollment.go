@@ -48,6 +48,7 @@ type EnrollmentResponse struct {
 // HeartbeatRequest is sent to the backend heartbeat endpoint
 type HeartbeatRequest struct {
 	Fingerprint   string  `json:"fingerprint"`
+	Hostname      string  `json:"hostname,omitempty"`
 	Version       string  `json:"version,omitempty"`
 	CPUPercent    float64 `json:"cpu_percent,omitempty"`
 	MemoryUsedMB  int64   `json:"memory_used_mb,omitempty"`
@@ -307,6 +308,7 @@ func (m *Manager) SendHeartbeat(ctx context.Context, sysMetrics *metrics.SystemM
 
 	req := HeartbeatRequest{
 		Fingerprint: m.credentials.Fingerprint,
+		Hostname:    m.credentials.Hostname,
 		Version:     agentVersion,
 	}
 	if sysMetrics != nil {

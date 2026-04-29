@@ -25,8 +25,10 @@ const ruleTypes = [
   { value: "container_stopped",  label: "Container Stopped" },
   { value: "high_cpu",           label: "High CPU Usage" },
   { value: "high_memory",        label: "High Memory Usage" },
+  { value: "oom_kill",           label: "OOM Kill" },
   { value: "ssl_expiry",         label: "SSL Certificate Expiring" },
   { value: "high_error_rate",    label: "High Error Rate" },
+  { value: "agent_offline",      label: "Agent Offline" },
 ];
 
 export default function AlertRulesPage() {
@@ -125,7 +127,7 @@ export default function AlertRulesPage() {
       enabled: rule.enabled,
       cooldown_mins: rule.cooldown_mins,
       channels: rule.channels,
-      threshold: (conditions.threshold as number) || 3,
+      threshold: (conditions.threshold as number) || (conditions.threshold_mins as number) || 3,
       duration_mins: (conditions.duration_mins as number) || 5,
       warning_days: (conditions.warning_days as number) || 14,
       critical_days: (conditions.critical_days as number) || 7,
@@ -149,8 +151,10 @@ export default function AlertRulesPage() {
       case "high_memory":
       case "high_restart_count":
         return { threshold: form.threshold };
+      case "agent_offline":
+        return { threshold_mins: form.threshold };
       default:
-        return { threshold: form.threshold, duration_mins: form.duration_mins };
+        return {};
     }
   };
 
@@ -319,15 +323,18 @@ export default function AlertRulesPage() {
               {(form.rule_type === "high_cpu" ||
                 form.rule_type === "high_memory" ||
                 form.rule_type === "high_restart_count" ||
-                form.rule_type === "high_error_rate") && (
+                form.rule_type === "high_error_rate" ||
+                form.rule_type === "agent_offline") && (
                 <Input
-                  label={`Threshold ${
+                  label={
                     form.rule_type === "high_cpu" || form.rule_type === "high_memory"
-                      ? "(%)"
+                      ? "Threshold (%)"
                       : form.rule_type === "high_error_rate"
-                      ? "(errors/min)"
-                      : "(restarts)"
-                  }`}
+                      ? "Threshold (errors/min)"
+                      : form.rule_type === "agent_offline"
+                      ? "Offline threshold (minutes)"
+                      : "Threshold (restarts)"
+                  }
                   type="number"
                   value={form.threshold}
                   onChange={(e) => setForm({ ...form, threshold: parseFloat(e.target.value) })}

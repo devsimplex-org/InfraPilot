@@ -284,6 +284,7 @@ type agentMetricsPayload struct {
 func (h *Handler) AgentHeartbeat(c *gin.Context) {
 	var req struct {
 		Fingerprint string `json:"fingerprint" binding:"required"`
+		Hostname    string `json:"hostname,omitempty"`
 		Version     string `json:"version,omitempty"`
 		agentMetricsPayload
 	}
@@ -297,16 +298,17 @@ func (h *Handler) AgentHeartbeat(c *gin.Context) {
 		UPDATE agents SET
 			last_seen_at    = NOW(),
 			status          = 'active',
-			version         = COALESCE($2, version),
-			cpu_percent     = $3,
-			memory_used_mb  = $4,
-			memory_total_mb = $5,
-			disk_used_mb    = $6,
-			disk_total_mb   = $7,
-			uptime_seconds  = $8,
+			hostname        = CASE WHEN $2 <> '' THEN $2 ELSE hostname END,
+			version         = COALESCE(NULLIF($3, ''), version),
+			cpu_percent     = $4,
+			memory_used_mb  = $5,
+			memory_total_mb = $6,
+			disk_used_mb    = $7,
+			disk_total_mb   = $8,
+			uptime_seconds  = $9,
 			updated_at      = NOW()
 		WHERE fingerprint = $1
-	`, req.Fingerprint, req.Version,
+	`, req.Fingerprint, req.Hostname, req.Version,
 		req.CPUPercent, req.MemoryUsedMB, req.MemoryTotalMB,
 		req.DiskUsedMB, req.DiskTotalMB, req.UptimeSeconds)
 
