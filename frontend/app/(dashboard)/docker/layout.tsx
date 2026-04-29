@@ -43,6 +43,7 @@ const tabGroups: { id: string; label: string; tabs: Tab[] }[] = [
     tabs: [
       { id: "stacks",      label: "Stacks",      href: "/docker/stacks" },
       { id: "deployments", label: "Deployments", href: "/docker/deployments" },
+      { id: "registries",  label: "Registries",  href: "/docker/registries" },
     ],
   },
 ];
