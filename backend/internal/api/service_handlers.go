@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -48,7 +49,13 @@ type UpsertServiceRequest struct {
 }
 
 type ServiceDeployRequest struct {
-	ImageTag    string  `json:"image_tag" binding:"required"`
+	// Optional: if service doesn't exist yet, these auto-create it
+	ImageRepository string     `json:"image_repository,omitempty"`
+	AgentID         *uuid.UUID `json:"agent_id,omitempty"`
+	// Optional environment override (fallback if ?env not in query)
+	Environment string `json:"environment,omitempty"`
+	// Optional: defaults to service's configured tag if omitted
+	ImageTag    string  `json:"image_tag,omitempty"`
 	ImageDigest *string `json:"image_digest,omitempty"`
 	GitBranch   *string `json:"git_branch,omitempty"`
 	GitCommit   *string `json:"git_commit,omitempty"`
@@ -225,10 +232,10 @@ func (h *Handler) deleteService(c *gin.Context) {
 // deployService triggers a deployment for a named service.
 // This is the single canonical deploy path used by CLI, webhook, and UI.
 // POST /api/v1/services/:name/deploy?env=dev
+// If the service doesn't exist yet, it is auto-created when image_repository + agent_id are provided.
 func (h *Handler) deployService(c *gin.Context) {
 	orgID := c.MustGet("org_id").(uuid.UUID)
 	serviceName := c.Param("name")
-	environment := c.DefaultQuery("env", "prod")
 
 	var req ServiceDeployRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -236,17 +243,54 @@ func (h *Handler) deployService(c *gin.Context) {
 		return
 	}
 
+	// Environment: query param takes precedence, fall back to body field
+	environment := c.Query("env")
+	if environment == "" {
+		environment = req.Environment
+	}
+	if environment == "" {
+		environment = "prod"
+	}
+
 	// Load service config
 	var svc ServiceConfig
 	var cfgJSON []byte
 	err := h.db.QueryRow(c.Request.Context(), `
-		SELECT id, agent_id, image_repository, container_config
+		SELECT id, agent_id, image_repository, image_tag, container_config
 		FROM service_configs
 		WHERE org_id = $1 AND service_name = $2 AND environment = $3
-	`, orgID, serviceName, environment).Scan(&svc.ID, &svc.AgentID, &svc.ImageRepository, &cfgJSON)
+	`, orgID, serviceName, environment).Scan(&svc.ID, &svc.AgentID, &svc.ImageRepository, &svc.ImageTag, &cfgJSON)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("service %q (%s) not found — create it first with PUT /api/v1/services", serviceName, environment)})
-		return
+		// Auto-create if caller supplied enough info
+		if req.ImageRepository == "" || req.AgentID == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf(
+				"service %q (%s) not found — create it first or pass image_repository + agent_id to auto-create",
+				serviceName, environment,
+			)})
+			return
+		}
+
+		tag := req.ImageTag
+		if tag == "" {
+			tag = "latest"
+		}
+		var newID uuid.UUID
+		createErr := h.db.QueryRow(c.Request.Context(), `
+			INSERT INTO service_configs
+				(org_id, agent_id, service_name, environment, image_repository, image_tag, container_config, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, '{}', NOW())
+			RETURNING id
+		`, orgID, *req.AgentID, serviceName, environment, req.ImageRepository, tag).Scan(&newID)
+		if createErr != nil {
+			h.logger.Error("failed to auto-create service config", zap.Error(createErr))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create service"})
+			return
+		}
+		svc.ID = newID
+		svc.AgentID = *req.AgentID
+		svc.ImageRepository = req.ImageRepository
+		svc.ImageTag = tag
+		cfgJSON = []byte("{}")
 	}
 
 	var containerConfig *DeploymentContainerConfig
@@ -257,7 +301,14 @@ func (h *Handler) deployService(c *gin.Context) {
 		}
 	}
 
+	// Use request tag if provided, else fall back to service's configured tag
 	imageTag := req.ImageTag
+	if imageTag == "" {
+		imageTag = svc.ImageTag
+	}
+	if imageTag == "" {
+		imageTag = "latest"
+	}
 	imageDigest := ""
 	if req.ImageDigest != nil {
 		imageDigest = *req.ImageDigest
@@ -292,9 +343,10 @@ func (h *Handler) deployService(c *gin.Context) {
 		WHERE id = $2
 	`, imageTag, svc.ID)
 
-	// Run the deployment pipeline
+	// Run the deployment pipeline (must use Background context — request context
+	// is cancelled as soon as the HTTP response is sent)
 	go h.runDeploymentPipeline(
-		c.Request.Context(), orgID, deploymentID,
+		context.Background(), orgID, deploymentID,
 		svc.ImageRepository, imageTag, imageDigest,
 		containerConfig, true, // skipScanning=true for CE
 	)
@@ -319,7 +371,19 @@ func (h *Handler) deployService(c *gin.Context) {
 func (h *Handler) rollbackService(c *gin.Context) {
 	orgID := c.MustGet("org_id").(uuid.UUID)
 	serviceName := c.Param("name")
-	environment := c.DefaultQuery("env", "prod")
+	environment := c.Query("env")
+	if environment == "" {
+		// also accept env from JSON body
+		var body struct {
+			Environment string `json:"environment"`
+		}
+		if err := c.ShouldBindJSON(&body); err == nil && body.Environment != "" {
+			environment = body.Environment
+		}
+	}
+	if environment == "" {
+		environment = "prod"
+	}
 
 	// Find the previous successful deployment
 	var prevID uuid.UUID

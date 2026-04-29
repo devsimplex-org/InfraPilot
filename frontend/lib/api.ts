@@ -1716,7 +1716,7 @@ export interface RuntimeSecurityPosture {
 }
 
 // Container Registry Types
-export type RegistryProvider = 'ghcr' | 'dockerhub';
+export type RegistryProvider = 'ghcr' | 'dockerhub' | 'ecr' | 'gcr' | 'acr';
 export type RegistryConnectionStatus = 'pending' | 'connected' | 'failed';
 
 export interface ContainerRegistry {
@@ -1736,9 +1736,24 @@ export interface CreateRegistryRequest {
   name: string;
   provider: RegistryProvider;
   namespace?: string;
-  token?: string; // For GHCR
-  username?: string; // For Docker Hub
-  password?: string; // For Docker Hub
+  // GHCR
+  token?: string;
+  // Docker Hub
+  username?: string;
+  password?: string;
+  // ECR
+  aws_access_key_id?: string;
+  aws_secret_access_key?: string;
+  aws_region?: string;
+  aws_account_id?: string;
+  // GCR
+  gcp_service_account_json?: string;
+  gcp_project_id?: string;
+  // ACR
+  azure_tenant_id?: string;
+  azure_client_id?: string;
+  azure_client_secret?: string;
+  azure_registry_name?: string;
 }
 
 export interface UpdateRegistryRequest {
