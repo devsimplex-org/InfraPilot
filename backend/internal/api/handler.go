@@ -16,30 +16,33 @@ import (
 	"github.com/infrapilot/backend/internal/crypto"
 	agentgrpc "github.com/infrapilot/backend/internal/grpc"
 	"github.com/infrapilot/backend/internal/license"
+	"github.com/infrapilot/backend/internal/registry"
 	"github.com/infrapilot/backend/internal/webhook"
 )
 
 type Handler struct {
-	db            *pgxpool.Pool
-	auth          *auth.Service
-	logger        *zap.Logger
-	webhookService *webhook.Service
-	encryptionSvc *crypto.EncryptionService
-	license       *license.Client
-	cfg           *config.Config
-	version       string
+	db              *pgxpool.Pool
+	auth            *auth.Service
+	logger          *zap.Logger
+	webhookService  *webhook.Service
+	encryptionSvc   *crypto.EncryptionService
+	license         *license.Client
+	cfg             *config.Config
+	version         string
+	registryService *registry.Service
 }
 
 func NewHandler(db *pgxpool.Pool, authService *auth.Service, logger *zap.Logger, encryptionSvc *crypto.EncryptionService, licenseClient *license.Client, cfg *config.Config, version string) *Handler {
 	return &Handler{
-		db:             db,
-		auth:           authService,
-		logger:         logger,
-		webhookService: webhook.NewService(db, logger, encryptionSvc),
-		encryptionSvc:  encryptionSvc,
-		license:        licenseClient,
-		cfg:            cfg,
-		version:        version,
+		db:              db,
+		auth:            authService,
+		logger:          logger,
+		webhookService:  webhook.NewService(db, logger, encryptionSvc),
+		encryptionSvc:   encryptionSvc,
+		license:         licenseClient,
+		cfg:             cfg,
+		version:         version,
+		registryService: registry.NewService(db, logger, encryptionSvc),
 	}
 }
 
@@ -287,6 +290,19 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 			protected.GET("/api-keys", h.listAPIKeys)
 			protected.POST("/api-keys", h.createAPIKey)
 			protected.DELETE("/api-keys/:id", h.deleteAPIKey)
+
+			// Container Registries
+			registries := protected.Group("/registries")
+			{
+				registries.GET("", h.listRegistries)
+				registries.POST("", h.RequireManageAlerts(), h.createRegistry)
+				registries.GET("/:rid", h.getRegistry)
+				registries.PUT("/:rid", h.RequireManageAlerts(), h.updateRegistry)
+				registries.DELETE("/:rid", h.RequireManageAlerts(), h.deleteRegistry)
+				registries.POST("/:rid/test", h.RequireManageAlerts(), h.testRegistryConnection)
+				registries.GET("/:rid/repositories", h.listRegistryRepositories)
+				registries.GET("/:rid/repositories/:repo/tags", h.listRegistryTags)
+			}
 
 			// Services — canonical deploy interface for CLI, webhooks, and UI
 			services := protected.Group("/services")
