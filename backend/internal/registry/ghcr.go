@@ -62,43 +62,100 @@ func (c *GHCRClient) TestConnection(ctx context.Context) error {
 	return nil
 }
 
-// ListRepositories lists container packages for the namespace
+// ListRepositories lists container packages for the namespace.
+// ListRepositories lists all container packages the token has access to:
+// personal packages + all org packages. Results are merged and de-duplicated.
 func (c *GHCRClient) ListRepositories(ctx context.Context, page, pageSize int) (*ListRepositoriesResponse, error) {
-	var apiURL string
+	seen := map[string]struct{}{}
+	var all []Repository
 
-	// GitHub API uses different endpoints for user vs org packages
-	// First, try to determine if namespace is a user or org
-	if c.namespace != "" {
-		// Try org first, then user
-		apiURL = fmt.Sprintf("%s/orgs/%s/packages?package_type=container&per_page=%d&page=%d",
-			ghcrAPIBase, url.PathEscape(c.namespace), pageSize, page)
-	} else {
-		// Use authenticated user's packages
-		apiURL = fmt.Sprintf("%s/user/packages?package_type=container&per_page=%d&page=%d",
-			ghcrAPIBase, pageSize, page)
-	}
-
-	repos, total, err := c.fetchPackages(ctx, apiURL)
-	if err != nil {
-		// If org endpoint failed, try user endpoint
-		if c.namespace != "" {
-			apiURL = fmt.Sprintf("%s/users/%s/packages?package_type=container&per_page=%d&page=%d",
-				ghcrAPIBase, url.PathEscape(c.namespace), pageSize, page)
-			repos, total, err = c.fetchPackages(ctx, apiURL)
-			if err != nil {
-				return nil, err
+	// 1. Authenticated user's own packages (personal namespace, includes private)
+	userURL := fmt.Sprintf("%s/user/packages?package_type=container&per_page=100&page=1", ghcrAPIBase)
+	if userRepos, _, err := c.fetchPackages(ctx, userURL); err == nil {
+		for _, r := range userRepos {
+			if _, ok := seen[r.FullName]; !ok {
+				seen[r.FullName] = struct{}{}
+				all = append(all, r)
 			}
-		} else {
-			return nil, err
 		}
 	}
 
+	// 2. Packages for each org the user belongs to
+	orgs, err := c.fetchUserOrgs(ctx)
+	if err == nil {
+		for _, org := range orgs {
+			orgURL := fmt.Sprintf("%s/orgs/%s/packages?package_type=container&per_page=100&page=1",
+				ghcrAPIBase, url.PathEscape(org))
+			if orgRepos, _, orgErr := c.fetchPackages(ctx, orgURL); orgErr == nil {
+				for _, r := range orgRepos {
+					if _, ok := seen[r.FullName]; !ok {
+						seen[r.FullName] = struct{}{}
+						all = append(all, r)
+					}
+				}
+			}
+		}
+	}
+
+	// 3. If namespace set and not yet found, try as public user listing
+	if c.namespace != "" {
+		pubURL := fmt.Sprintf("%s/users/%s/packages?package_type=container&per_page=100&page=1",
+			ghcrAPIBase, url.PathEscape(c.namespace))
+		if pubRepos, _, pubErr := c.fetchPackages(ctx, pubURL); pubErr == nil {
+			for _, r := range pubRepos {
+				if _, ok := seen[r.FullName]; !ok {
+					seen[r.FullName] = struct{}{}
+					all = append(all, r)
+				}
+			}
+		}
+	}
+
+	// Manual pagination over merged results
+	total := len(all)
+	start := (page - 1) * pageSize
+	if start >= total {
+		return &ListRepositoriesResponse{Page: page, PageSize: pageSize, TotalCount: total}, nil
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+
 	return &ListRepositoriesResponse{
-		Repositories: repos,
+		Repositories: all[start:end],
 		TotalCount:   total,
 		Page:         page,
 		PageSize:     pageSize,
 	}, nil
+}
+
+// fetchUserOrgs returns the list of org logins for the authenticated user
+func (c *GHCRClient) fetchUserOrgs(ctx context.Context) ([]string, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", ghcrAPIBase+"/user/orgs?per_page=100", nil)
+	if err != nil {
+		return nil, err
+	}
+	c.setHeaders(req)
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("status %d", resp.StatusCode)
+	}
+	var orgs []struct {
+		Login string `json:"login"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&orgs); err != nil {
+		return nil, err
+	}
+	logins := make([]string, len(orgs))
+	for i, o := range orgs {
+		logins[i] = o.Login
+	}
+	return logins, nil
 }
 
 func (c *GHCRClient) fetchPackages(ctx context.Context, apiURL string) ([]Repository, int, error) {
@@ -127,18 +184,24 @@ func (c *GHCRClient) fetchPackages(ctx context.Context, apiURL string) ([]Reposi
 
 	repos := make([]Repository, len(packages))
 	for i, p := range packages {
-		fullName := p.Name
+		ownerLogin := ""
 		if p.Owner != nil {
-			fullName = fmt.Sprintf("ghcr.io/%s/%s", p.Owner.Login, p.Name)
+			ownerLogin = p.Owner.Login
+		}
+		fullName := p.Name
+		if ownerLogin != "" {
+			fullName = fmt.Sprintf("ghcr.io/%s/%s", ownerLogin, p.Name)
 		}
 
 		repos[i] = Repository{
-			Name:        p.Name,
-			FullName:    fullName,
-			Description: nilIfEmpty(p.Description),
-			IsPrivate:   p.Visibility == "private",
-			PullCount:   0, // GitHub API doesn't provide pull count
-			UpdatedAt:   nilIfEmpty(p.UpdatedAt),
+			Name:            p.Name,
+			FullName:        fullName,
+			Description:     nilIfEmpty(p.Description),
+			IsPrivate:       p.Visibility == "private",
+			PullCount:       0,
+			UpdatedAt:       nilIfEmpty(p.UpdatedAt),
+			Owner:           ownerLogin,
+			NamespacedOwner: ownerLogin,
 		}
 	}
 
