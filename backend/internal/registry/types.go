@@ -81,12 +81,15 @@ type Credentials struct {
 
 // Repository represents a container repository
 type Repository struct {
-	Name        string  `json:"name"`
-	FullName    string  `json:"full_name"`
-	Description *string `json:"description,omitempty"`
-	IsPrivate   bool    `json:"is_private"`
-	PullCount   int64   `json:"pull_count"`
-	UpdatedAt   *string `json:"updated_at,omitempty"`
+	Name            string  `json:"name"`
+	FullName        string  `json:"full_name"`
+	Description     *string `json:"description,omitempty"`
+	IsPrivate       bool    `json:"is_private"`
+	PullCount       int64   `json:"pull_count"`
+	UpdatedAt       *string `json:"updated_at,omitempty"`
+	// Internal: used for namespace filtering, not serialised to API consumers
+	Owner           string  `json:"-"`
+	NamespacedOwner string  `json:"-"`
 }
 
 // Tag represents a container image tag

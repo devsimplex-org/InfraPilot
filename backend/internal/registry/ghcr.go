@@ -62,43 +62,59 @@ func (c *GHCRClient) TestConnection(ctx context.Context) error {
 	return nil
 }
 
-// ListRepositories lists container packages for the namespace
+// ListRepositories lists container packages for the namespace.
+// Tries endpoints in order: org → authenticated user → public user listing.
 func (c *GHCRClient) ListRepositories(ctx context.Context, page, pageSize int) (*ListRepositoriesResponse, error) {
-	var apiURL string
+	endpoints := []string{}
 
-	// GitHub API uses different endpoints for user vs org packages
-	// First, try to determine if namespace is a user or org
 	if c.namespace != "" {
-		// Try org first, then user
-		apiURL = fmt.Sprintf("%s/orgs/%s/packages?package_type=container&per_page=%d&page=%d",
-			ghcrAPIBase, url.PathEscape(c.namespace), pageSize, page)
-	} else {
-		// Use authenticated user's packages
-		apiURL = fmt.Sprintf("%s/user/packages?package_type=container&per_page=%d&page=%d",
-			ghcrAPIBase, pageSize, page)
+		// 1. Org packages (works when namespace is a GitHub org)
+		endpoints = append(endpoints, fmt.Sprintf("%s/orgs/%s/packages?package_type=container&per_page=%d&page=%d",
+			ghcrAPIBase, url.PathEscape(c.namespace), pageSize, page))
 	}
 
-	repos, total, err := c.fetchPackages(ctx, apiURL)
-	if err != nil {
-		// If org endpoint failed, try user endpoint
-		if c.namespace != "" {
-			apiURL = fmt.Sprintf("%s/users/%s/packages?package_type=container&per_page=%d&page=%d",
-				ghcrAPIBase, url.PathEscape(c.namespace), pageSize, page)
-			repos, total, err = c.fetchPackages(ctx, apiURL)
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			return nil, err
+	// 2. Authenticated user's own packages — returns private packages with read:packages scope
+	endpoints = append(endpoints, fmt.Sprintf("%s/user/packages?package_type=container&per_page=%d&page=%d",
+		ghcrAPIBase, pageSize, page))
+
+	if c.namespace != "" {
+		// 3. Public packages for a specific user (fallback, public only)
+		endpoints = append(endpoints, fmt.Sprintf("%s/users/%s/packages?package_type=container&per_page=%d&page=%d",
+			ghcrAPIBase, url.PathEscape(c.namespace), pageSize, page))
+	}
+
+	var lastErr error
+	for _, apiURL := range endpoints {
+		repos, total, err := c.fetchPackages(ctx, apiURL)
+		if err != nil {
+			lastErr = err
+			continue
 		}
+		// Filter by namespace when using the authenticated user endpoint
+		if c.namespace != "" && len(repos) > 0 {
+			filtered := repos[:0]
+			for _, r := range repos {
+				if r.Owner == c.namespace || r.NamespacedOwner == c.namespace {
+					filtered = append(filtered, r)
+				}
+			}
+			if len(filtered) > 0 {
+				repos = filtered
+				total = len(filtered)
+			}
+		}
+		return &ListRepositoriesResponse{
+			Repositories: repos,
+			TotalCount:   total,
+			Page:         page,
+			PageSize:     pageSize,
+		}, nil
 	}
 
-	return &ListRepositoriesResponse{
-		Repositories: repos,
-		TotalCount:   total,
-		Page:         page,
-		PageSize:     pageSize,
-	}, nil
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return &ListRepositoriesResponse{Page: page, PageSize: pageSize}, nil
 }
 
 func (c *GHCRClient) fetchPackages(ctx context.Context, apiURL string) ([]Repository, int, error) {
@@ -127,18 +143,24 @@ func (c *GHCRClient) fetchPackages(ctx context.Context, apiURL string) ([]Reposi
 
 	repos := make([]Repository, len(packages))
 	for i, p := range packages {
-		fullName := p.Name
+		ownerLogin := ""
 		if p.Owner != nil {
-			fullName = fmt.Sprintf("ghcr.io/%s/%s", p.Owner.Login, p.Name)
+			ownerLogin = p.Owner.Login
+		}
+		fullName := p.Name
+		if ownerLogin != "" {
+			fullName = fmt.Sprintf("ghcr.io/%s/%s", ownerLogin, p.Name)
 		}
 
 		repos[i] = Repository{
-			Name:        p.Name,
-			FullName:    fullName,
-			Description: nilIfEmpty(p.Description),
-			IsPrivate:   p.Visibility == "private",
-			PullCount:   0, // GitHub API doesn't provide pull count
-			UpdatedAt:   nilIfEmpty(p.UpdatedAt),
+			Name:            p.Name,
+			FullName:        fullName,
+			Description:     nilIfEmpty(p.Description),
+			IsPrivate:       p.Visibility == "private",
+			PullCount:       0,
+			UpdatedAt:       nilIfEmpty(p.UpdatedAt),
+			Owner:           ownerLogin,
+			NamespacedOwner: ownerLogin,
 		}
 	}
 
