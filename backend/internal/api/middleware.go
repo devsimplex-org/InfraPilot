@@ -105,6 +105,21 @@ func (h *Handler) AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
+		// API key authentication (ip_live_ prefix)
+		if strings.HasPrefix(token, apiKeyPrefix) {
+			orgID, userID, role, err := h.validateAPIKey(c, token)
+			if err != nil {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+				c.Abort()
+				return
+			}
+			c.Set("user_id", userID)
+			c.Set("org_id", orgID)
+			c.Set("role", role)
+			c.Next()
+			return
+		}
+
 		claims, err := h.auth.ValidateToken(token)
 		if err != nil {
 			status := http.StatusUnauthorized

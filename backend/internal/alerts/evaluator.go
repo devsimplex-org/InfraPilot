@@ -135,7 +135,9 @@ func (e *AlertEvaluator) runEvaluation(ctx context.Context) {
 // getEnabledRules fetches all enabled alert rules
 func (e *AlertEvaluator) getEnabledRules(ctx context.Context) ([]AlertRule, error) {
 	rows, err := e.db.Query(ctx, `
-		SELECT id, org_id, name, rule_type, conditions, channels, cooldown_mins, enabled
+		SELECT id, org_id, name, rule_type, conditions,
+		       array_to_json(channels)::text AS channels,
+		       cooldown_mins, enabled
 		FROM alert_rules
 		WHERE enabled = true
 	`)
@@ -245,6 +247,8 @@ func (e *AlertEvaluator) evaluateRule(ctx context.Context, rule AlertRule, metri
 		e.evaluateSSLExpiry(ctx, rule)
 	case "high_error_rate":
 		e.evaluateHighErrorRate(ctx, rule)
+	case "agent_offline":
+		e.evaluateAgentOffline(ctx, rule)
 	}
 }
 
@@ -540,6 +544,44 @@ func (e *AlertEvaluator) evaluateHighErrorRate(ctx context.Context, rule AlertRu
 					"threshold":        threshold,
 				})
 		}
+	}
+}
+
+func (e *AlertEvaluator) evaluateAgentOffline(ctx context.Context, rule AlertRule) {
+	thresholdMins := 5
+	if t, ok := rule.Conditions["threshold_mins"].(float64); ok && t > 0 {
+		thresholdMins = int(t)
+	}
+
+	rows, err := e.db.Query(ctx, `
+		SELECT id, name, last_seen_at
+		FROM agents
+		WHERE org_id = $1
+		  AND last_seen_at < NOW() - ($2 * INTERVAL '1 minute')
+	`, rule.OrgID, thresholdMins)
+	if err != nil {
+		e.logger.Error("Failed to query agents for offline check", zap.Error(err))
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var agentID uuid.UUID
+		var agentName string
+		var lastSeenAt time.Time
+		if err := rows.Scan(&agentID, &agentName, &lastSeenAt); err != nil {
+			continue
+		}
+
+		minutesOffline := int(time.Since(lastSeenAt).Minutes())
+		e.triggerAlert(ctx, rule, agentName, "critical",
+			fmt.Sprintf("Agent %q has been offline for %d minutes", agentName, minutesOffline),
+			map[string]interface{}{
+				"agent_id":        agentID.String(),
+				"agent_name":      agentName,
+				"last_seen_at":    lastSeenAt.Format(time.RFC3339),
+				"minutes_offline": minutesOffline,
+			})
 	}
 }
 

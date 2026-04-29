@@ -10,6 +10,7 @@ import {
   BarChart3,
   Zap,
   Layers,
+  ShieldCheck,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -34,6 +35,7 @@ const tabGroups = [
     label: "Reverse Proxy",
     tabs: [
       { id: "proxies", label: "Proxy Hosts", href: "/traffic/proxies", icon: Globe },
+      { id: "certificates", label: "SSL Certificates", href: "/traffic/certificates", icon: ShieldCheck },
       { id: "analytics", label: "Analytics", href: "/traffic/analytics", icon: BarChart3 },
       { id: "logs", label: "Nginx Logs", href: "/traffic/logs", icon: FileText },
     ],
@@ -66,7 +68,7 @@ export default function TrafficLayout({ children }: { children: ReactNode }) {
 
   // Check if we're on a detail or create page (e.g., /traffic/proxies/create)
   const pathParts = pathname.split("/").filter(Boolean);
-  const knownSegments = ["proxies", "logs", "analytics", "upgrade"];
+  const knownSegments = ["proxies", "certificates", "logs", "analytics", "upgrade"];
   const isSubPage = pathParts.length > 2 && !knownSegments.includes(pathParts[2]);
 
   // Determine active tab from pathname
@@ -75,6 +77,7 @@ export default function TrafficLayout({ children }: { children: ReactNode }) {
     if (pathname === "/traffic/proxies" || pathname.startsWith("/traffic/proxies/")) return "proxies";
     if (pathname === "/traffic/analytics" || pathname.startsWith("/traffic/analytics/")) return "analytics";
     if (pathname === "/traffic/logs" || pathname.startsWith("/traffic/logs/")) return "logs";
+    if (pathname === "/traffic/certificates" || pathname.startsWith("/traffic/certificates/")) return "certificates";
     if (pathname === "/traffic/upgrade") return "upgrade";
     const segment = pathname.split("/")[2];
     return segment || "overview";
