@@ -37,6 +37,7 @@ coverage/
 
 # Generated files
 *.pb.go
+*.tsbuildinfo
 
 # Docker volumes (local dev)
 postgres_data/
