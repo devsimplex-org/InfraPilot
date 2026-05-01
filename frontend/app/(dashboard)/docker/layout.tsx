@@ -2,7 +2,7 @@
 
 import { ReactNode, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { RefreshCw, Server, Download, Plus, Layers, Rocket, X, Loader2, CheckCircle, AlertTriangle } from "lucide-react";
+import { RefreshCw, Server, Download, Plus, Rocket, X, Loader2, CheckCircle, AlertTriangle } from "lucide-react";
 
 type Tab = {
   id: string;
@@ -20,8 +20,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Spinner } from "@/components/ui/Spinner";
 import { ContainerPanel } from "@/components/docker/ContainerPanel";
 import { DeploymentPanel } from "@/components/docker/DeploymentPanel";
-import { StackDeployWizard } from "@/components/StackDeployWizard";
-import { DeployWizard } from "@/components/DeployWizard";
+import { UnifiedDeployWizard } from "@/components/UnifiedDeployWizard";
 import { cn } from "@/lib/utils";
 
 const tabGroups: { id: string; label: string; tabs: Tab[] }[] = [
@@ -42,8 +41,7 @@ const tabGroups: { id: string; label: string; tabs: Tab[] }[] = [
     id: "management",
     label: "Management",
     tabs: [
-      { id: "services",    label: "Services",    href: "/docker/services" },
-      { id: "stacks",      label: "Stacks",      href: "/docker/stacks" },
+      { id: "apps",        label: "Apps",        href: "/docker/apps" },
       { id: "deployments", label: "Deployments", href: "/docker/deployments" },
     ],
   },
@@ -54,7 +52,6 @@ function DockerLayoutContent({ children }: { children: ReactNode }) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { activeAgents, selectedAgent, setSelectedAgent, isLoadingAgents } = useDocker();
-  const [showStackDeployWizard, setShowStackDeployWizard] = useState(false);
   const [showDeployWizard, setShowDeployWizard] = useState(false);
   const [showPullModal, setShowPullModal] = useState(false);
   const [pullInput, setPullInput] = useState("");
@@ -104,24 +101,14 @@ function DockerLayoutContent({ children }: { children: ReactNode }) {
   // Get action button based on active tab
   const getActionButton = () => {
     switch (activeTab) {
-      case "services":
+      case "apps":
         return (
           <button
             onClick={() => setShowDeployWizard(true)}
             className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors text-sm font-medium"
           >
             <Rocket className="w-4 h-4" />
-            Deploy Service
-          </button>
-        );
-      case "stacks":
-        return (
-          <button
-            onClick={() => setShowStackDeployWizard(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors text-sm font-medium"
-          >
-            <Layers className="w-4 h-4" />
-            Deploy Stack
+            Deploy App
           </button>
         );
       case "images":
@@ -132,16 +119,6 @@ function DockerLayoutContent({ children }: { children: ReactNode }) {
           >
             <Download className="w-4 h-4" />
             Pull Image
-          </button>
-        );
-      case "deployments":
-        return (
-          <button
-            onClick={() => setShowDeployWizard(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors text-sm font-medium"
-          >
-            <Rocket className="w-4 h-4" />
-            Deploy Container
           </button>
         );
       case "volumes":
@@ -201,8 +178,7 @@ function DockerLayoutContent({ children }: { children: ReactNode }) {
         {children}
         <ContainerPanel />
         <DeploymentPanel />
-        <StackDeployWizard isOpen={showStackDeployWizard} onClose={() => setShowStackDeployWizard(false)} />
-        <DeployWizard isOpen={showDeployWizard} onClose={() => setShowDeployWizard(false)} onSuccess={() => { setShowDeployWizard(false); router.push("/docker/deployments"); }} />
+        <UnifiedDeployWizard isOpen={showDeployWizard} onClose={() => setShowDeployWizard(false)} onSuccess={() => { setShowDeployWizard(false); router.push("/docker/apps"); }} />
       </>
     );
   }
@@ -284,17 +260,11 @@ function DockerLayoutContent({ children }: { children: ReactNode }) {
       {/* Global Deployment Panel */}
       <DeploymentPanel />
 
-      {/* Stack Deploy Wizard Modal */}
-      <StackDeployWizard
-        isOpen={showStackDeployWizard}
-        onClose={() => setShowStackDeployWizard(false)}
-      />
-
-      {/* Deploy Container Wizard */}
-      <DeployWizard
+      {/* Unified Deploy Wizard */}
+      <UnifiedDeployWizard
         isOpen={showDeployWizard}
         onClose={() => setShowDeployWizard(false)}
-        onSuccess={() => { setShowDeployWizard(false); router.push("/docker/deployments"); }}
+        onSuccess={() => { setShowDeployWizard(false); router.push("/docker/apps"); }}
       />
 
       {/* Pull Image Modal */}
