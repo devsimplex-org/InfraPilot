@@ -170,6 +170,7 @@ export interface ProxyHost {
   basic_auth_enabled: boolean;
   basic_auth_realm?: string;
   basic_auth_excluded_paths?: string[];
+  bearer_auth_enabled: boolean;
   access_log: boolean;
   error_log: boolean;
   log_format?: string;
@@ -196,6 +197,19 @@ export interface AuthUser {
   username: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface BearerToken {
+  id: string;
+  proxy_id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// Only present in the response to createBearerToken -- shown once, never again.
+export interface CreateBearerTokenResponse extends BearerToken {
+  token: string;
 }
 
 export interface ConfigPreviewRequest {
@@ -604,6 +618,15 @@ export interface SetupLicenseResponse {
   tier: string;
   max_agents: number;
   features: string[];
+}
+
+export interface CommunitySignupVerifyResponse {
+  // fetchAPI throws on any non-2xx response (using its "error" field as the message),
+  // so a resolved call here always means the code was correct — status is always
+  // "verified".
+  status: "verified";
+  tier: string;
+  max_agents: number;
 }
 
 export interface LicenseSettingsResponse {
@@ -3545,10 +3568,28 @@ export const api = {
   // Setup (first-run)
   getSetupStatus: (options?: RequestInit, timeoutMs?: number) => fetchAPI<SetupStatusResponse>("/setup/status", options ?? {}, timeoutMs),
 
+  verifySetupToken: (setupToken: string) =>
+    fetchAPI<{ valid: boolean }>("/setup/token", {
+      method: "POST",
+      body: JSON.stringify({ setup_token: setupToken }),
+    }),
+
   setupLicense: (key: string, setupToken: string) =>
     fetchAPI<SetupLicenseResponse>("/setup/license", {
       method: "POST",
       body: JSON.stringify({ key, setup_token: setupToken }),
+    }),
+
+  communitySignup: (email: string, setupToken: string) =>
+    fetchAPI<{ status: string }>("/setup/community-signup", {
+      method: "POST",
+      body: JSON.stringify({ email, setup_token: setupToken }),
+    }),
+
+  communitySignupVerify: (email: string, code: string, setupToken: string) =>
+    fetchAPI<CommunitySignupVerifyResponse>("/setup/community-signup/verify", {
+      method: "POST",
+      body: JSON.stringify({ email, code, setup_token: setupToken }),
     }),
 
   createInitialAdmin: (email: string, password: string, setupToken: string) =>
@@ -3724,6 +3765,7 @@ export const api = {
       basic_auth_enabled: boolean;
       basic_auth_realm: string;
       basic_auth_excluded_paths: string[];
+      bearer_auth_enabled: boolean;
       status: string;
     }>
   ) =>
@@ -3799,6 +3841,23 @@ export const api = {
   deleteAuthUser: (agentId: string, proxyId: string, userId: string) =>
     fetchAPI<void>(
       `/agents/${agentId}/proxies/${proxyId}/auth-users/${userId}`,
+      {
+        method: "DELETE",
+      }
+    ),
+
+  listBearerTokens: (agentId: string, proxyId: string) =>
+    fetchAPI<BearerToken[]>(`/agents/${agentId}/proxies/${proxyId}/bearer-tokens`),
+
+  createBearerToken: (agentId: string, proxyId: string, data: { name: string }) =>
+    fetchAPI<CreateBearerTokenResponse>(`/agents/${agentId}/proxies/${proxyId}/bearer-tokens`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  deleteBearerToken: (agentId: string, proxyId: string, tokenId: string) =>
+    fetchAPI<void>(
+      `/agents/${agentId}/proxies/${proxyId}/bearer-tokens/${tokenId}`,
       {
         method: "DELETE",
       }

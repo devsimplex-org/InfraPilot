@@ -5,60 +5,153 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/lib/auth";
 
+const inputClass =
+  "w-full px-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500";
+const labelClass = "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2";
+const buttonClass =
+  "w-full py-3 px-4 bg-primary-600 hover:bg-primary-700 disabled:bg-primary-800 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors";
+const errorBoxClass =
+  "bg-red-500/10 border border-red-500/50 text-red-600 dark:text-red-400 px-4 py-3 rounded text-sm";
+
 export default function SetupPage() {
   const router = useRouter();
   const { setTokens } = useAuthStore();
 
   const [ready, setReady] = useState(false);
-  // Keyless by default (doc 36 §7): 2 = admin account is the primary step; 1 = optional license activation.
-  const [step, setStep] = useState<1 | 2>(2);
+  // A license is required to complete setup (v3/36), and the setup token is required
+  // before anything else on this page can run at all -- so the wizard is now three
+  // steps, always in order: token, license, admin account.
+  const [step, setStep] = useState<1 | 2 | 3>(1);
 
-  // Required by both steps below — closes the "whoever visits /setup first becomes
-  // admin" race. Printed to the container's logs at startup, only someone with actual
-  // access to the host (not a remote attacker) can read it.
+  // Step 1: setup token — closes the "whoever visits /setup first becomes admin" race.
+  // Collected once here and carried through every later call.
   const [setupToken, setSetupToken] = useState("");
+  const [tokenInput, setTokenInput] = useState("");
+  const [tokenError, setTokenError] = useState("");
+  const [tokenLoading, setTokenLoading] = useState(false);
 
-  // Step 1: license
+  // Step 2: license — two ways in, toggled with licenseMode.
+  const [licenseMode, setLicenseMode] = useState<"signup" | "paste">("signup");
+
+  // Step 2a: paste an existing key
   const [licenseKey, setLicenseKey] = useState("");
   const [licenseError, setLicenseError] = useState("");
   const [licenseLoading, setLicenseLoading] = useState(false);
 
-  // Step 2: admin account
+  // Step 2b: in-app email sign-up for a free key — enter email, get a 6-digit code,
+  // type it in. No tab-switching, no polling.
+  const [otpStage, setOtpStage] = useState<"email" | "code">("email");
+  const [signupEmail, setSignupEmail] = useState("");
+  const [signupError, setSignupError] = useState("");
+  const [signupLoading, setSignupLoading] = useState(false);
+  const [otpCode, setOtpCode] = useState("");
+  const [otpError, setOtpError] = useState("");
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [otpVerified, setOtpVerified] = useState(false);
+  const [resendLoading, setResendLoading] = useState(false);
+
+  // Step 3: admin account
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [adminError, setAdminError] = useState("");
   const [adminLoading, setAdminLoading] = useState(false);
 
-  // On mount: redirect away if setup already done; skip license step if key already active
+  // On mount: redirect away if setup already done. A license already configured (e.g.
+  // LICENSE_KEY env var, or a prior partial setup) skips straight to admin creation --
+  // that step will still ask for the token, since it's not carried across a refresh.
   useEffect(() => {
     api.getSetupStatus().then((status) => {
       if (!status.setup_required) {
         router.replace("/login");
         return;
       }
-      // Keyless by default: always land on admin-account creation. A license is
-      // optional — activate it here (link) or later in Settings → License.
       if (status.license_error) setLicenseError(status.license_error);
-      setStep(2);
+      setStep(status.license_configured ? 3 : 1);
       setReady(true);
     }).catch(() => {
       setReady(true);
     });
   }, [router]);
 
+  const handleTokenSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTokenError("");
+    setTokenLoading(true);
+    try {
+      await api.verifySetupToken(tokenInput.trim());
+      setSetupToken(tokenInput.trim());
+      setStep(2);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Invalid setup token";
+      setTokenError(message);
+    } finally {
+      setTokenLoading(false);
+    }
+  };
+
   const handleLicenseSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLicenseError("");
     setLicenseLoading(true);
     try {
-      await api.setupLicense(licenseKey.trim(), setupToken.trim());
-      setStep(2);
+      await api.setupLicense(licenseKey.trim(), setupToken);
+      setStep(3);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Invalid license key";
       setLicenseError(message);
     } finally {
       setLicenseLoading(false);
+    }
+  };
+
+  const sendCode = async () => {
+    await api.communitySignup(signupEmail.trim(), setupToken);
+    setOtpStage("code");
+    setOtpCode("");
+    setOtpError("");
+  };
+
+  const handleSendCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSignupError("");
+    setSignupLoading(true);
+    try {
+      await sendCode();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to send code";
+      setSignupError(message);
+    } finally {
+      setSignupLoading(false);
+    }
+  };
+
+  const handleResendCode = async () => {
+    setOtpError("");
+    setResendLoading(true);
+    try {
+      await sendCode();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to resend code";
+      setOtpError(message);
+    } finally {
+      setResendLoading(false);
+    }
+  };
+
+  const handleVerifyCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setOtpError("");
+    setOtpLoading(true);
+    try {
+      await api.communitySignupVerify(signupEmail.trim(), otpCode.trim(), setupToken);
+      setOtpVerified(true);
+      setTimeout(() => setStep(3), 1000);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Incorrect code";
+      setOtpError(message);
+    } finally {
+      setOtpLoading(false);
     }
   };
 
@@ -77,7 +170,7 @@ export default function SetupPage() {
 
     setAdminLoading(true);
     try {
-      const result = await api.createInitialAdmin(email, password, setupToken.trim());
+      const result = await api.createInitialAdmin(email, password, setupToken);
       if (result.access_token && result.refresh_token) {
         setTokens(result.access_token, result.refresh_token);
         router.push("/");
@@ -100,6 +193,12 @@ export default function SetupPage() {
     );
   }
 
+  const stepTitles: Record<1 | 2 | 3, string> = {
+    1: "Enter the setup token from your console",
+    2: "Activate a free Community key to get started",
+    3: "Create your admin account",
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-950">
       <div className="w-full max-w-md">
@@ -115,110 +214,180 @@ export default function SetupPage() {
             <span className="inline-block mt-1 px-2 py-0.5 text-xs font-medium bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300 rounded-full">
               Community Edition
             </span>
-            <p className="text-gray-600 dark:text-gray-400 mt-2">
-              {step === 1
-                ? "Activate a Community or Enterprise key (optional)"
-                : "Create your admin account"}
-            </p>
+            <p className="text-gray-600 dark:text-gray-400 mt-2">{stepTitles[step]}</p>
           </div>
 
-          {/* Setup token — required to complete either step below, closes the remote
-              "whoever visits /setup first becomes admin" race. */}
-          <div className="mb-6">
-            <label
-              htmlFor="setupToken"
-              className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
-            >
-              Setup Token
-            </label>
-            <input
-              id="setupToken"
-              type="text"
-              value={setupToken}
-              onChange={(e) => setSetupToken(e.target.value)}
-              required
-              className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 font-mono text-sm"
-              placeholder="Paste the token from your container logs"
-            />
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              Find it with{" "}
-              <code className="font-mono">docker logs &lt;container&gt; | grep -i &quot;setup token&quot;</code>
-            </p>
-          </div>
-
-          {/* Step 1: License Key */}
+          {/* Step 1: Setup Token */}
           {step === 1 && (
-            <form onSubmit={handleLicenseSubmit} className="space-y-5">
-              {licenseError && (
-                <div className="bg-red-500/10 border border-red-500/50 text-red-600 dark:text-red-400 px-4 py-3 rounded text-sm">
-                  {licenseError}
-                </div>
-              )}
-
-              <div className="bg-blue-500/10 border border-blue-500/50 text-blue-700 dark:text-blue-400 px-4 py-3 rounded text-sm">
-                Don&apos;t have a key?{" "}
-                <a
-                  href="https://infrapilot.org/signup"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline hover:no-underline font-medium"
-                >
-                  Get one free at infrapilot.org
-                </a>
-                {" "}(no credit card, works for Community and paid tiers alike).
-              </div>
+            <form onSubmit={handleTokenSubmit} className="space-y-5">
+              {tokenError && <div className={errorBoxClass}>{tokenError}</div>}
 
               <div>
-                <label
-                  htmlFor="licenseKey"
-                  className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
-                >
-                  License Key
+                <label htmlFor="setupToken" className={labelClass}>
+                  Setup Token
                 </label>
                 <input
-                  id="licenseKey"
+                  id="setupToken"
                   type="text"
-                  value={licenseKey}
-                  onChange={(e) => setLicenseKey(e.target.value)}
+                  value={tokenInput}
+                  onChange={(e) => setTokenInput(e.target.value)}
                   required
                   autoFocus
-                  className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 font-mono"
-                  placeholder="IP-CE-XXXX-XXXX-XXXX"
+                  className={`${inputClass} font-mono text-sm`}
+                  placeholder="Paste the token"
                 />
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Find it with{" "}
+                  <code className="font-mono">docker exec &lt;container&gt; cat /data/setup_token</code>
+                </p>
               </div>
 
-              <button
-                type="submit"
-                disabled={licenseLoading}
-                className="w-full py-3 px-4 bg-primary-600 hover:bg-primary-700 disabled:bg-primary-800 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
-              >
-                {licenseLoading ? "Validating..." : "Activate License →"}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => { setLicenseError(""); setStep(2); }}
-                className="w-full text-center text-sm text-gray-500 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
-              >
-                ← Skip — continue with Community Edition
+              <button type="submit" disabled={tokenLoading} className={buttonClass}>
+                {tokenLoading ? "Checking..." : "Continue →"}
               </button>
             </form>
           )}
 
-          {/* Step 2: Admin Account */}
+          {/* Step 2: License */}
           {step === 2 && (
-            <form onSubmit={handleAdminSubmit} className="space-y-5">
-              {adminError && (
-                <div className="bg-red-500/10 border border-red-500/50 text-red-600 dark:text-red-400 px-4 py-3 rounded text-sm">
-                  {adminError}
-                </div>
+            <div className="space-y-5">
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setLicenseMode("signup")}
+                  className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
+                    licenseMode === "signup"
+                      ? "bg-primary-600 text-white"
+                      : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
+                  }`}
+                >
+                  Get a free key
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLicenseMode("paste")}
+                  className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
+                    licenseMode === "paste"
+                      ? "bg-primary-600 text-white"
+                      : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
+                  }`}
+                >
+                  I have a key
+                </button>
+              </div>
+
+              {licenseMode === "signup" ? (
+                otpStage === "email" ? (
+                  <form onSubmit={handleSendCode} className="space-y-5">
+                    {signupError && <div className={errorBoxClass}>{signupError}</div>}
+
+                    <div>
+                      <label htmlFor="signupEmail" className={labelClass}>
+                        Email Address
+                      </label>
+                      <input
+                        id="signupEmail"
+                        type="email"
+                        value={signupEmail}
+                        onChange={(e) => setSignupEmail(e.target.value)}
+                        required
+                        autoFocus
+                        className={inputClass}
+                        placeholder="you@example.com"
+                      />
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        No credit card. We&apos;ll email you a 6-digit code to activate a
+                        free Community key.
+                      </p>
+                    </div>
+                    <button type="submit" disabled={signupLoading} className={buttonClass}>
+                      {signupLoading ? "Sending..." : "Send Code →"}
+                    </button>
+                  </form>
+                ) : (
+                  <form onSubmit={handleVerifyCode} className="space-y-5">
+                    {otpError && <div className={errorBoxClass}>{otpError}</div>}
+
+                    {otpVerified ? (
+                      <div className="bg-green-500/10 border border-green-500/50 text-green-700 dark:text-green-400 px-4 py-3 rounded text-sm text-center">
+                        Verified! Your Community key is active — continuing...
+                      </div>
+                    ) : (
+                      <>
+                        <div>
+                          <label htmlFor="otpCode" className={labelClass}>
+                            Verification Code
+                          </label>
+                          <input
+                            id="otpCode"
+                            type="text"
+                            inputMode="numeric"
+                            maxLength={6}
+                            value={otpCode}
+                            onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ""))}
+                            required
+                            autoFocus
+                            className={`${inputClass} font-mono text-center text-2xl tracking-[0.3em]`}
+                            placeholder="000000"
+                          />
+                          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                            Sent to <strong>{signupEmail}</strong>. Expires in 10 minutes.
+                          </p>
+                        </div>
+                        <button
+                          type="submit"
+                          disabled={otpLoading || otpCode.length !== 6}
+                          className={buttonClass}
+                        >
+                          {otpLoading ? "Verifying..." : "Verify Code →"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleResendCode}
+                          disabled={resendLoading}
+                          className="w-full text-sm text-primary-600 dark:text-primary-400 hover:underline disabled:opacity-50"
+                        >
+                          {resendLoading ? "Resending..." : "Resend code"}
+                        </button>
+                      </>
+                    )}
+                  </form>
+                )
+              ) : (
+                <form onSubmit={handleLicenseSubmit} className="space-y-5">
+                  {licenseError && <div className={errorBoxClass}>{licenseError}</div>}
+
+                  <div>
+                    <label htmlFor="licenseKey" className={labelClass}>
+                      License Key
+                    </label>
+                    <input
+                      id="licenseKey"
+                      type="text"
+                      value={licenseKey}
+                      onChange={(e) => setLicenseKey(e.target.value)}
+                      required
+                      autoFocus
+                      className={`${inputClass} font-mono`}
+                      placeholder="IP-CE-XXXX-XXXX-XXXX"
+                    />
+                  </div>
+
+                  <button type="submit" disabled={licenseLoading} className={buttonClass}>
+                    {licenseLoading ? "Validating..." : "Activate License →"}
+                  </button>
+                </form>
               )}
+            </div>
+          )}
+
+          {/* Step 3: Admin Account */}
+          {step === 3 && (
+            <form onSubmit={handleAdminSubmit} className="space-y-5">
+              {adminError && <div className={errorBoxClass}>{adminError}</div>}
 
               <div>
-                <label
-                  htmlFor="email"
-                  className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
-                >
+                <label htmlFor="email" className={labelClass}>
                   Email Address
                 </label>
                 <input
@@ -228,16 +397,13 @@ export default function SetupPage() {
                   onChange={(e) => setEmail(e.target.value)}
                   required
                   autoFocus
-                  className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500"
+                  className={inputClass}
                   placeholder="admin@example.com"
                 />
               </div>
 
               <div>
-                <label
-                  htmlFor="password"
-                  className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
-                >
+                <label htmlFor="password" className={labelClass}>
                   Password
                 </label>
                 <input
@@ -247,16 +413,13 @@ export default function SetupPage() {
                   onChange={(e) => setPassword(e.target.value)}
                   required
                   minLength={8}
-                  className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500"
+                  className={inputClass}
                   placeholder="At least 8 characters"
                 />
               </div>
 
               <div>
-                <label
-                  htmlFor="confirmPassword"
-                  className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
-                >
+                <label htmlFor="confirmPassword" className={labelClass}>
                   Confirm Password
                 </label>
                 <input
@@ -266,16 +429,12 @@ export default function SetupPage() {
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   required
                   minLength={8}
-                  className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500"
+                  className={inputClass}
                   placeholder="Confirm your password"
                 />
               </div>
 
-              <button
-                type="submit"
-                disabled={adminLoading}
-                className="w-full py-3 px-4 bg-primary-600 hover:bg-primary-700 disabled:bg-primary-800 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
-              >
+              <button type="submit" disabled={adminLoading} className={buttonClass}>
                 {adminLoading ? "Creating Account..." : "Create Admin Account →"}
               </button>
 
@@ -284,17 +443,6 @@ export default function SetupPage() {
                 InfraPilot sends anonymous, non-identifying usage telemetry by default — never
                 app names, repo URLs, env vars, or your infrastructure&apos;s content. Turn it
                 off anytime in Settings → Privacy.
-              </p>
-
-              <p className="text-center text-xs text-gray-500 dark:text-gray-400">
-                Have a Community or Enterprise key?{" "}
-                <button
-                  type="button"
-                  onClick={() => setStep(1)}
-                  className="text-primary-600 dark:text-primary-400 hover:underline"
-                >
-                  Activate it
-                </button>
               </p>
             </form>
           )}

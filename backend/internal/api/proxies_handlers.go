@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,6 +37,7 @@ type ProxyHost struct {
 	BasicAuthEnabled       bool     `json:"basic_auth_enabled"`
 	BasicAuthRealm         string   `json:"basic_auth_realm,omitempty"`
 	BasicAuthExcludedPaths []string `json:"basic_auth_excluded_paths,omitempty"`
+	BearerAuthEnabled      bool     `json:"bearer_auth_enabled"`
 	AccessLog              bool     `json:"access_log"`
 	ErrorLog               bool     `json:"error_log"`
 	LogFormat              *string  `json:"log_format,omitempty"`
@@ -87,6 +89,7 @@ type UpdateProxyRequest struct {
 	BasicAuthEnabled       *bool     `json:"basic_auth_enabled,omitempty"`
 	BasicAuthRealm         *string   `json:"basic_auth_realm,omitempty"`
 	BasicAuthExcludedPaths *[]string `json:"basic_auth_excluded_paths,omitempty"`
+	BearerAuthEnabled      *bool     `json:"bearer_auth_enabled,omitempty"`
 	AccessLog              *bool     `json:"access_log,omitempty"`
 	ErrorLog               *bool     `json:"error_log,omitempty"`
 	Status                 *string   `json:"status,omitempty"`
@@ -200,6 +203,16 @@ func (h *Handler) createProxyHost(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+
+	// A stray leading/trailing space (e.g. from a copy-paste) becomes part of the
+	// generated nginx config, since UpstreamTarget is interpolated into a `set
+	// $upstream "..."` variable rather than a literal -- nginx can't validate that
+	// at config-load time, so it only 500s once a real request comes in, with no
+	// clue in the UI about why. Trim once here rather than at every later read site.
+	req.Domain = strings.TrimSpace(req.Domain)
+	req.UpstreamTarget = strings.TrimSpace(req.UpstreamTarget)
+	req.RedirectURL = strings.TrimSpace(req.RedirectURL)
+	req.BasicAuthRealm = strings.TrimSpace(req.BasicAuthRealm)
 
 	// Default proxy_type to "upstream" if not specified
 	if req.ProxyType == "" {
@@ -436,6 +449,25 @@ func (h *Handler) updateProxyHost(c *gin.Context) {
 		return
 	}
 
+	// See createProxyHost for why these get trimmed before anything downstream
+	// (dispatch, nginx config generation) ever sees them.
+	if req.Domain != nil {
+		trimmed := strings.TrimSpace(*req.Domain)
+		req.Domain = &trimmed
+	}
+	if req.UpstreamTarget != nil {
+		trimmed := strings.TrimSpace(*req.UpstreamTarget)
+		req.UpstreamTarget = &trimmed
+	}
+	if req.RedirectURL != nil {
+		trimmed := strings.TrimSpace(*req.RedirectURL)
+		req.RedirectURL = &trimmed
+	}
+	if req.BasicAuthRealm != nil {
+		trimmed := strings.TrimSpace(*req.BasicAuthRealm)
+		req.BasicAuthRealm = &trimmed
+	}
+
 	// Get current proxy to check policies
 	var currentDomain string
 	var currentSSL bool
@@ -533,6 +565,11 @@ func (h *Handler) updateProxyHost(c *gin.Context) {
 		query += fmt.Sprintf(", basic_auth_excluded_paths = $%d", argCount)
 		args = append(args, *req.BasicAuthExcludedPaths)
 	}
+	if req.BearerAuthEnabled != nil {
+		argCount++
+		query += fmt.Sprintf(", bearer_auth_enabled = $%d", argCount)
+		args = append(args, *req.BearerAuthEnabled)
+	}
 	if req.AccessLog != nil {
 		argCount++
 		query += fmt.Sprintf(", access_log = $%d", argCount)
@@ -579,7 +616,7 @@ func (h *Handler) updateProxyHost(c *gin.Context) {
 		       ssl_enabled, ssl_cert_path, ssl_key_path, ssl_expires_at,
 		       force_ssl, http2_enabled, include_www,
 		       COALESCE(basic_auth_enabled, false), COALESCE(basic_auth_realm, 'Restricted'),
-		       COALESCE(basic_auth_excluded_paths, '{}'),
+		       COALESCE(basic_auth_excluded_paths, '{}'), COALESCE(bearer_auth_enabled, false),
 		       COALESCE(access_log, true), COALESCE(error_log, true), log_format,
 		       config_hash, status, is_system_proxy, created_at, updated_at
 		FROM proxy_hosts
@@ -589,7 +626,7 @@ func (h *Handler) updateProxyHost(c *gin.Context) {
 		&proxy.ProxyType, &proxy.RedirectURL, &proxy.RedirectCode,
 		&proxy.SSLEnabled, &proxy.SSLCertPath, &proxy.SSLKeyPath, &proxy.SSLExpiresAt,
 		&proxy.ForceSSL, &proxy.HTTP2Enabled, &proxy.IncludeWWW,
-		&proxy.BasicAuthEnabled, &proxy.BasicAuthRealm, &proxy.BasicAuthExcludedPaths,
+		&proxy.BasicAuthEnabled, &proxy.BasicAuthRealm, &proxy.BasicAuthExcludedPaths, &proxy.BearerAuthEnabled,
 		&proxy.AccessLog, &proxy.ErrorLog, &proxy.LogFormat,
 		&proxy.ConfigHash, &proxy.Status, &proxy.IsSystemProxy, &proxy.CreatedAt, &proxy.UpdatedAt,
 	)
@@ -877,6 +914,7 @@ func (h *Handler) getProxyConfig(c *gin.Context) {
 		SELECT id, agent_id, domain, upstream_target, ssl_enabled, ssl_cert_path,
 		       ssl_key_path, ssl_expires_at, force_ssl, http2_enabled, include_www,
 		       COALESCE(basic_auth_enabled, false), COALESCE(basic_auth_realm, 'Restricted'),
+		       COALESCE(bearer_auth_enabled, false),
 		       config_hash, status, created_at, updated_at
 		FROM proxy_hosts
 		WHERE id = $1 AND agent_id = $2
@@ -884,6 +922,7 @@ func (h *Handler) getProxyConfig(c *gin.Context) {
 		&proxy.ID, &proxy.AgentID, &proxy.Domain, &proxy.UpstreamTarget, &proxy.SSLEnabled,
 		&proxy.SSLCertPath, &proxy.SSLKeyPath, &proxy.SSLExpiresAt, &proxy.ForceSSL,
 		&proxy.HTTP2Enabled, &proxy.IncludeWWW, &proxy.BasicAuthEnabled, &proxy.BasicAuthRealm,
+		&proxy.BearerAuthEnabled,
 		&proxy.ConfigHash, &proxy.Status, &proxy.CreatedAt, &proxy.UpdatedAt,
 	)
 
@@ -905,8 +944,13 @@ func (h *Handler) getProxyConfig(c *gin.Context) {
 		&headers.ContentSecurityPolicy,
 	)
 
+	bearerTokens, err := h.decryptBearerTokens(c.Request.Context(), proxyID)
+	if err != nil {
+		h.logger.Error("Failed to decrypt bearer tokens", zap.Error(err))
+	}
+
 	// Generate nginx config
-	config := generateNginxConfig(proxy, headers)
+	config := generateNginxConfig(proxy, headers, bearerTokens)
 
 	c.JSON(http.StatusOK, gin.H{
 		"domain": proxy.Domain,
@@ -992,6 +1036,7 @@ type ConfigPreviewRequest struct {
 	IncludeWWW       bool    `json:"include_www"`
 	BasicAuthEnabled bool    `json:"basic_auth_enabled"`
 	BasicAuthRealm   string  `json:"basic_auth_realm"`
+	BearerAuthEnabled bool   `json:"bearer_auth_enabled"`
 	HSTSEnabled      bool    `json:"hsts_enabled"`
 	HSTSMaxAge       int     `json:"hsts_max_age"`
 	XFrameOptions    string  `json:"x_frame_options"`
@@ -1039,6 +1084,11 @@ func (h *Handler) previewProxyConfig(c *gin.Context) {
 		return
 	}
 
+	// See createProxyHost for why -- this path never touches the DB, so it needs
+	// its own trim rather than inheriting one applied elsewhere.
+	req.Domain = strings.TrimSpace(req.Domain)
+	req.UpstreamTarget = strings.TrimSpace(req.UpstreamTarget)
+
 	// Set default values
 	if req.BasicAuthRealm == "" {
 		req.BasicAuthRealm = "Restricted"
@@ -1049,14 +1099,15 @@ func (h *Handler) previewProxyConfig(c *gin.Context) {
 
 	// Build proxy host for config generation
 	proxy := ProxyHost{
-		Domain:           req.Domain,
-		UpstreamTarget:   req.UpstreamTarget,
-		SSLEnabled:       req.SSLEnabled,
-		ForceSSL:         req.ForceSSL,
-		HTTP2Enabled:     req.HTTP2Enabled,
-		IncludeWWW:       req.IncludeWWW,
-		BasicAuthEnabled: req.BasicAuthEnabled,
-		BasicAuthRealm:   req.BasicAuthRealm,
+		Domain:            req.Domain,
+		UpstreamTarget:    req.UpstreamTarget,
+		SSLEnabled:        req.SSLEnabled,
+		ForceSSL:          req.ForceSSL,
+		HTTP2Enabled:      req.HTTP2Enabled,
+		IncludeWWW:        req.IncludeWWW,
+		BasicAuthEnabled:  req.BasicAuthEnabled,
+		BasicAuthRealm:    req.BasicAuthRealm,
+		BearerAuthEnabled: req.BearerAuthEnabled,
 	}
 
 	// Build security headers for config generation
@@ -1069,8 +1120,16 @@ func (h *Handler) previewProxyConfig(c *gin.Context) {
 		ContentSecurityPolicy: req.ContentSecurityPolicy,
 	}
 
+	// This proxy already exists (it's being edited), so its real saved tokens (if any)
+	// are what would actually end up in the deployed config -- fetch them rather than
+	// showing a placeholder.
+	bearerTokens, err := h.decryptBearerTokens(c.Request.Context(), proxyID)
+	if err != nil {
+		h.logger.Error("Failed to decrypt bearer tokens for preview", zap.Error(err))
+	}
+
 	// Generate nginx config
-	config := generateNginxConfig(proxy, headers)
+	config := generateNginxConfig(proxy, headers, bearerTokens)
 
 	c.JSON(http.StatusOK, gin.H{
 		"config": config,
@@ -1266,7 +1325,7 @@ func generateLoggingConfig(domain string, accessLog, errorLog bool) string {
 }
 
 // generateNginxConfig creates nginx server block config
-func generateNginxConfig(proxy ProxyHost, headers SecurityHeaders) string {
+func generateNginxConfig(proxy ProxyHost, headers SecurityHeaders, bearerTokens []string) string {
 	var config string
 
 	// Build server_name with optional www
@@ -1308,7 +1367,7 @@ func generateNginxConfig(proxy ProxyHost, headers SecurityHeaders) string {
 			config += "    root /var/www/html;\n"
 			config += "    error_page 502 503 504 /502.html;\n"
 			config += "    location = /502.html { internal; }\n\n"
-			config += generateLocationBlockWithAuth(proxy.UpstreamTarget, proxy.BasicAuthEnabled, proxy.BasicAuthRealm, proxy.Domain, proxy.BasicAuthExcludedPaths)
+			config += generateLocationBlockWithAuth(proxy.UpstreamTarget, proxy.BasicAuthEnabled, proxy.BasicAuthRealm, proxy.Domain, proxy.BasicAuthExcludedPaths, proxy.BearerAuthEnabled, bearerTokens)
 		}
 		config += "}\n\n"
 	}
@@ -1387,7 +1446,7 @@ func generateNginxConfig(proxy ProxyHost, headers SecurityHeaders) string {
 			config += "    root /var/www/html;\n"
 			config += "    error_page 502 503 504 /502.html;\n"
 			config += "    location = /502.html { internal; }\n\n"
-			config += generateLocationBlockWithAuth(proxy.UpstreamTarget, proxy.BasicAuthEnabled, proxy.BasicAuthRealm, proxy.Domain, proxy.BasicAuthExcludedPaths)
+			config += generateLocationBlockWithAuth(proxy.UpstreamTarget, proxy.BasicAuthEnabled, proxy.BasicAuthRealm, proxy.Domain, proxy.BasicAuthExcludedPaths, proxy.BearerAuthEnabled, bearerTokens)
 		}
 		config += "}\n"
 	}
@@ -1448,10 +1507,34 @@ func generateSecurityHeaders(headers SecurityHeaders) string {
 }
 
 func generateLocationBlock(upstream string) string {
-	return generateLocationBlockWithAuth(upstream, false, "", "", nil)
+	return generateLocationBlockWithAuth(upstream, false, "", "", nil, false, nil)
 }
 
-func generateLocationBlockWithAuth(upstream string, basicAuthEnabled bool, basicAuthRealm, domain string, excludedPaths []string) string {
+// proxyPassDirective returns the nginx directive(s) to reach upstream. Normally this is
+// the variable-based form (`set $upstream "..."; proxy_pass $upstream;`) so nginx
+// resolves the hostname via its `resolver` directive at request time rather than at
+// config-load/reload time -- this lets nginx start cleanly even when the upstream is a
+// container name for a container that's currently stopped.
+//
+// host.docker.internal is a special case that breaks under that scheme: nginx's
+// `resolver` directive performs a real DNS query and never consults /etc/hosts, but
+// host.docker.internal only ever exists as a static /etc/hosts entry Docker injects --
+// it was never registered as an actual DNS record, so the resolver always returns
+// NXDOMAIN for it. A literal `proxy_pass` is resolved once via the system resolver
+// instead, which does read /etc/hosts. There's no "crashes on start if the target isn't
+// up yet" risk being traded away here either: host.docker.internal is a stable
+// host-level alias that resolves regardless of whether the actual service behind it is
+// running (unlike a container name, which only resolves while that container exists) --
+// if nothing is listening there, the existing 502 error page handles it exactly like
+// any other unreachable upstream.
+func proxyPassDirective(upstream string) string {
+	if u, err := url.Parse(upstream); err == nil && u.Hostname() == "host.docker.internal" {
+		return fmt.Sprintf("        proxy_pass %s;\n", upstream)
+	}
+	return fmt.Sprintf("        set $upstream \"%s\";\n        proxy_pass $upstream;\n", upstream)
+}
+
+func generateLocationBlockWithAuth(upstream string, basicAuthEnabled bool, basicAuthRealm, domain string, excludedPaths []string, bearerAuthEnabled bool, bearerTokens []string) string {
 	var config string
 
 	// Generate location blocks for excluded paths (no auth)
@@ -1463,10 +1546,7 @@ func generateLocationBlockWithAuth(upstream string, basicAuthEnabled bool, basic
 			}
 			config += fmt.Sprintf("    location %s {\n", path)
 			config += "        auth_basic off;\n"
-			// Use variable-based upstream so nginx resolves at request time,
-			// not at startup — prevents nginx crash when container is stopped.
-			config += fmt.Sprintf("        set $upstream \"%s\";\n", upstream)
-			config += "        proxy_pass $upstream;\n"
+			config += proxyPassDirective(upstream)
 			config += "        proxy_http_version 1.1;\n"
 			config += "        proxy_set_header Host $host;\n"
 			config += "        proxy_set_header X-Real-IP $remote_addr;\n"
@@ -1491,10 +1571,20 @@ func generateLocationBlockWithAuth(upstream string, basicAuthEnabled bool, basic
 		config += fmt.Sprintf("        auth_basic_user_file /data/nginx/conf.d/.htpasswd_%s;\n\n", sanitizeFilename(domain))
 	}
 
-	// Use variable-based upstream so nginx resolves at request time,
-	// not at startup — prevents nginx crash when container is stopped.
-	config += fmt.Sprintf("        set $upstream \"%s\";\n", upstream)
-	config += "        proxy_pass $upstream;\n"
+	// Bearer token auth: nginx has no built-in directive to check a header against a
+	// list of valid values (that's what `map` is for, but map is only legal at the
+	// http{} level, not inside this per-domain server/location block), so this checks
+	// the Authorization header against each token directly. If Basic Auth is also
+	// enabled, both guards are simply present -- a request must satisfy both.
+	if bearerAuthEnabled && len(bearerTokens) > 0 {
+		config += "        set $bearer_token_valid 0;\n"
+		for _, t := range bearerTokens {
+			config += fmt.Sprintf("        if ($http_authorization = \"Bearer %s\") { set $bearer_token_valid 1; }\n", t)
+		}
+		config += "        if ($bearer_token_valid = 0) { return 401; }\n\n"
+	}
+
+	config += proxyPassDirective(upstream)
 	config += "        proxy_http_version 1.1;\n"
 	config += "        proxy_set_header Host $host;\n"
 	config += "        proxy_set_header X-Real-IP $remote_addr;\n"
@@ -1660,14 +1750,19 @@ func (h *Handler) dispatchProxyConfig(ctx context.Context, agentID, proxyID uuid
 	)
 
 	// Fetch basic auth settings
-	var basicAuthEnabled bool
+	var basicAuthEnabled, bearerAuthEnabled bool
 	var basicAuthRealm string
 	var basicAuthExcludedPaths []string
 	h.db.QueryRow(ctx, `
 		SELECT COALESCE(basic_auth_enabled, false), COALESCE(basic_auth_realm, 'Restricted'),
-		       COALESCE(basic_auth_excluded_paths, '{}')
+		       COALESCE(basic_auth_excluded_paths, '{}'), COALESCE(bearer_auth_enabled, false)
 		FROM proxy_hosts WHERE id = $1
-	`, proxyID).Scan(&basicAuthEnabled, &basicAuthRealm, &basicAuthExcludedPaths)
+	`, proxyID).Scan(&basicAuthEnabled, &basicAuthRealm, &basicAuthExcludedPaths, &bearerAuthEnabled)
+
+	bearerTokens, err := h.decryptBearerTokens(ctx, proxyID)
+	if err != nil {
+		h.logger.Error("Failed to decrypt bearer tokens", zap.Error(err))
+	}
 
 	// Build proxy host for config generation
 	proxy := ProxyHost{
@@ -1680,10 +1775,11 @@ func (h *Handler) dispatchProxyConfig(ctx context.Context, agentID, proxyID uuid
 		BasicAuthEnabled:       basicAuthEnabled,
 		BasicAuthRealm:         basicAuthRealm,
 		BasicAuthExcludedPaths: basicAuthExcludedPaths,
+		BearerAuthEnabled:      bearerAuthEnabled,
 	}
 
 	// Generate nginx config
-	config := generateNginxConfig(proxy, headers)
+	config := generateNginxConfig(proxy, headers, bearerTokens)
 
 	// Build config path
 	configPath := filepath.Join("/data/nginx/conf.d", sanitizeFilename(domain)+".conf")
@@ -1742,14 +1838,19 @@ func (h *Handler) dispatchProxyConfigFull(ctx context.Context, agentID, proxyID 
 	)
 
 	// Fetch basic auth settings
-	var basicAuthEnabled bool
+	var basicAuthEnabled, bearerAuthEnabled bool
 	var basicAuthRealm string
 	var basicAuthExcludedPaths []string
 	h.db.QueryRow(ctx, `
 		SELECT COALESCE(basic_auth_enabled, false), COALESCE(basic_auth_realm, 'Restricted'),
-		       COALESCE(basic_auth_excluded_paths, '{}')
+		       COALESCE(basic_auth_excluded_paths, '{}'), COALESCE(bearer_auth_enabled, false)
 		FROM proxy_hosts WHERE id = $1
-	`, proxyID).Scan(&basicAuthEnabled, &basicAuthRealm, &basicAuthExcludedPaths)
+	`, proxyID).Scan(&basicAuthEnabled, &basicAuthRealm, &basicAuthExcludedPaths, &bearerAuthEnabled)
+
+	bearerTokens, err := h.decryptBearerTokens(ctx, proxyID)
+	if err != nil {
+		h.logger.Error("Failed to decrypt bearer tokens", zap.Error(err))
+	}
 
 	// Default proxy type to upstream if empty
 	if proxyType == "" {
@@ -1776,10 +1877,11 @@ func (h *Handler) dispatchProxyConfigFull(ctx context.Context, agentID, proxyID 
 		BasicAuthEnabled:       basicAuthEnabled,
 		BasicAuthRealm:         basicAuthRealm,
 		BasicAuthExcludedPaths: basicAuthExcludedPaths,
+		BearerAuthEnabled:      bearerAuthEnabled,
 	}
 
 	// Generate nginx config
-	config := generateNginxConfig(proxy, headers)
+	config := generateNginxConfig(proxy, headers, bearerTokens)
 
 	// Build config path
 	configPath := filepath.Join("/data/nginx/conf.d", sanitizeFilename(domain)+".conf")
@@ -1813,6 +1915,29 @@ func (h *Handler) dispatchProxyConfigFull(ctx context.Context, agentID, proxyID 
 	)
 }
 
+// redispatchProxyConfig re-reads a proxy's own settings from the DB and regenerates/
+// redeploys its full nginx config. Used by changes (like a bearer token add/remove)
+// that don't touch domain/upstream/SSL themselves but still need to be reflected in the
+// generated config -- unlike Basic Auth, bearer tokens have no separate file of their
+// own to write, so there's nothing beyond "regenerate the config" to dispatch.
+func (h *Handler) redispatchProxyConfig(ctx context.Context, agentID, proxyID uuid.UUID) {
+	var domain, upstreamTarget, proxyType string
+	var redirectURL *string
+	var redirectCode int
+	var forceSSL, http2Enabled, includeWWW, sslEnabled bool
+	err := h.db.QueryRow(ctx, `
+		SELECT domain, upstream_target, COALESCE(proxy_type, 'upstream'), redirect_url,
+		       COALESCE(redirect_code, 301), force_ssl, http2_enabled, COALESCE(include_www, false), ssl_enabled
+		FROM proxy_hosts WHERE id = $1
+	`, proxyID).Scan(&domain, &upstreamTarget, &proxyType, &redirectURL, &redirectCode, &forceSSL, &http2Enabled, &includeWWW, &sslEnabled)
+	if err != nil {
+		h.logger.Error("Failed to fetch proxy for redispatch", zap.Error(err), zap.String("proxy_id", proxyID.String()))
+		return
+	}
+
+	h.dispatchProxyConfigFull(ctx, agentID, proxyID, domain, upstreamTarget, proxyType, redirectURL, &redirectCode, forceSSL, http2Enabled, includeWWW, sslEnabled)
+}
+
 // dispatchProxyConfigWithCert sends nginx config with custom certificate paths to the agent
 func (h *Handler) dispatchProxyConfigWithCert(ctx context.Context, agentID, proxyID uuid.UUID, domain, upstream string, forceSSL, http2, sslEnabled bool, certPath, keyPath string) {
 	agentIDStr := agentID.String()
@@ -1838,19 +1963,43 @@ func (h *Handler) dispatchProxyConfigWithCert(ctx context.Context, agentID, prox
 		&headers.ContentSecurityPolicy,
 	)
 
+	// Fetch auth settings. This path (wildcard SSL / custom cert upload) used to
+	// build the ProxyHost with these left at their zero values, which silently
+	// stripped Basic Auth AND Bearer Auth from the regenerated config on ANY
+	// wildcard-cert action against an already-protected proxy -- a real auth-bypass
+	// bug, not a cosmetic gap, since a proxy could go from protected to fully public
+	// with no warning the moment someone reapplied SSL.
+	var basicAuthEnabled, bearerAuthEnabled bool
+	var basicAuthRealm string
+	var basicAuthExcludedPaths []string
+	h.db.QueryRow(ctx, `
+		SELECT COALESCE(basic_auth_enabled, false), COALESCE(basic_auth_realm, 'Restricted'),
+		       COALESCE(basic_auth_excluded_paths, '{}'), COALESCE(bearer_auth_enabled, false)
+		FROM proxy_hosts WHERE id = $1
+	`, proxyID).Scan(&basicAuthEnabled, &basicAuthRealm, &basicAuthExcludedPaths, &bearerAuthEnabled)
+
+	bearerTokens, err := h.decryptBearerTokens(ctx, proxyID)
+	if err != nil {
+		h.logger.Error("Failed to decrypt bearer tokens", zap.Error(err))
+	}
+
 	// Build proxy host for config generation
 	proxy := ProxyHost{
-		Domain:         domain,
-		UpstreamTarget: upstream,
-		ForceSSL:       forceSSL,
-		HTTP2Enabled:   http2,
-		SSLEnabled:     sslEnabled,
-		SSLCertPath:    &certPath,
-		SSLKeyPath:     &keyPath,
+		Domain:                 domain,
+		UpstreamTarget:         upstream,
+		ForceSSL:               forceSSL,
+		HTTP2Enabled:           http2,
+		SSLEnabled:             sslEnabled,
+		SSLCertPath:            &certPath,
+		SSLKeyPath:             &keyPath,
+		BasicAuthEnabled:       basicAuthEnabled,
+		BasicAuthRealm:         basicAuthRealm,
+		BasicAuthExcludedPaths: basicAuthExcludedPaths,
+		BearerAuthEnabled:      bearerAuthEnabled,
 	}
 
 	// Generate nginx config with custom cert paths
-	config := generateNginxConfig(proxy, headers)
+	config := generateNginxConfig(proxy, headers, bearerTokens)
 
 	// Build config path
 	configPath := filepath.Join("/data/nginx/conf.d", sanitizeFilename(domain)+".conf")
@@ -2151,8 +2300,15 @@ func (h *Handler) testNetworkConnectivity(c *gin.Context) {
 		Command:   cmdPayload,
 	}
 
-	// Send command and wait for response
-	resp, err := agentgrpc.SendCommand(agentIDStr, cmd, 10*time.Second)
+	// Send command and wait for response. The agent's own fallback port scan (see
+	// HandleNetworkTest) can take several seconds even after being parallelized, and
+	// this budget matches the other agent-command timeouts elsewhere in this file
+	// (30s) rather than the 10s this used to have, which was tight enough that a
+	// slightly slow first dial (e.g. against host.docker.internal, whose resolution
+	// timing differs from a container name) could blow the deadline before the
+	// agent's real answer ever arrived, producing a generic 500 instead of the
+	// actual reachable/unreachable result.
+	resp, err := agentgrpc.SendCommand(agentIDStr, cmd, 30*time.Second)
 	if err != nil {
 		h.logger.Error("Failed to test network connectivity",
 			zap.Error(err),
